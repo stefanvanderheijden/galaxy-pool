@@ -1,3 +1,5 @@
+import { BlackHole } from './BlackHole.js'
+
 /**
  * Elastic collision detection and resolution between bodies.
  */
@@ -7,12 +9,16 @@ export const Collisions = {
    * Conserves momentum and kinetic energy. Applies positional correction.
    * Fixed bodies are treated as immovable walls.
    * @param {Body[]} bodies
+   * @param {number} [restitution=0.9] - Bounciness 0 (perfectly inelastic) to 1 (elastic)
    */
-  resolveAll(bodies) {
+  resolveAll(bodies, restitution = 0.9) {
     for (let i = 0; i < bodies.length; i++) {
       for (let j = i + 1; j < bodies.length; j++) {
         const a = bodies[i]
         const b = bodies[j]
+
+        // Black holes absorb — never bounce
+        if (a instanceof BlackHole || b instanceof BlackHole) continue
 
         const dx = b.position.x - a.position.x
         const dy = b.position.y - a.position.y
@@ -48,8 +54,7 @@ export const Collisions = {
         // Only resolve if bodies are approaching
         if (relVelNormal >= 0) continue
 
-        // Elastic impulse scalar
-        const restitution = 0.9
+        // Impulse scalar
         let impulse = -(1 + restitution) * relVelNormal
         if (!a.isFixed && !b.isFixed) {
           impulse /= (1 / a.mass + 1 / b.mass)

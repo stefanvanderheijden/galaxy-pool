@@ -2,6 +2,9 @@
   <div class="sketch-wrapper">
     <canvas ref="canvasRef" class="sketch-canvas"></canvas>
 
+    <!-- Settings panel lives here so it's available to every sketch -->
+    <slot name="settings" />
+
     <div class="controls">
       <div class="controls-left">
         <button class="ctrl-btn" @click="$emit('toggle-play')">
@@ -112,7 +115,7 @@ input[type='range'] {
 }
 
 .speed-slider {
-  width: 220px;
+  width: 480px;
 }
 
 .info {

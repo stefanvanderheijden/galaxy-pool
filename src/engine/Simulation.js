@@ -14,10 +14,11 @@ export class Simulation {
    * @param {number} [opts.gravitationalConstant]
    * @param {number} [opts.timeScale]
    */
-  constructor({ bodies = [], gravitationalConstant = 0.5, timeScale = 1 } = {}) {
+  constructor({ bodies = [], gravitationalConstant = 0.5, timeScale = 1, restitution = 0.9 } = {}) {
     this.bodies = [...bodies]
     this.G = gravitationalConstant
     this.timeScale = timeScale
+    this.restitution = restitution
     this.state = 'running'
     this.elapsed = 0
     this._captureCallbacks = []
@@ -36,7 +37,7 @@ export class Simulation {
 
     Gravity.applyAll(this.bodies, this.G)
     Integrator.stepAll(this.bodies, scaledDt)
-    Collisions.resolveAll(this.bodies)
+    Collisions.resolveAll(this.bodies, this.restitution)
 
     // Check black hole captures
     const blackHoles = this.bodies.filter(b => b instanceof BlackHole)
