@@ -54,7 +54,7 @@ function onFileChange(e) {
 <style scoped>
 .settings-panel {
   position: absolute;
-  top: 48px;
+  top: 12px;
   right: 12px;
   z-index: 100;
   font-family: monospace;
@@ -89,6 +89,9 @@ function onFileChange(e) {
   border-radius: 6px;
   width: 260px;
   box-shadow: 0 4px 24px rgba(0,0,0,0.6);
+  max-height: calc(100vh - 80px);
+  display: flex;
+  flex-direction: column;
 }
 
 .panel-inner {
@@ -96,6 +99,9 @@ function onFileChange(e) {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #2a2a4a transparent;
 }
 
 .panel-footer {
