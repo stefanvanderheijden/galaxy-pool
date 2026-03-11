@@ -63,6 +63,11 @@ const sketches = [
     name: 'Black Hole',
     description: 'Sun and black hole with influence region. Watch planets get captured.',
   },
+  {
+    id: '003',
+    name: 'Spaceship',
+    description: 'Fly a ship through the solar system. Arrow keys to thrust and rotate.',
+  },
 ]
 
 const exampleJson = `{
