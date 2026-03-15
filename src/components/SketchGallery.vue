@@ -68,6 +68,11 @@ const sketches = [
     name: 'Spaceship',
     description: 'Fly a ship through the solar system. Arrow keys to thrust and rotate.',
   },
+  {
+    id: '004',
+    name: 'Pool',
+    description: 'Drag and release planets like pool balls. Gravity does the rest.',
+  },
 ]
 
 const exampleJson = `{
