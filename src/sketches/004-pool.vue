@@ -17,6 +17,8 @@
         <SettingsSection title="Cue">
           <SettingsRow label="Power"            v-model="settings.settings.cue.power"             :min="1"    :max="50"    :step="0.5"   :decimals="1" tooltip="Multiplier on the drag distance to compute impulse. Higher = more powerful shots." />
           <SettingsRow label="Max drag"         v-model="settings.settings.cue.maxDrag"           :min="50"   :max="400"   :step="10"    :decimals="0" tooltip="Maximum drag distance in pixels. Limits the maximum shot power." />
+          <SettingsRow label="Charge rate"      v-model="settings.settings.cue.chargeRate"        :min="1"    :max="30"    :step="1"     :decimals="0" tooltip="Charge gained per second of simulation time." />
+          <SettingsRow label="Max charge"       v-model="settings.settings.cue.maxCharge"         :min="20"   :max="500"   :step="10"    :decimals="0" tooltip="Maximum charge level. Limits pull distance until fully charged." />
         </SettingsSection>
         <SettingsSection title="Sun">
           <SettingsRow label="Mass"             v-model="settings.settings.sun.mass"              :min="1000" :max="30000" :step="100"   :decimals="0" tooltip="Mass of the central star." />
@@ -53,7 +55,7 @@ import { BlackHole } from '../engine/BlackHole.js'
 const PROTOTYPE_ID = '004'
 const settings = useSettings(PROTOTYPE_ID, {
   sim:       { baseSpeed: 1 },
-  cue:       { power: 10, maxDrag: 200 },
+  cue:       { power: 10, maxDrag: 200, chargeRate: 5, maxCharge: 200 },
   sun:       { mass: 8000 },
   blackhole: { mass: 8000, influenceRadius: 280, captureRadius: 30 },
   physics:   { gravity: 0.5, restitution: 0.9 },
@@ -85,8 +87,10 @@ watch(() => settings.settings.blackhole.mass,            () => reset())
 watch(() => settings.settings.blackhole.influenceRadius, () => reset())
 watch(() => settings.settings.blackhole.captureRadius,   () => reset())
 
-// --- Cue drag state ---
-let drag = null  // { body, startX, startY, curX, curY }
+// --- Charge & cue drag state ---
+let charge = 0       // current charge level (pixels of allowed pull)
+let prevElapsed = 0  // track sim time for charge accumulation
+let drag = null      // { body, startX, startY, curX, curY }
 
 function buildScene(w, h) {
   sim.bodies = []
@@ -148,7 +152,7 @@ function drawCue(ctx) {
   const dist = Math.sqrt(dx * dx + dy * dy)
   if (dist < 2) return
 
-  const maxDrag = settings.settings.cue.maxDrag
+  const maxDrag = Math.min(settings.settings.cue.maxDrag, charge)
   const clamped = Math.min(dist, maxDrag)
   const nx = dx / dist  // unit vector toward mouse
   const ny = dy / dist
@@ -202,6 +206,110 @@ function drawCue(ctx) {
   ctx.restore()
 }
 
+function drawChargeBar(ctx, w, h) {
+  const maxCharge = settings.settings.cue.maxCharge
+  const pct = Math.min(charge / maxCharge, 1)
+
+  const barW = 18
+  const barH = h * 0.55
+  const x = 22
+  const y = (h - barH) / 2
+
+  ctx.save()
+
+  // Outer glow
+  ctx.shadowColor = `rgba(${Math.round(255 * (1 - pct))}, ${Math.round(255 * pct)}, 80, 0.4)`
+  ctx.shadowBlur = 16
+
+  // Background track
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.07)'
+  ctx.beginPath()
+  ctx.roundRect(x, y, barW, barH, 9)
+  ctx.fill()
+
+  // Compute drag cost if dragging
+  let costPct = 0
+  if (drag) {
+    const bx = drag.body.position.x, by = drag.body.position.y
+    const dx = drag.curX - bx, dy = drag.curY - by
+    const dist = Math.sqrt(dx * dx + dy * dy)
+    const effectiveMax = Math.min(settings.settings.cue.maxDrag, charge)
+    costPct = Math.min(dist, effectiveMax) / maxCharge
+  }
+
+  // Fill — grows upward from bottom
+  ctx.shadowBlur = 0
+  const fillH = barH * pct
+  const fillY = y + barH - fillH
+  const r = Math.round(255 * (1 - pct))
+  const g = Math.round(255 * pct)
+
+  if (pct > 0.01) {
+    const grad = ctx.createLinearGradient(0, y + barH, 0, y)
+    grad.addColorStop(0, `rgba(${r}, ${g}, 80, 0.5)`)
+    grad.addColorStop(1, `rgba(${r}, ${g}, 120, 0.95)`)
+    ctx.fillStyle = grad
+    ctx.beginPath()
+    ctx.roundRect(x, fillY, barW, fillH, 9)
+    ctx.fill()
+
+    // Inner bright edge
+    ctx.fillStyle = `rgba(255, 255, 255, ${0.15 + pct * 0.15})`
+    ctx.beginPath()
+    ctx.roundRect(x + 3, fillY + 2, 4, Math.max(fillH - 4, 0), 2)
+    ctx.fill()
+  }
+
+  // Cost overlay — pulsing red zone showing what the shot will drain
+  if (costPct > 0.005) {
+    const costH = barH * costPct
+    const costY = fillY  // cost eats from the top of the fill
+    const pulse = 0.55 + 0.25 * Math.sin(Date.now() / 150)
+    ctx.fillStyle = `rgba(255, 60, 60, ${pulse})`
+    ctx.beginPath()
+    ctx.roundRect(x, costY, barW, Math.min(costH, fillH), 9)
+    ctx.fill()
+
+    // Cost marker line
+    const markerY = costY + Math.min(costH, fillH)
+    ctx.strokeStyle = `rgba(255, 100, 100, ${pulse + 0.2})`
+    ctx.lineWidth = 1.5
+    ctx.beginPath()
+    ctx.moveTo(x - 4, markerY)
+    ctx.lineTo(x + barW + 4, markerY)
+    ctx.stroke()
+
+    // Cost label next to the bar
+    ctx.fillStyle = `rgba(255, 100, 100, ${pulse + 0.15})`
+    ctx.font = 'bold 11px monospace'
+    ctx.textAlign = 'left'
+    ctx.fillText(`-${Math.round(costPct * 100)}%`, x + barW + 8, markerY + 4)
+    ctx.textAlign = 'start'
+  }
+
+  // Border
+  ctx.strokeStyle = `rgba(255, 255, 255, ${0.15 + pct * 0.2})`
+  ctx.lineWidth = 1.5
+  ctx.beginPath()
+  ctx.roundRect(x, y, barW, barH, 9)
+  ctx.stroke()
+
+  // Percentage label
+  ctx.fillStyle = `rgba(255, 255, 255, ${0.5 + pct * 0.4})`
+  ctx.font = 'bold 13px monospace'
+  ctx.textAlign = 'center'
+  ctx.fillText(`${Math.round(pct * 100)}%`, x + barW / 2, y + barH + 20)
+
+  // "CHARGE" label rotated vertically
+  ctx.font = '10px monospace'
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.4)'
+  ctx.translate(x + barW + 14, y + barH / 2)
+  ctx.rotate(-Math.PI / 2)
+  ctx.fillText('CHARGE', 0, 0)
+
+  ctx.restore()
+}
+
 function render(ctx, w, h, record = true) {
   ctx.clearRect(0, 0, w, h)
   for (const body of sim.bodies) {
@@ -209,6 +317,7 @@ function render(ctx, w, h, record = true) {
     body.draw(ctx)
   }
   drawCue(ctx)
+  drawChargeBar(ctx, w, h)
 }
 
 let rafId = null, lastTime = null
@@ -286,7 +395,7 @@ function initCanvas(canvas) {
     const dist = Math.sqrt(dx * dx + dy * dy)
 
     if (dist > 2) {
-      const maxDrag = settings.settings.cue.maxDrag
+      const maxDrag = Math.min(settings.settings.cue.maxDrag, charge)
       const clamped = Math.min(dist, maxDrag)
       const power   = settings.settings.cue.power
       const nx = dx / dist
@@ -294,6 +403,8 @@ function initCanvas(canvas) {
       // Impulse fires opposite to drag direction
       body.velocity.x += -nx * clamped * power / body.mass
       body.velocity.y += -ny * clamped * power / body.mass
+      // Deplete charge proportionally to how much pull was used
+      charge = Math.max(0, charge - clamped)
     }
 
     drag = null
@@ -314,6 +425,13 @@ function initCanvas(canvas) {
       didStep = sim.state === 'running'
       bodyCount.value = sim.bodies.length
       elapsed.value   = sim.elapsed
+
+      // Accumulate charge from sim time that passed
+      const simDelta = sim.elapsed - prevElapsed
+      if (simDelta > 0) {
+        charge = Math.min(charge + simDelta * settings.settings.cue.chargeRate, settings.settings.cue.maxCharge)
+      }
+      prevElapsed = sim.elapsed
     }
     lastTime = ts
     if (ctx) render(ctx, _w, _h, didStep)
@@ -338,6 +456,8 @@ function togglePlay() {
 function setTimeScale(scale) { timeScale.value = scale; sim.setTimeScale(scale) }
 function reset() {
   drag = null
+  charge = 0
+  prevElapsed = 0
   buildScene(_w, _h)
   isPlaying.value = false
   timeScale.value = settings.settings.sim.baseSpeed
