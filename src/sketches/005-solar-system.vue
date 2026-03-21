@@ -198,7 +198,6 @@ function simStep(dt_yr, realDt_s) {
 
 // Rotation speed in real-time rad/s (independent of sim time scale)
 const ROT_SPEED_RPS = 1.2   // rad per real second
-const ROT_DAMPING   = 0.85  // per real second (when key released)
 
 function applyShipInput(dt_yr, realDt_s) {
   if (!ship) return
@@ -207,11 +206,8 @@ function applyShipInput(dt_yr, realDt_s) {
   // Rotation operates in real time so it always feels responsive
   if (keys['ArrowLeft']  || keys['a'] || keys['A']) shipAngVel = -ROT_SPEED_RPS
   if (keys['ArrowRight'] || keys['d'] || keys['D']) shipAngVel =  ROT_SPEED_RPS
-  if (keys['x'] || keys['X']) {
-    // RCS damping thrusters — kill rotation fast
+  if (!keys['ArrowLeft'] && !keys['ArrowRight'] && !keys['a'] && !keys['A'] && !keys['d'] && !keys['D']) {
     shipAngVel *= Math.pow(0.01, realDt_s)
-  } else if (!keys['ArrowLeft'] && !keys['ArrowRight'] && !keys['a'] && !keys['A'] && !keys['d'] && !keys['D']) {
-    shipAngVel *= Math.pow(ROT_DAMPING, realDt_s)
   }
   shipAngle += shipAngVel * realDt_s
 
@@ -448,6 +444,23 @@ function drawPredictionPath(ctx) {
 }
 
 // =============================================================================
+// COLOR HELPERS
+// =============================================================================
+
+function hexToRgb(hex) {
+  const n = parseInt(hex.replace('#', ''), 16)
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+}
+function lighten(hex, t) {
+  const [r, g, b] = hexToRgb(hex)
+  return `rgb(${Math.round(r + (255-r)*t)},${Math.round(g + (255-g)*t)},${Math.round(b + (255-b)*t)})`
+}
+function darken(hex, t) {
+  const [r, g, b] = hexToRgb(hex)
+  return `rgb(${Math.round(r*(1-t))},${Math.round(g*(1-t))},${Math.round(b*(1-t))})`
+}
+
+// =============================================================================
 // BODY RENDERING
 // =============================================================================
 
@@ -476,76 +489,91 @@ function drawBody(ctx, body, w, h) {
     return
   }
 
-  // Check if body is visible at current zoom
+  const sp = worldToScreen(body.x, body.y)
+  if (sp.x < -60 || sp.x > w + 60 || sp.y < -60 || sp.y > h + 60) return
+
   if (screenR >= MIN_PLANET_PX) {
-    // Draw body in world space
+    // === REAL MODE: draw sphere at true scale in world space ===
     ctx.save()
     ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY)
 
     if (body.id === 'sun') {
-      // Glow layers
-      const g = ctx.createRadialGradient(body.x, body.y, 0, body.x, body.y, body.drawR * 4)
-      g.addColorStop(0, '#FFFAAA')
-      g.addColorStop(0.25, '#FFD700')
-      g.addColorStop(0.6, 'rgba(255,160,0,0.3)')
-      g.addColorStop(1, 'rgba(255,100,0,0)')
+      // Outer corona glow
+      const g = ctx.createRadialGradient(body.x, body.y, body.drawR * 0.8, body.x, body.y, body.drawR * 5)
+      g.addColorStop(0,   'rgba(255,220,80,0.5)')
+      g.addColorStop(0.4, 'rgba(255,140,0,0.15)')
+      g.addColorStop(1,   'rgba(255,80,0,0)')
       ctx.fillStyle = g
       ctx.beginPath()
-      ctx.arc(body.x, body.y, body.drawR * 4, 0, Math.PI * 2)
+      ctx.arc(body.x, body.y, body.drawR * 5, 0, Math.PI * 2)
       ctx.fill()
     }
 
+    // Sphere with radial gradient shading (light from top-left)
+    const ox = body.x - body.drawR * 0.3
+    const oy = body.y - body.drawR * 0.3
+    const sg = ctx.createRadialGradient(ox, oy, 0, body.x, body.y, body.drawR)
+    sg.addColorStop(0,   lighten(body.color, 0.5))
+    sg.addColorStop(0.5, body.color)
+    sg.addColorStop(1,   darken(body.color, 0.55))
     ctx.beginPath()
     ctx.arc(body.x, body.y, body.drawR, 0, Math.PI * 2)
-    ctx.fillStyle = body.color
+    ctx.fillStyle = sg
     ctx.fill()
 
     // Saturn rings
     if (body.id === 'saturn') {
       ctx.save()
       ctx.translate(body.x, body.y)
-      ctx.scale(1, 0.3)
-      ctx.strokeStyle = 'rgba(232,213,160,0.45)'
-      ctx.lineWidth   = body.drawR * 0.6 / 0.3
+      ctx.scale(1, 0.28)
+      ctx.strokeStyle = 'rgba(232,213,160,0.5)'
+      ctx.lineWidth   = body.drawR * 0.55 / 0.28
       ctx.beginPath()
-      ctx.arc(0, 0, body.drawR * 2.2, 0, Math.PI * 2)
+      ctx.arc(0, 0, body.drawR * 2.3, 0, Math.PI * 2)
       ctx.stroke()
       ctx.restore()
     }
 
     ctx.restore()
   } else {
-    // Icon in screen space
-    const sp = worldToScreen(body.x, body.y)
-    // Clip to screen bounds
-    if (sp.x < -20 || sp.x > w + 20 || sp.y < -20 || sp.y > h + 20) return
-
+    // === ICON MODE: fixed-size navigation marker in screen space ===
     ctx.save()
     ctx.setTransform(1, 0, 0, 1, 0, 0)
 
-    // Glow for sun even when tiny
     if (body.id === 'sun') {
-      const g = ctx.createRadialGradient(sp.x, sp.y, 0, sp.x, sp.y, 18)
-      g.addColorStop(0, 'rgba(255,215,0,0.9)')
-      g.addColorStop(0.5, 'rgba(255,160,0,0.3)')
-      g.addColorStop(1, 'rgba(255,100,0,0)')
+      // Sun always gets a prominent glow even as icon
+      const g = ctx.createRadialGradient(sp.x, sp.y, 2, sp.x, sp.y, 22)
+      g.addColorStop(0,   'rgba(255,240,100,1)')
+      g.addColorStop(0.3, 'rgba(255,180,0,0.5)')
+      g.addColorStop(1,   'rgba(255,80,0,0)')
       ctx.fillStyle = g
       ctx.beginPath()
-      ctx.arc(sp.x, sp.y, 18, 0, Math.PI * 2)
+      ctx.arc(sp.x, sp.y, 22, 0, Math.PI * 2)
       ctx.fill()
+      // Solid core
+      ctx.beginPath()
+      ctx.arc(sp.x, sp.y, 5, 0, Math.PI * 2)
+      ctx.fillStyle = '#FFE566'
+      ctx.fill()
+    } else {
+      // Dot
+      ctx.beginPath()
+      ctx.arc(sp.x, sp.y, 3, 0, Math.PI * 2)
+      ctx.fillStyle = body.color
+      ctx.fill()
+      // Thin indicator ring — makes it clearly an icon/marker
+      ctx.beginPath()
+      ctx.arc(sp.x, sp.y, 7, 0, Math.PI * 2)
+      ctx.strokeStyle = body.color + '66'
+      ctx.lineWidth   = 1
+      ctx.stroke()
     }
 
-    const r = body.id === 'sun' ? 5 : 3
-    ctx.beginPath()
-    ctx.arc(sp.x, sp.y, r, 0, Math.PI * 2)
-    ctx.fillStyle = body.color
-    ctx.fill()
-
-    // Label
+    // Name label
     ctx.font      = '10px monospace'
-    ctx.fillStyle = 'rgba(255,255,255,0.4)'
+    ctx.fillStyle = body.color + 'aa'
     ctx.textAlign = 'center'
-    ctx.fillText(body.name, sp.x, sp.y + r + 11)
+    ctx.fillText(body.name, sp.x, sp.y + 18)
 
     ctx.restore()
   }
@@ -665,8 +693,8 @@ function drawHUD(ctx, w, h) {
 
   // Focus buttons
   const buttons = [
-    { label: 'Focus: Sun',  focus: 'sun',  zoom: 0.06 },
-    { label: 'Focus: Ship', focus: 'ship', zoom: 800  },
+    { label: 'Focus: Sun',  focus: 'sun'  },
+    { label: 'Focus: Ship', focus: 'ship' },
   ]
   const bw = 100, bh = 22, gap = 6, startX = 12, startY = 12
 
@@ -798,8 +826,6 @@ function initCanvas(canvas) {
       const bx = startX + i * (bw + gap)
       if (cx >= bx && cx <= bx + bw && cy >= startY && cy <= startY + bh) {
         cam.focus = fm
-        if (fm === 'sun')  cam.zoom = 0.06
-        if (fm === 'ship') cam.zoom = 800
       }
     })
   }
