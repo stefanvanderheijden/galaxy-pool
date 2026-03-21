@@ -15,9 +15,9 @@
           <input
             class="speed-slider"
             type="range"
-            min="0.25"
-            max="20"
-            step="0.25"
+            :min="timeScaleMin"
+            :max="timeScaleMax"
+            :step="timeScaleStep"
             :value="timeScale"
             @input="$emit('set-timescale', Number($event.target.value))"
           />
@@ -28,7 +28,8 @@
 
       <div class="controls-right">
         <span class="info">bodies: {{ bodyCount }}</span>
-        <span class="info">t: {{ elapsed.toFixed(1) }}s</span>
+        <span class="info" v-if="elapsedLabel">{{ elapsedLabel }}</span>
+        <span class="info" v-else>t: {{ elapsed.toFixed(1) }}s</span>
         <slot name="controls" />
       </div>
     </div>
@@ -39,10 +40,14 @@
 import { ref, onMounted } from 'vue'
 
 defineProps({
-  isPlaying:  { type: Boolean, default: true },
-  timeScale:  { type: Number,  default: 1 },
-  bodyCount:  { type: Number,  default: 0 },
-  elapsed:    { type: Number,  default: 0 },
+  isPlaying:     { type: Boolean, default: true },
+  timeScale:     { type: Number,  default: 1 },
+  timeScaleMin:  { type: Number,  default: 0.25 },
+  timeScaleMax:  { type: Number,  default: 20 },
+  timeScaleStep: { type: Number,  default: 0.25 },
+  bodyCount:     { type: Number,  default: 0 },
+  elapsed:       { type: Number,  default: 0 },
+  elapsedLabel:  { type: String,  default: '' },
 })
 
 const emit = defineEmits(['toggle-play', 'set-timescale', 'reset', 'canvas-ready'])
