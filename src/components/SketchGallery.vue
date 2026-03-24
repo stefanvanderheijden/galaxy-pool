@@ -78,6 +78,11 @@ const sketches = [
     name: 'Solar System',
     description: 'Real-scale solar system. Arrow keys to fly. Scroll to zoom, drag to pan.',
   },
+  {
+    id: '006',
+    name: 'Orbit Shot',
+    description: 'Fly into a planet\'s orbit ring to dock, then drag to aim and launch the planet like a pool shot.',
+  },
 ]
 
 const exampleJson = `{
