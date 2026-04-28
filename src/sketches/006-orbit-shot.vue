@@ -31,7 +31,7 @@
             label="Thrust"
             v-model="settings.settings.ship.thrustAccel"
             :min="1"
-            :max="200"
+            :max="500"
             :step="1"
             :decimals="0"
             tooltip="Thrust acceleration in AU/yr². Default 20."
@@ -182,8 +182,8 @@ const CAPTURE_DURATION_S = 1.25;
 const SLINGSHOT_ORBIT_MIN_R = 0.018;
 const SLINGSHOT_ORBIT_R_MULT = 2.8;
 const BLACK_HOLE = {
-  x: 0.42,
-  y: -0.38,
+  x: 1.46,
+  y: -1.34,
   drawR: 0.035,
   captureR: 0.05,
 };
@@ -245,7 +245,7 @@ const SOLAR_BODIES = [
 
 const settings = useSettings(PROTOTYPE_ID, {
   sim: { baseSpeed: 1000000 },
-  ship: { thrustAccel: 20, rotateSpeed: 3 },
+  ship: { thrustAccel: 220, rotateSpeed: 3 },
   orbit: {
     ringRadiusMult: 0.1,
     velMatchThreshold: 0.35,
@@ -328,7 +328,13 @@ let captureCooldown = 0;
 let shockwaves = [];
 let debris = [];
 let blackHoleScore = 0;
+let blackHoleConsumed = []; // { name, color, physR } in order of consumption
 let shipLoss = null;
+let sunPenalty = 0;
+let totalEnergySpent = 0;
+let finalScoreShown = false;
+
+const TOTAL_PLANETS = SOLAR_BODIES.filter((b) => !b.isFixed).length;
 
 // =============================================================================
 // TRAIL CIRCULAR BUFFER
@@ -483,7 +489,11 @@ function applySolarGravityWell(bs, dt) {
     const uy = dy / dist;
     const well = Math.max(
       0,
-      Math.min(1, 1 - (dist - SUN_DESTRUCTION_R) / (SUN_GRAVITY_WELL_R - SUN_DESTRUCTION_R)),
+      Math.min(
+        1,
+        1 -
+          (dist - SUN_DESTRUCTION_R) / (SUN_GRAVITY_WELL_R - SUN_DESTRUCTION_R),
+      ),
     );
     const strength = well * well;
 
@@ -713,7 +723,9 @@ function fireShot() {
   const ny = ddy / dist;
 
   // dv proportional to drag fraction, shot direction is OPPOSITE to drag
-  const dv = (clamped / maxDrag) * settings.settings.orbit.shotPower * 0.01;
+  const power = clamped / maxDrag;
+  const dv = power * settings.settings.orbit.shotPower * 0.01;
+  totalEnergySpent += power * settings.settings.orbit.shotPower;
 
   // Apply impulse to planet (opposite to drag direction)
   planet.vx += -nx * dv;
@@ -782,7 +794,14 @@ function consumeBodyInBlackHole(body, index) {
     cam.focus = "sun";
   } else {
     blackHoleScore++;
+    const def = SOLAR_BODIES.find((d) => d.id === body.id);
+    blackHoleConsumed.push({
+      name: body.name,
+      color: body.color,
+      physR: def ? def.physR : body.drawR * 0.01,
+    });
   }
+  updateFinalScoreState();
   if (orbitState.planet === body) breakOrbit(false);
 
   shockwaves.push({
@@ -805,9 +824,16 @@ function destroyBodyInSun(body, index) {
     orbitState = { mode: "free", planet: null, shipOffset: null };
     orbitDrag = null;
     cam.focus = "sun";
+  } else {
+    sunPenalty++;
   }
+  updateFinalScoreState();
   if (orbitState.planet === body) breakOrbit(false);
   spawnSunDebris(body);
+}
+
+function updateFinalScoreState() {
+  finalScoreShown = blackHoleScore + sunPenalty >= TOTAL_PLANETS;
 }
 
 function spawnSunDebris(body) {
@@ -819,20 +845,22 @@ function spawnSunDebris(body) {
   const [r, g, b] = hexToRgb(body.color);
 
   for (let i = 0; i < DEBRIS_COUNT; i++) {
-    const spread = (Math.random() - 0.5) * 0.85;
+    const offsetR = body.drawR * Math.sqrt(Math.random()) * 0.9;
+    const offsetA = Math.random() * Math.PI * 2;
     const kick = speed * (0.06 + Math.random() * 0.2);
     const side = speed * (Math.random() - 0.5) * 0.22;
     debris.push({
-      x: body.x,
-      y: body.y,
-      vx: body.vx * 0.82 + (nx * kick + px * side),
-      vy: body.vy * 0.82 + (ny * kick + py * side),
-      size: 1.5 + Math.random() * 3.5,
+      x: body.x + Math.cos(offsetA) * offsetR,
+      y: body.y + Math.sin(offsetA) * offsetR,
+      vx: body.vx * 0.5 + (nx * kick + px * side),
+      vy: body.vy * 0.5 + (ny * kick + py * side),
+      size: 1.0 + Math.random() * 2.0,
       age: 0,
-      duration: 0.7 + Math.random() * 1.0,
+      duration: 0.85 + Math.random() * 1.1,
       color: `${r},${g},${b}`,
-      heat: 0.55 + Math.random() * 0.45,
-      spin: spread,
+      heat: 0.15 + Math.random() * 0.25,
+      angle: Math.random() * Math.PI * 2,
+      spin: (Math.random() - 0.5) * 8,
     });
   }
 }
@@ -987,6 +1015,10 @@ function buildScene(w, h) {
   shipPredPath = [];
   debris = [];
   blackHoleScore = 0;
+  blackHoleConsumed = [];
+  sunPenalty = 0;
+  totalEnergySpent = 0;
+  finalScoreShown = false;
   shipLoss = null;
   orbitState = { mode: "free", planet: null, shipOffset: null };
   orbitDrag = null;
@@ -1201,7 +1233,8 @@ function drawBlackHole(ctx) {
   for (let i = 1; i <= ringCount; i++) {
     const t = i / ringCount;
     const r = coreR + (outerR - coreR) * Math.pow(t, 1.8);
-    const edgePulse = i === ringCount ? 0.08 + 0.04 * Math.sin(Date.now() / 300) : 0;
+    const edgePulse =
+      i === ringCount ? 0.08 + 0.04 * Math.sin(Date.now() / 300) : 0;
     ctx.strokeStyle = `rgba(255,140,0,${(0.22 * (1 - t * 0.78) + edgePulse).toFixed(3)})`;
     ctx.lineWidth = (i === ringCount ? 1.15 : 0.7) / s;
     ctx.beginPath();
@@ -1269,7 +1302,8 @@ function drawSolarGravityWell(ctx) {
   const ringCount = 5;
   for (let i = 1; i <= ringCount; i++) {
     const t = i / ringCount;
-    const r = SUN_DESTRUCTION_R + (SUN_GRAVITY_WELL_R - SUN_DESTRUCTION_R) * t * t;
+    const r =
+      SUN_DESTRUCTION_R + (SUN_GRAVITY_WELL_R - SUN_DESTRUCTION_R) * t * t;
     ctx.strokeStyle = `rgba(255,210,80,${(0.16 * (1 - t * 0.7)).toFixed(3)})`;
     ctx.lineWidth = 0.8 / s;
     ctx.beginPath();
@@ -2088,7 +2122,7 @@ function drawTimeScore(ctx, w) {
   const x = w / 2;
   const y = 13;
   const panelW = 330;
-  const panelH = 76;
+  const panelH = 91;
   ctx.fillStyle = "rgba(0,0,0,0.42)";
   ctx.strokeStyle = "rgba(255,255,255,0.16)";
   ctx.lineWidth = 1;
@@ -2107,6 +2141,133 @@ function drawTimeScore(ctx, w) {
   ctx.font = "10px monospace";
   ctx.fillStyle = "rgba(255,255,255,0.48)";
   ctx.fillText(`MONTH ${monthInYear} OF CURRENT YEAR`, x, y + 70);
+
+  ctx.font = "bold 11px monospace";
+  ctx.fillStyle = "rgba(255,255,255,0.7)";
+  ctx.fillText(`ENERGY SPENT ${Math.round(totalEnergySpent).toLocaleString()}`, x, y + 84);
+  ctx.restore();
+}
+
+function drawFinalScoreOverview(ctx, w, h) {
+  if (!finalScoreShown) return;
+
+  const { totalMonths, years, monthInYear } = getTimeParts();
+  const score = blackHoleScore - sunPenalty;
+  const perfect = blackHoleScore === TOTAL_PLANETS && sunPenalty === 0;
+  const panelW = 390;
+  const panelH = 188;
+  const x = w / 2 - panelW / 2;
+  const y = h / 2 - panelH / 2;
+
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = "rgba(2,4,10,0.84)";
+  ctx.strokeStyle = perfect ? "rgba(255,232,150,0.75)" : "rgba(255,120,90,0.65)";
+  ctx.lineWidth = 1.5;
+  roundRect(ctx, x, y, panelW, panelH, 7);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.textAlign = "center";
+  ctx.font = "bold 18px monospace";
+  ctx.fillStyle = perfect ? "rgba(255,232,150,0.98)" : "rgba(255,180,130,0.98)";
+  ctx.fillText(perfect ? "ALL PLANETS SCORED" : "RUN COMPLETE", w / 2, y + 28);
+
+  ctx.font = "bold 24px monospace";
+  ctx.fillStyle = "rgba(127,232,232,0.96)";
+  ctx.fillText(`YEAR ${years.toLocaleString()}  MONTH ${monthInYear}`, w / 2, y + 62);
+
+  ctx.font = "bold 18px monospace";
+  ctx.fillStyle = "rgba(255,232,150,0.95)";
+  ctx.fillText(`TOTAL MONTHS ${totalMonths.toLocaleString()}`, w / 2, y + 88);
+
+  ctx.font = "14px monospace";
+  ctx.fillStyle = "rgba(255,255,255,0.78)";
+  ctx.fillText(`ENERGY SPENT ${Math.round(totalEnergySpent).toLocaleString()}`, w / 2, y + 116);
+  ctx.fillText(`BLACK HOLE ${blackHoleScore}/${TOTAL_PLANETS}  •  SUN PENALTY -${sunPenalty}`, w / 2, y + 140);
+
+  ctx.font = "bold 16px monospace";
+  ctx.fillStyle = score >= TOTAL_PLANETS ? "rgba(165,255,180,0.95)" : "rgba(255,210,120,0.92)";
+  ctx.fillText(`PLANET SCORE ${score}`, w / 2, y + 166);
+
+  ctx.restore();
+}
+
+// =============================================================================
+// BLACK HOLE TROPHY ROW
+// =============================================================================
+
+function drawConsumedPlanets(ctx, h) {
+  if (blackHoleConsumed.length === 0) return;
+
+  // Find max physR to normalize sizes
+  const maxPhysR = Math.max(...blackHoleConsumed.map((p) => p.physR));
+  const MAX_DISPLAY_R = 22; // px for the largest planet
+  const MIN_DISPLAY_R = 5;  // px floor
+
+  const padding = 12;
+  const labelH = 14;
+  const iconAreaH = MAX_DISPLAY_R * 2 + 4;
+  const itemW = MAX_DISPLAY_R * 2 + 16;
+  const totalW = blackHoleConsumed.length * itemW + padding * 2;
+  const panelH = iconAreaH + labelH + padding * 2;
+  const panelX = padding;
+  const panelY = h - panelH - padding;
+
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+  // Panel background
+  ctx.fillStyle = "rgba(0,0,0,0.45)";
+  ctx.strokeStyle = "rgba(255,140,0,0.3)";
+  ctx.lineWidth = 1;
+  roundRect(ctx, panelX, panelY, totalW, panelH, 5);
+  ctx.fill();
+  ctx.stroke();
+
+  // "INTO THE BLACK HOLE" label at top-left of panel
+  ctx.font = "9px monospace";
+  ctx.fillStyle = "rgba(255,140,0,0.55)";
+  ctx.textAlign = "left";
+  ctx.fillText("INTO THE BLACK HOLE", panelX + padding, panelY + 11);
+
+  const centerY = panelY + padding + 10 + MAX_DISPLAY_R;
+
+  for (let i = 0; i < blackHoleConsumed.length; i++) {
+    const planet = blackHoleConsumed[i];
+    const r = Math.max(MIN_DISPLAY_R, (planet.physR / maxPhysR) * MAX_DISPLAY_R);
+    const cx = panelX + padding + i * itemW + MAX_DISPLAY_R + 8;
+
+    const [rv, gv, bv] = hexToRgb(planet.color);
+
+    // Glow halo
+    const glow = ctx.createRadialGradient(cx, centerY, r * 0.5, cx, centerY, r * 2.2);
+    glow.addColorStop(0, `rgba(${rv},${gv},${bv},0.28)`);
+    glow.addColorStop(1, `rgba(${rv},${gv},${bv},0)`);
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(cx, centerY, r * 2.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Sphere shading
+    const ox = cx - r * 0.3;
+    const oy = centerY - r * 0.3;
+    const sg = ctx.createRadialGradient(ox, oy, 0, cx, centerY, r);
+    sg.addColorStop(0, lighten(planet.color, 0.5));
+    sg.addColorStop(0.5, planet.color);
+    sg.addColorStop(1, darken(planet.color, 0.55));
+    ctx.fillStyle = sg;
+    ctx.beginPath();
+    ctx.arc(cx, centerY, r, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Planet name label
+    ctx.font = "9px monospace";
+    ctx.fillStyle = `rgba(${rv},${gv},${bv},0.85)`;
+    ctx.textAlign = "center";
+    ctx.fillText(planet.name, cx, centerY + MAX_DISPLAY_R + labelH);
+  }
+
   ctx.restore();
 }
 
@@ -2202,6 +2363,7 @@ function drawHUD(ctx, w, h) {
     ctx.font = "11px monospace";
     ctx.fillStyle = "rgba(255,255,255,0.4)";
     ctx.textAlign = "right";
+    ctx.fillText(`Planet score: ${blackHoleScore - sunPenalty}`, w - 12, h - 54);
     ctx.fillText(`Black hole score: ${blackHoleScore}`, w - 12, h - 40);
     ctx.fillText(`Speed: ${speed_km_s.toFixed(2)} km/s`, w - 12, h - 26);
     ctx.fillText(`Dist from Sun: ${dist_au.toFixed(4)} AU`, w - 12, h - 12);
@@ -2213,6 +2375,7 @@ function drawHUD(ctx, w, h) {
   }
 
   ctx.restore();
+  drawFinalScoreOverview(ctx, w, h);
 
   // Velocity match / approach indicator
   drawVelocityMatchHUD(ctx, w, h);
@@ -2255,8 +2418,9 @@ function tickDebris(dt_yr, realDt) {
     piece.age += realDt;
     piece.x += piece.vx * dt_yr;
     piece.y += piece.vy * dt_yr;
-    piece.vx *= Math.pow(0.25, realDt);
-    piece.vy *= Math.pow(0.25, realDt);
+    piece.angle += piece.spin * realDt;
+    piece.vx *= Math.pow(0.72, realDt);
+    piece.vy *= Math.pow(0.72, realDt);
   }
   for (let i = debris.length - 1; i >= 0; i--) {
     if (debris[i].age >= debris[i].duration) debris.splice(i, 1);
@@ -2271,18 +2435,24 @@ function drawDebris(ctx) {
 
   for (const piece of debris) {
     const t = Math.min(piece.age / piece.duration, 1);
-    const alpha = Math.pow(1 - t, 1.4);
+    const alpha = Math.pow(1 - t, 1.1);
     const pxSize = piece.size / s;
     const heat = piece.heat * (1 - t);
-    ctx.fillStyle = `rgba(255,${Math.round(150 + heat * 80)},${Math.round(60 + heat * 80)},${alpha * 0.85})`;
-    ctx.beginPath();
-    ctx.arc(piece.x, piece.y, pxSize, 0, Math.PI * 2);
-    ctx.fill();
 
-    ctx.fillStyle = `rgba(${piece.color},${alpha * 0.45})`;
+    ctx.save();
+    ctx.translate(piece.x, piece.y);
+    ctx.rotate(piece.angle);
+    ctx.fillStyle = `rgba(${piece.color},${alpha * 0.86})`;
+    ctx.strokeStyle = `rgba(255,${Math.round(165 + heat * 80)},80,${alpha * 0.42})`;
+    ctx.lineWidth = 0.7 / s;
     ctx.beginPath();
-    ctx.arc(piece.x - piece.vx * 0.01, piece.y - piece.vy * 0.01, pxSize * 1.8, 0, Math.PI * 2);
+    ctx.moveTo(pxSize * 1.2, 0);
+    ctx.lineTo(-pxSize * 0.65, pxSize * 0.72);
+    ctx.lineTo(-pxSize * 0.38, -pxSize * 0.85);
+    ctx.closePath();
     ctx.fill();
+    ctx.stroke();
+    ctx.restore();
   }
 
   ctx.restore();
@@ -2358,6 +2528,7 @@ function render(ctx, w, h, realDt) {
   drawDebris(ctx);
   drawSlingshotRing(ctx);
   drawOrbitCue(ctx);
+  drawConsumedPlanets(ctx, h);
   drawHUD(ctx, w, h);
 }
 
