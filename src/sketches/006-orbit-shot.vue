@@ -69,7 +69,7 @@
             label="Shot power"
             v-model="settings.settings.orbit.shotPower"
             :min="100"
-            :max="5000"
+            :max="80000"
             :step="100"
             :decimals="0"
             tooltip="Impulse power for planet shots. Higher = more kick."
@@ -96,7 +96,7 @@
             label="Planet grav boost"
             v-model="settings.settings.orbit.planetGravBoost"
             :min="1"
-            :max="5000"
+            :max="80000"
             :step="50"
             :decimals="0"
             tooltip="Gravity multiplier for planet→ship attraction only. Sun is unaffected."
@@ -2557,6 +2557,14 @@ function initCanvas(canvas) {
       (orbitState.mode === "slingshot" || orbitState.mode === "capturing")
     ) {
       breakOrbit(true);
+      return;
+    }
+    if (e.key === "q" || e.key === "Q") {
+      timeScale.value = Math.max(1, timeScale.value - 80000);
+      return;
+    }
+    if (e.key === "e" || e.key === "E") {
+      timeScale.value = Math.min(10000000, timeScale.value + 80000);
       return;
     }
     keys[e.key] = true;
