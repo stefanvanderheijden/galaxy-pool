@@ -16,22 +16,122 @@
     <template #settings>
       <SettingsPanel @export="settings.exportJSON()" @import="onImport">
         <SettingsSection title="Simulation">
-          <SettingsRow label="Base speed"    v-model="settings.settings.sim.baseSpeed"       :min="0.1"  :max="1000" :step="0.1"   :decimals="1" tooltip="Simulation speed multiplier." />
+          <SettingsRow
+            label="Base speed"
+            v-model="settings.settings.sim.baseSpeed"
+            :min="0.1"
+            :max="1000"
+            :step="0.1"
+            :decimals="1"
+            tooltip="Simulation speed multiplier."
+          />
         </SettingsSection>
         <SettingsSection title="Spaceship">
-          <SettingsRow label="Thrust"        v-model="settings.settings.ship.thrustAccel"    :min="1"    :max="200"  :step="1"     :decimals="0"  tooltip="Thrust acceleration in AU/yr². Default 20." />
-          <SettingsRow label="Rotate speed"  v-model="settings.settings.ship.rotateSpeed"    :min="0.2"  :max="6"    :step="0.1"   :decimals="1"  tooltip="Rotation speed in rad/s (real-time)." />
+          <SettingsRow
+            label="Thrust"
+            v-model="settings.settings.ship.thrustAccel"
+            :min="1"
+            :max="200"
+            :step="1"
+            :decimals="0"
+            tooltip="Thrust acceleration in AU/yr². Default 20."
+          />
+          <SettingsRow
+            label="Rotate speed"
+            v-model="settings.settings.ship.rotateSpeed"
+            :min="0.2"
+            :max="6"
+            :step="0.1"
+            :decimals="1"
+            tooltip="Rotation speed in rad/s (real-time)."
+          />
         </SettingsSection>
         <SettingsSection title="Orbit Shot">
-          <SettingsRow label="Ring radius (AU)"      v-model="settings.settings.orbit.ringRadiusMult"      :min="0.05" :max="2"     :step="0.05"  :decimals="2"  tooltip="Capture ring radius in AU. Same for all planets." />
-          <SettingsRow label="Velocity threshold"    v-model="settings.settings.orbit.velMatchThreshold"   :min="0.05" :max="1.0"   :step="0.05"  :decimals="2"  tooltip="Max relative speed fraction to auto-dock. Lower = harder to dock." />
-          <SettingsRow label="Shot power"            v-model="settings.settings.orbit.shotPower"           :min="100"  :max="5000"  :step="100"   :decimals="0"  tooltip="Impulse power for planet shots. Higher = more kick." />
-          <SettingsRow label="Max drag (px)"         v-model="settings.settings.orbit.maxDrag"             :min="50"   :max="400"   :step="10"    :decimals="0"  tooltip="Maximum drag distance for shot aiming." />
-          <SettingsRow label="Recoil"                v-model="settings.settings.orbit.recoilMult"          :min="0"    :max="1"     :step="0.01"  :decimals="2"  tooltip="Fraction of planet impulse applied back to ship as recoil." />
-          <SettingsRow label="Planet grav boost"    v-model="settings.settings.orbit.planetGravBoost"     :min="1"    :max="5000"  :step="50"    :decimals="0"  tooltip="Gravity multiplier for planet→ship attraction only. Sun is unaffected." />
+          <SettingsRow
+            label="Ring radius (AU)"
+            v-model="settings.settings.orbit.ringRadiusMult"
+            :min="0.05"
+            :max="2"
+            :step="0.05"
+            :decimals="2"
+            tooltip="Capture ring radius in AU. Same for all planets."
+          />
+          <SettingsRow
+            label="Trajectory threshold"
+            v-model="settings.settings.orbit.velMatchThreshold"
+            :min="0.05"
+            :max="1.0"
+            :step="0.05"
+            :decimals="2"
+            tooltip="Max relative speed fraction for capture. Lower = harder to enter slingshot orbit."
+          />
+          <SettingsRow
+            label="Shot power"
+            v-model="settings.settings.orbit.shotPower"
+            :min="100"
+            :max="5000"
+            :step="100"
+            :decimals="0"
+            tooltip="Impulse power for planet shots. Higher = more kick."
+          />
+          <SettingsRow
+            label="Max drag (px)"
+            v-model="settings.settings.orbit.maxDrag"
+            :min="50"
+            :max="400"
+            :step="10"
+            :decimals="0"
+            tooltip="Maximum drag distance for shot aiming."
+          />
+          <SettingsRow
+            label="Recoil"
+            v-model="settings.settings.orbit.recoilMult"
+            :min="0"
+            :max="1"
+            :step="0.01"
+            :decimals="2"
+            tooltip="Fraction of planet impulse applied back to ship as recoil."
+          />
+          <SettingsRow
+            label="Planet grav boost"
+            v-model="settings.settings.orbit.planetGravBoost"
+            :min="1"
+            :max="5000"
+            :step="50"
+            :decimals="0"
+            tooltip="Gravity multiplier for planet→ship attraction only. Sun is unaffected."
+          />
+        </SettingsSection>
+        <SettingsSection title="Black hole">
+          <SettingsRow
+            label="Mass"
+            v-model="settings.settings.blackhole.mass"
+            :min="0"
+            :max="5"
+            :step="0.05"
+            :decimals="2"
+            tooltip="Local ship-only gravity. Planets are not affected."
+          />
+          <SettingsRow
+            label="Influence radius"
+            v-model="settings.settings.blackhole.influenceRadius"
+            :min="0.1"
+            :max="4"
+            :step="0.1"
+            :decimals="2"
+            tooltip="AU radius where the black hole can pull the ship."
+          />
         </SettingsSection>
         <SettingsSection title="Visuals">
-          <SettingsRow label="Trail length"  v-model="settings.settings.visuals.trailLength" :min="50"   :max="2000" :step="50"    :decimals="0"  tooltip="Number of past positions in the spaceship trail." />
+          <SettingsRow
+            label="Trail length"
+            v-model="settings.settings.visuals.trailLength"
+            :min="50"
+            :max="2000"
+            :step="50"
+            :decimals="0"
+            tooltip="Number of past positions in the spaceship trail."
+          />
         </SettingsSection>
       </SettingsPanel>
     </template>
@@ -39,156 +139,265 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onUnmounted } from 'vue'
-import SketchWrapper from '../components/SketchWrapper.vue'
-import SettingsPanel from '../components/SettingsPanel.vue'
-import SettingsSection from '../components/SettingsSection.vue'
-import SettingsRow from '../components/SettingsRow.vue'
-import { useSettings } from '../composables/useSettings.js'
+import { ref, watch, onMounted, onUnmounted } from "vue";
+import SketchWrapper from "../components/SketchWrapper.vue";
+import SettingsPanel from "../components/SettingsPanel.vue";
+import SettingsSection from "../components/SettingsSection.vue";
+import SettingsRow from "../components/SettingsRow.vue";
+import { useSettings } from "../composables/useSettings.js";
 
 // =============================================================================
 // CONSTANTS
 // =============================================================================
 
-const PROTOTYPE_ID = '006'
+const PROTOTYPE_ID = "006";
 
 // Unit system: AU (astronomical unit), Solar masses, Julian years
 // G in these units = 4π² (from Kepler's 3rd law: T²=a³ for M_sun)
-const G_SIM     = 4 * Math.PI * Math.PI  // ~39.478 AU³ / (M☉ · yr²)
-const PX_PER_AU = 100                     // pixels per AU at zoom = 1
-const AU_KM     = 1.496e8                 // km per AU (for display labels)
-const SOFTENING = 1e-5                    // AU² — prevents singularities
-const MAX_DT    = 0.05                    // real-time seconds cap per frame
+const G_SIM = 4 * Math.PI * Math.PI; // ~39.478 AU³ / (M☉ · yr²)
+const PX_PER_AU = 100; // pixels per AU at zoom = 1
+const AU_KM = 1.496e8; // km per AU (for display labels)
+const SOFTENING = 1e-5; // AU² — prevents singularities
+const MAX_DT = 0.05; // real-time seconds cap per frame
 
 // Spaceship physical dimensions
-const SHIP_LENGTH_AU = 1000 / AU_KM   // 1000 km in AU ≈ 6.684e-6 AU
-const SHIP_WIDTH_AU  = 26  / AU_KM   // 26 km in AU  ≈ 1.738e-7 AU
-const SHIP_MASS      = 5.03e-18       // M☉ — 10,000 Gt
+const SHIP_LENGTH_AU = 1000 / AU_KM; // 1000 km in AU ≈ 6.684e-6 AU
+const SHIP_WIDTH_AU = 26 / AU_KM; // 26 km in AU  ≈ 1.738e-7 AU
+const SHIP_MASS = 5.03e-18; // M☉ — 10,000 Gt
 
 // Minimum pixel size below which we switch to icon rendering
-const MIN_PLANET_PX = 3   // px
-const MIN_SHIP_PX   = 30  // px (length in screen pixels)
+const MIN_PLANET_PX = 3; // px
+const MIN_SHIP_PX = 30; // px (length in screen pixels)
 
 // Prediction config
-const PRED_STEPS    = 600   // ghost steps per prediction run
-const PRED_DT_MULT  = 6     // ghost dt = N × real frame dt
-const PRED_INTERVAL = 20    // recalculate every N rendered frames
+const PRED_HORIZON_YR = 2.4; // simulated years to preview
+const PRED_BASE_DT_YR = 0.001; // max ghost timestep before adaptive tightening
+const PRED_TARGET_SEGMENT_PX = 7; // keeps fast projected curves visually smooth
+const PRED_MAX_STEPS = 3000;
+const PRED_INTERVAL = 20; // recalculate every N rendered frames
 
 // Planet-shot prediction
-const SHOT_PRED_STEPS = 300
+const SHOT_PRED_STEPS = 300;
+const CAPTURE_DURATION_S = 1.25;
+const SLINGSHOT_ORBIT_MIN_R = 0.018;
+const SLINGSHOT_ORBIT_R_MULT = 2.8;
+const BLACK_HOLE = {
+  x: 0.42,
+  y: -0.38,
+  drawR: 0.035,
+  captureR: 0.05,
+};
+const SUN_GRAVITY_WELL_R = 0.18;
+const SUN_DESTRUCTION_R = 0.028;
+const DEBRIS_COUNT = 22;
 
 // Solar system data — all in simulation units (AU, M☉)
 const SOLAR_BODIES = [
-  { id: 'sun',     name: 'Sun',     mass: 1.0,       orbR: 0,      angle: 0,     color: '#FFD700', physR: 0.00465, drawR: 0.010, isFixed: true  },
-  { id: 'mercury', name: 'Mercury', mass: 1.660e-7,  orbR: 0.387,  angle: 4.402, color: '#b5b5b5', physR: 1.63e-5, drawR: 0.003, isFixed: false },
-  { id: 'venus',   name: 'Venus',   mass: 2.447e-6,  orbR: 0.723,  angle: 3.176, color: '#e8cda0', physR: 4.05e-5, drawR: 0.005, isFixed: false },
-  { id: 'earth',   name: 'Earth',   mass: 3.003e-6,  orbR: 1.000,  angle: 1.753, color: '#4fc3f7', physR: 4.26e-5, drawR: 0.006, isFixed: false },
-  { id: 'mars',    name: 'Mars',    mass: 3.213e-7,  orbR: 1.524,  angle: 5.015, color: '#e8714a', physR: 2.27e-5, drawR: 0.004, isFixed: false },
-  { id: 'jupiter', name: 'Jupiter', mass: 9.543e-4,  orbR: 5.203,  angle: 0.600, color: '#c8a882', physR: 4.67e-4, drawR: 0.050, isFixed: false },
-  { id: 'saturn',  name: 'Saturn',  mass: 2.857e-4,  orbR: 9.537,  angle: 0.871, color: '#e8d5a0', physR: 3.89e-4, drawR: 0.040, isFixed: false },
-  { id: 'uranus',  name: 'Uranus',  mass: 4.366e-5,  orbR: 19.19,  angle: 5.466, color: '#7de8e8', physR: 1.70e-4, drawR: 0.025, isFixed: false },
-  { id: 'neptune', name: 'Neptune', mass: 5.151e-5,  orbR: 30.07,  angle: 5.321, color: '#4b70dd', physR: 1.65e-4, drawR: 0.024, isFixed: false },
-]
+  {
+    id: "sun",
+    name: "Sun",
+    mass: 1.0,
+    orbR: 0,
+    angle: 0,
+    color: "#FFD700",
+    physR: 0.00465,
+    drawR: 0.01,
+    isFixed: true,
+  },
+  {
+    id: "venus",
+    name: "Venus",
+    mass: 2.447e-6,
+    orbR: 0.723,
+    angle: 3.176,
+    color: "#e8cda0",
+    physR: 4.05e-5,
+    drawR: 0.005,
+    isFixed: false,
+  },
+  {
+    id: "earth",
+    name: "Earth",
+    mass: 3.003e-6,
+    orbR: 1.0,
+    angle: 1.753,
+    color: "#4fc3f7",
+    physR: 4.26e-5,
+    drawR: 0.006,
+    isFixed: false,
+  },
+  {
+    id: "mars",
+    name: "Mars",
+    mass: 3.213e-7,
+    orbR: 1.524,
+    angle: 5.015,
+    color: "#e8714a",
+    physR: 2.27e-5,
+    drawR: 0.004,
+    isFixed: false,
+  },
+];
 
 // =============================================================================
 // SETTINGS
 // =============================================================================
 
 const settings = useSettings(PROTOTYPE_ID, {
-  sim:     { baseSpeed: 1000000 },
-  ship:    { thrustAccel: 20, rotateSpeed: 3 },
-  orbit:   {
-    ringRadiusMult:     0.3,
-    velMatchThreshold:  0.35,
-    shotPower:          800,
-    maxDrag:            250,
-    recoilMult:         0.05,
-    planetGravBoost:    500,
+  sim: { baseSpeed: 1000000 },
+  ship: { thrustAccel: 20, rotateSpeed: 3 },
+  orbit: {
+    ringRadiusMult: 0.1,
+    velMatchThreshold: 0.35,
+    shotPower: 800,
+    maxDrag: 250,
+    recoilMult: 0.05,
+    planetGravBoost: 500,
+  },
+  blackhole: {
+    mass: 0.8,
+    influenceRadius: 0.45,
   },
   visuals: { trailLength: 800 },
-})
+});
 
-function onImport(parsed) { settings.importJSON(parsed); reset() }
+function onImport(parsed) {
+  settings.importJSON(parsed);
+  reset();
+}
 
 onMounted(() => {
-  const imported = history.state?.importedSettings
-  if (imported) settings.importJSON(imported)
-})
+  const imported = history.state?.importedSettings;
+  if (imported) settings.importJSON(imported);
+});
 
 // =============================================================================
 // REACTIVE STATE
 // =============================================================================
 
-const isPlaying    = ref(true)
-const timeScale    = ref(settings.settings.sim.baseSpeed)
-const bodyCount    = ref(0)
-const elapsedLabel = ref('')
+const isPlaying = ref(true);
+const timeScale = ref(settings.settings.sim.baseSpeed);
+const bodyCount = ref(0);
+const elapsedLabel = ref("");
 
 // =============================================================================
 // SIMULATION STATE
 // =============================================================================
 
-let bodies = []
-let ship   = null   // reference into bodies[]
+let bodies = [];
+let ship = null; // reference into bodies[]
+let starLayers = [];
 
 // Camera
 const cam = {
-  zoom:         0.33,
-  panX:         0,
-  panY:         0,
-  focus:        'sun',  // 'sun' | 'ship' | 'orbit' | 'free'
-  _dragActive:  false,
-  _dragLastX:   0,
-  _dragLastY:   0,
-}
+  zoom: 0.33,
+  panX: 0,
+  panY: 0,
+  focus: "sun", // 'sun' | 'ship' | 'orbit' | 'free'
+  _dragActive: false,
+  _dragLastX: 0,
+  _dragLastY: 0,
+};
 
 // Camera zoom animation
-let camTargetZoom = 0.33
+let camTargetZoom = 0.33;
 
 // Spaceship angular state
-let shipAngle  = 0   // radians
-let shipAngVel = 0   // rad/s
+let shipAngle = 0; // radians
+let shipAngVel = 0; // rad/s
 
 // Inputs
-const keys = {}
+const keys = {};
 
 // Prediction path
-let shipPredPath  = []
-let predCountdown = 0
+let shipPredPath = [];
+let predCountdown = 0;
 
 // Orbit game state
-// mode: 'free' | 'docked'
-let orbitState = { mode: 'free', planet: null, shipOffset: null }
+// mode: 'free' | 'capturing' | 'slingshot'
+let orbitState = { mode: "free", planet: null, shipOffset: null };
 
 // Drag for aiming the shot (screen-space pixels)
-let orbitDrag = null  // null | { startX, startY, curX, curY }
+let orbitDrag = null; // null | { startX, startY, curX, curY }
 
 // Cooldown after firing — real-time seconds remaining
-let dockCooldown = 0
-
+let captureCooldown = 0;
 
 // Shockwave particles — spawned on fireShot
 // Each: { x, y, r, maxR, alpha, color }  — x/y/r in world AU
-let shockwaves = []
+let shockwaves = [];
+let debris = [];
+let blackHoleScore = 0;
+let shipLoss = null;
 
 // =============================================================================
 // TRAIL CIRCULAR BUFFER
 // =============================================================================
 
 function makeTrail(cap) {
-  const buf = new Array(cap)
-  let head = 0, size = 0
+  const buf = new Array(cap);
+  let head = 0,
+    size = 0;
   return {
-    push(x, y) { buf[head] = { x, y }; head = (head + 1) % cap; if (size < cap) size++ },
-    points() {
-      const out   = []
-      const start = (head - size + cap) % cap
-      for (let i = 0; i < size; i++) out.push(buf[(start + i) % cap])
-      return out
+    push(x, y) {
+      buf[head] = { x, y };
+      head = (head + 1) % cap;
+      if (size < cap) size++;
     },
-    clear() { head = 0; size = 0 },
-    get length() { return size },
-  }
+    points() {
+      const out = [];
+      const start = (head - size + cap) % cap;
+      for (let i = 0; i < size; i++) out.push(buf[(start + i) % cap]);
+      return out;
+    },
+    clear() {
+      head = 0;
+      size = 0;
+    },
+    get length() {
+      return size;
+    },
+  };
+}
+
+function seededRandom(seed) {
+  let s = seed >>> 0;
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+
+function buildStarfield(w, h) {
+  const rand = seededRandom(0x6a51cafe);
+  const layerDefs = [
+    { count: 90, depth: 0.018, alpha: 0.28, size: 0.7 },
+    { count: 70, depth: 0.04, alpha: 0.45, size: 1.0 },
+    { count: 42, depth: 0.075, alpha: 0.72, size: 1.35 },
+  ];
+  const tw = Math.max(w * 1.8, 1600);
+  const th = Math.max(h * 1.8, 1100);
+
+  starLayers = layerDefs.map((def) => ({
+    ...def,
+    tw,
+    th,
+    stars: Array.from({ length: def.count }, () => {
+      const tint = rand();
+      return {
+        x: rand() * tw,
+        y: rand() * th,
+        r: def.size * (0.55 + rand() * 1.4),
+        twinkle: rand() * Math.PI * 2,
+        color:
+          tint < 0.68
+            ? "255,255,255"
+            : tint < 0.86
+              ? "178,220,255"
+              : "255,226,177",
+      };
+    }),
+  }));
 }
 
 // =============================================================================
@@ -196,79 +405,166 @@ function makeTrail(cap) {
 // =============================================================================
 
 function gravityStep(bs, dt, planetBoost = 1) {
-  const n  = bs.length
-  const fx = new Float64Array(n)
-  const fy = new Float64Array(n)
+  const n = bs.length;
+  const fx = new Float64Array(n);
+  const fy = new Float64Array(n);
 
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {
-      const dx     = bs[j].x - bs[i].x
-      const dy     = bs[j].y - bs[i].y
-      const distSq = dx * dx + dy * dy + SOFTENING
-      const dist   = Math.sqrt(distSq)
-      const f      = G_SIM * bs[i].mass * bs[j].mass / distSq
+      const dx = bs[j].x - bs[i].x;
+      const dy = bs[j].y - bs[i].y;
+      const distSq = dx * dx + dy * dy + SOFTENING;
+      const dist = Math.sqrt(distSq);
+      const f = (G_SIM * bs[i].mass * bs[j].mass) / distSq;
       // Apply boost only on ship↔planet pairs (not ship↔sun, not planet↔planet)
-      const isShipPlanetPair = (bs[i].id === 'ship' && bs[j].isPlanet) ||
-                               (bs[j].id === 'ship' && bs[i].isPlanet)
-      const boost  = isShipPlanetPair ? planetBoost : 1
-      const ffx    = f * boost * dx / dist
-      const ffy    = f * boost * dy / dist
-      if (!bs[i].isFixed) { fx[i] += ffx; fy[i] += ffy }
-      if (!bs[j].isFixed) { fx[j] -= ffx; fy[j] -= ffy }
+      const isShipPlanetPair =
+        (bs[i].id === "ship" && bs[j].isPlanet) ||
+        (bs[j].id === "ship" && bs[i].isPlanet);
+      const boost = isShipPlanetPair ? planetBoost : 1;
+      const ffx = (f * boost * dx) / dist;
+      const ffy = (f * boost * dy) / dist;
+      if (!bs[i].isFixed) {
+        fx[i] += ffx;
+        fy[i] += ffy;
+      }
+      if (!bs[j].isFixed) {
+        fx[j] -= ffx;
+        fy[j] -= ffy;
+      }
     }
   }
 
   for (let i = 0; i < n; i++) {
-    if (bs[i].isFixed) continue
-    bs[i].vx += (fx[i] / bs[i].mass) * dt
-    bs[i].vy += (fy[i] / bs[i].mass) * dt
-    bs[i].x  += bs[i].vx * dt
-    bs[i].y  += bs[i].vy * dt
+    if (bs[i].isFixed) continue;
+    bs[i].vx += (fx[i] / bs[i].mass) * dt;
+    bs[i].vy += (fy[i] / bs[i].mass) * dt;
+    bs[i].x += bs[i].vx * dt;
+    bs[i].y += bs[i].vy * dt;
   }
 }
 
+function applyBlackHoleGravityToShipLike(target, dt) {
+  const bh = settings.settings.blackhole;
+  if (!target || !bh || bh.mass <= 0 || bh.influenceRadius <= 0) return;
+
+  const dx = BLACK_HOLE.x - target.x;
+  const dy = BLACK_HOLE.y - target.y;
+  const distSq = dx * dx + dy * dy + SOFTENING;
+  const dist = Math.sqrt(distSq);
+  if (dist >= bh.influenceRadius) return;
+
+  const falloff = 1 - dist / bh.influenceRadius;
+  const accel = (G_SIM * bh.mass * falloff) / distSq;
+  target.vx += (dx / dist) * accel * dt;
+  target.vy += (dy / dist) * accel * dt;
+}
+
+function applyBlackHoleGravityLocal(bs, dt) {
+  for (const body of bs) {
+    if (body.isFixed) continue;
+    applyBlackHoleGravityToShipLike(body, dt);
+  }
+}
+
+function applySolarGravityWell(bs, dt) {
+  const sun = bs.find((b) => b.id === "sun");
+  if (!sun) return;
+
+  for (const body of bs) {
+    if (body.isFixed || body.id === "sun") continue;
+
+    const dx = sun.x - body.x;
+    const dy = sun.y - body.y;
+    const distSq = dx * dx + dy * dy + SOFTENING;
+    const dist = Math.sqrt(distSq);
+    if (dist >= SUN_GRAVITY_WELL_R) continue;
+
+    const ux = dx / dist;
+    const uy = dy / dist;
+    const well = Math.max(
+      0,
+      Math.min(1, 1 - (dist - SUN_DESTRUCTION_R) / (SUN_GRAVITY_WELL_R - SUN_DESTRUCTION_R)),
+    );
+    const strength = well * well;
+
+    // Extra local pull: a gameplay gravity well, not realism.
+    // It adds speed toward the sun without braking the flyby trajectory.
+    const accel = (G_SIM * sun.mass * strength * 0.7) / distSq;
+    body.vx += ux * accel * dt;
+    body.vy += uy * accel * dt;
+  }
+}
+
+function easeInOutCubic(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+function getSlingshotOrbitRadius(planet) {
+  return Math.max(planet.drawR * SLINGSHOT_ORBIT_R_MULT, SLINGSHOT_ORBIT_MIN_R);
+}
+
+function stepSystemWhileShipAutopilots(dt_yr, planetBoost) {
+  if (!ship) return gravityStep(bodies, dt_yr, planetBoost);
+  ship.isFixed = true;
+  gravityStep(bodies, dt_yr, planetBoost);
+  ship.isFixed = false;
+}
+
 function simStep(dt_yr, realDt_s) {
-  if (dockCooldown > 0) dockCooldown -= realDt_s
+  if (captureCooldown > 0) captureCooldown -= realDt_s;
 
-  const boost = settings.settings.orbit.planetGravBoost
+  const boost = settings.settings.orbit.planetGravBoost;
 
-  if (orbitState.mode === 'free') {
-    applyShipInput(dt_yr, realDt_s)
-    gravityStep(bodies, dt_yr, boost)
-    checkOrbitCapture()
-  } else if (orbitState.mode === 'docked') {
-    gravityStep(bodies, dt_yr, boost)
-    const planet = orbitState.planet
+  if (orbitState.mode === "free") {
+    applyShipInput(dt_yr, realDt_s);
+    applyBlackHoleGravityLocal(bodies, dt_yr);
+    applySolarGravityWell(bodies, dt_yr);
+    gravityStep(bodies, dt_yr, boost);
+    resolveBodyDestruction();
+    checkOrbitCapture();
+  } else if (orbitState.mode === "capturing") {
+    stepSystemWhileShipAutopilots(dt_yr, boost);
+    updateCapture(dt_yr, realDt_s);
+  } else if (orbitState.mode === "slingshot") {
+    stepSystemWhileShipAutopilots(dt_yr, boost);
+    const planet = orbitState.planet;
     if (planet) {
-      // Ship orbits at 2× planet drawR, nose always pointing at planet.
-      // Drag rotates the ship around the planet — drag angle in screen space
-      // maps directly to the ship's orbit angle in world space.
-      let orbitAngle
+      // Drag rotates the ship around the planet; this is an aiming orbit,
+      // not a physically simulated satellite orbit.
+      let orbitAngle;
       if (orbitDrag) {
-        const ddx = orbitDrag.curX - orbitDrag.startX
-        const ddy = orbitDrag.curY - orbitDrag.startY
-        const dd  = Math.sqrt(ddx * ddx + ddy * ddy)
+        const ddx = orbitDrag.curX - orbitDrag.startX;
+        const ddy = orbitDrag.curY - orbitDrag.startY;
+        const dd = Math.sqrt(ddx * ddx + ddy * ddy);
         if (dd > 2) {
           // drag direction in screen space = orbit angle (ship is on that side of planet)
-          orbitAngle = Math.atan2(ddy, ddx)
+          orbitAngle = Math.atan2(ddy, ddx);
         } else {
-          orbitAngle = Math.atan2(orbitState.shipOffset.dy, orbitState.shipOffset.dx)
+          orbitAngle = Math.atan2(
+            orbitState.shipOffset.dy,
+            orbitState.shipOffset.dx,
+          );
         }
       } else {
-        orbitAngle = Math.atan2(orbitState.shipOffset.dy, orbitState.shipOffset.dx)
+        orbitAngle = Math.atan2(
+          orbitState.shipOffset.dy,
+          orbitState.shipOffset.dx,
+        );
       }
 
-      // Preserve the natural capture distance, only update the angle
-      const dockDist = Math.sqrt(orbitState.shipOffset.dx ** 2 + orbitState.shipOffset.dy ** 2)
-      orbitState.shipOffset.dx = Math.cos(orbitAngle) * dockDist
-      orbitState.shipOffset.dy = Math.sin(orbitAngle) * dockDist
+      const orbitR = orbitState.orbitR || getSlingshotOrbitRadius(planet);
+      orbitState.shipOffset.dx = Math.cos(orbitAngle) * orbitR;
+      orbitState.shipOffset.dy = Math.sin(orbitAngle) * orbitR;
 
-      ship.x  = planet.x + orbitState.shipOffset.dx
-      ship.y  = planet.y + orbitState.shipOffset.dy
-      ship.vx = planet.vx
-      ship.vy = planet.vy
+      ship.x = planet.x + orbitState.shipOffset.dx;
+      ship.y = planet.y + orbitState.shipOffset.dy;
+      ship.vx = planet.vx;
+      ship.vy = planet.vy;
       // Nose always points toward planet center
-      shipAngle = Math.atan2(-orbitState.shipOffset.dy, -orbitState.shipOffset.dx)
+      shipAngle = Math.atan2(
+        -orbitState.shipOffset.dy,
+        -orbitState.shipOffset.dx,
+      );
     }
   }
 }
@@ -278,65 +574,119 @@ function simStep(dt_yr, realDt_s) {
 // =============================================================================
 
 function checkOrbitCapture() {
-  if (!ship) return
-  if (dockCooldown > 0) return
-  const threshold   = settings.settings.orbit.velMatchThreshold
-  const ringMult    = settings.settings.orbit.ringRadiusMult
+  if (!ship) return;
+  if (captureCooldown > 0) return;
 
   for (const body of bodies) {
-    if (body.isFixed)          continue
-    if (body.id === 'sun')     continue
-    if (body.id === 'ship')    continue
+    if (body.isFixed) continue;
+    if (body.id === "sun") continue;
+    if (body.id === "ship") continue;
 
-    const captureRingR = ringMult  // in AU
-
-    const dx   = ship.x - body.x
-    const dy   = ship.y - body.y
-    const dist = Math.sqrt(dx * dx + dy * dy)
-
-    if (dist > captureRingR) continue
-
-    // Ship is inside the ring — check velocity match
-    const relVx      = ship.vx - body.vx
-    const relVy      = ship.vy - body.vy
-    const relSpeed   = Math.sqrt(relVx * relVx + relVy * relVy)
-    const planetSpeed = Math.sqrt(body.vx * body.vx + body.vy * body.vy)
-
-    if (relSpeed < planetSpeed * threshold) {
-      // Dock — ship arrived naturally via gravity, lock it where it is
-      const offsetDx = ship.x - body.x
-      const offsetDy = ship.y - body.y
-      shipAngle = Math.atan2(-offsetDy, -offsetDx)  // nose toward planet
-
-      orbitState = {
-        mode:       'docked',
-        planet:     body,
-        shipOffset: { dx: offsetDx, dy: offsetDy },
-      }
-
-      cam.focus = 'orbit'
-      break
+    const { distancePct, matchPct } = getApproachMatch(body);
+    if (distancePct >= 1 && matchPct >= 1) {
+      beginOrbitCapture(body);
+      break;
     }
   }
 }
 
+function beginOrbitCapture(planet) {
+  if (!ship || !planet) return;
+
+  const dx = ship.x - planet.x;
+  const dy = ship.y - planet.y;
+  const startDist = Math.max(Math.sqrt(dx * dx + dy * dy), 1e-6);
+  const startAngle = Math.atan2(dy, dx);
+  const orbitR = getSlingshotOrbitRadius(planet);
+  const startRelVx = ship.vx - planet.vx;
+  const startRelVy = ship.vy - planet.vy;
+
+  orbitState = {
+    mode: "capturing",
+    planet,
+    shipOffset: { dx, dy },
+    orbitR,
+    capture: {
+      age: 0,
+      simAge: 0,
+      duration: CAPTURE_DURATION_S,
+      startDx: dx,
+      startDy: dy,
+      startRelVx,
+      startRelVy,
+      startAngle,
+    },
+  };
+
+  orbitDrag = null;
+}
+
+function updateCapture(dt_yr, realDt_s) {
+  if (
+    !ship ||
+    orbitState.mode !== "capturing" ||
+    !orbitState.planet ||
+    !orbitState.capture
+  )
+    return;
+
+  const planet = orbitState.planet;
+  const capture = orbitState.capture;
+  capture.age += realDt_s;
+  capture.simAge += dt_yr;
+
+  const rawT = Math.min(1, capture.age / capture.duration);
+  const t = easeInOutCubic(rawT);
+  const driftDx = capture.startDx + capture.startRelVx * capture.simAge;
+  const driftDy = capture.startDy + capture.startRelVy * capture.simAge;
+  const targetDx = Math.cos(capture.startAngle) * orbitState.orbitR;
+  const targetDy = Math.sin(capture.startAngle) * orbitState.orbitR;
+
+  orbitState.shipOffset = {
+    dx: driftDx + (targetDx - driftDx) * t,
+    dy: driftDy + (targetDy - driftDy) * t,
+  };
+
+  const prevX = ship.x;
+  const prevY = ship.y;
+  ship.x = planet.x + orbitState.shipOffset.dx;
+  ship.y = planet.y + orbitState.shipOffset.dy;
+  if (dt_yr > 0) {
+    ship.vx = (ship.x - prevX) / dt_yr;
+    ship.vy = (ship.y - prevY) / dt_yr;
+  }
+  shipAngle = Math.atan2(-orbitState.shipOffset.dy, -orbitState.shipOffset.dx);
+
+  if (rawT >= 1) {
+    ship.vx = planet.vx;
+    ship.vy = planet.vy;
+    orbitState = {
+      mode: "slingshot",
+      planet,
+      orbitR: orbitState.orbitR,
+      shipOffset: { ...orbitState.shipOffset },
+    };
+  }
+}
+
 // =============================================================================
-// UNDOCK
+// BREAK ORBIT
 // =============================================================================
 
-function undock(kick = true) {
-  if (orbitState.mode !== 'docked') return
+function breakOrbit(kick = true) {
+  if (orbitState.mode !== "slingshot" && orbitState.mode !== "capturing")
+    return;
 
   if (kick && ship) {
     // Small random kick to break away
-    const angle = Math.random() * Math.PI * 2
-    ship.vx += Math.cos(angle) * 0.1
-    ship.vy += Math.sin(angle) * 0.1
+    const angle = Math.random() * Math.PI * 2;
+    ship.vx += Math.cos(angle) * 0.1;
+    ship.vy += Math.sin(angle) * 0.1;
   }
 
-  orbitState = { mode: 'free', planet: null, shipOffset: null }
-  orbitDrag  = null
-  cam.focus  = 'ship'
+  orbitState = { mode: "free", planet: null, shipOffset: null };
+  orbitDrag = null;
+  cam.focus = "ship";
 }
 
 // =============================================================================
@@ -344,53 +694,147 @@ function undock(kick = true) {
 // =============================================================================
 
 function fireShot() {
-  if (orbitState.mode !== 'docked' || !orbitDrag) return
-  const planet  = orbitState.planet
-  if (!planet) return
+  if (orbitState.mode !== "slingshot" || !orbitDrag) return;
+  const planet = orbitState.planet;
+  if (!planet) return;
 
-  const { startX, startY, curX, curY } = orbitDrag
-  const ddx  = curX - startX
-  const ddy  = curY - startY
-  const dist = Math.sqrt(ddx * ddx + ddy * ddy)
-  if (dist < 2) { undock(true); return }
-
-  const maxDrag  = settings.settings.orbit.maxDrag
-  const clamped  = Math.min(dist, maxDrag)
-  const nx       = ddx / dist  // drag direction unit vector
-  const ny       = ddy / dist
-
-  // dv proportional to drag fraction, shot direction is OPPOSITE to drag
-  const dv = (clamped / maxDrag) * settings.settings.orbit.shotPower * 0.01
-
-  // Apply impulse to planet (opposite to drag direction)
-  planet.vx += -nx * dv
-  planet.vy += -ny * dv
-
-  // Recoil to ship (same as drag direction = opposite of planet shot)
-  const recoil = dv * settings.settings.orbit.recoilMult
-  if (ship) {
-    ship.vx += nx * recoil
-    ship.vy += ny * recoil
+  const { startX, startY, curX, curY } = orbitDrag;
+  const ddx = curX - startX;
+  const ddy = curY - startY;
+  const dist = Math.sqrt(ddx * ddx + ddy * ddy);
+  if (dist < 2) {
+    breakOrbit(true);
+    return;
   }
 
-  // Start cooldown — prevent re-docking for 5 real seconds
-  dockCooldown = 5.0
+  const maxDrag = settings.settings.orbit.maxDrag;
+  const clamped = Math.min(dist, maxDrag);
+  const nx = ddx / dist; // drag direction unit vector
+  const ny = ddy / dist;
+
+  // dv proportional to drag fraction, shot direction is OPPOSITE to drag
+  const dv = (clamped / maxDrag) * settings.settings.orbit.shotPower * 0.01;
+
+  // Apply impulse to planet (opposite to drag direction)
+  planet.vx += -nx * dv;
+  planet.vy += -ny * dv;
+
+  // Recoil to ship (same as drag direction = opposite of planet shot)
+  const recoil = dv * settings.settings.orbit.recoilMult;
+  if (ship) {
+    ship.vx += nx * recoil;
+    ship.vy += ny * recoil;
+  }
+
+  // Start cooldown — prevent immediate recapture for 5 real seconds
+  captureCooldown = 5.0;
 
   // Spawn shockwave at planet position — large slow wave
   shockwaves.push({
-    x:        planet.x,
-    y:        planet.y,
-    r:        0,
-    maxR:     planet.drawR * 300,   // ~30 AU for Earth-sized planet — solar-system scale
-    alpha:    1.0,
-    duration: 3.5,                  // real-time seconds to fully expand
-    age:      0,
-    color:    planet.color,
-  })
+    x: planet.x,
+    y: planet.y,
+    r: 0,
+    maxR: planet.drawR * 300, // ~30 AU for Earth-sized planet — solar-system scale
+    alpha: 1.0,
+    duration: 3.5, // real-time seconds to fully expand
+    age: 0,
+    color: planet.color,
+  });
 
-  // Update ship offset now that planet velocity changed
-  // (ship will be released from lock)
-  undock(false)
+  breakOrbit(false);
+}
+
+// =============================================================================
+// BODY DESTRUCTION
+// =============================================================================
+
+function resolveBodyDestruction() {
+  const sun = bodies.find((b) => b.id === "sun");
+  for (let i = bodies.length - 1; i >= 0; i--) {
+    const body = bodies[i];
+    if (body.isFixed || body.id === "sun") continue;
+
+    const bhDx = body.x - BLACK_HOLE.x;
+    const bhDy = body.y - BLACK_HOLE.y;
+    if (Math.sqrt(bhDx * bhDx + bhDy * bhDy) <= BLACK_HOLE.captureR) {
+      consumeBodyInBlackHole(body, i);
+      continue;
+    }
+
+    if (sun) {
+      const sunDx = body.x - sun.x;
+      const sunDy = body.y - sun.y;
+      const sunCrashR = SUN_DESTRUCTION_R + body.drawR;
+      if (Math.sqrt(sunDx * sunDx + sunDy * sunDy) <= sunCrashR) {
+        destroyBodyInSun(body, i);
+      }
+    }
+  }
+}
+
+function consumeBodyInBlackHole(body, index) {
+  bodies.splice(index, 1);
+  if (body.id === "ship") {
+    ship = null;
+    shipLoss = "BLACK HOLE";
+    orbitState = { mode: "free", planet: null, shipOffset: null };
+    orbitDrag = null;
+    cam.focus = "sun";
+  } else {
+    blackHoleScore++;
+  }
+  if (orbitState.planet === body) breakOrbit(false);
+
+  shockwaves.push({
+    x: BLACK_HOLE.x,
+    y: BLACK_HOLE.y,
+    r: 0,
+    maxR: BLACK_HOLE.captureR * 3.8,
+    alpha: 0.9,
+    duration: 1.2,
+    age: 0,
+    color: "#ff8c00",
+  });
+}
+
+function destroyBodyInSun(body, index) {
+  bodies.splice(index, 1);
+  if (body.id === "ship") {
+    ship = null;
+    shipLoss = "SUN IMPACT";
+    orbitState = { mode: "free", planet: null, shipOffset: null };
+    orbitDrag = null;
+    cam.focus = "sun";
+  }
+  if (orbitState.planet === body) breakOrbit(false);
+  spawnSunDebris(body);
+}
+
+function spawnSunDebris(body) {
+  const speed = Math.sqrt(body.vx * body.vx + body.vy * body.vy);
+  const nx = speed > 1e-6 ? body.vx / speed : 1;
+  const ny = speed > 1e-6 ? body.vy / speed : 0;
+  const px = -ny;
+  const py = nx;
+  const [r, g, b] = hexToRgb(body.color);
+
+  for (let i = 0; i < DEBRIS_COUNT; i++) {
+    const spread = (Math.random() - 0.5) * 0.85;
+    const kick = speed * (0.06 + Math.random() * 0.2);
+    const side = speed * (Math.random() - 0.5) * 0.22;
+    debris.push({
+      x: body.x,
+      y: body.y,
+      vx: body.vx * 0.82 + (nx * kick + px * side),
+      vy: body.vy * 0.82 + (ny * kick + py * side),
+      size: 1.5 + Math.random() * 3.5,
+      age: 0,
+      duration: 0.7 + Math.random() * 1.0,
+      color: `${r},${g},${b}`,
+      heat: 0.55 + Math.random() * 0.45,
+      spin: spread,
+    });
+  }
 }
 
 // =============================================================================
@@ -398,24 +842,31 @@ function fireShot() {
 // =============================================================================
 
 function applyShipInput(dt_yr, realDt_s) {
-  if (!ship) return
-  const thrust   = settings.settings.ship.thrustAccel  // AU/yr²
-  const rotSpeed = settings.settings.ship.rotateSpeed  // rad/s (real-time)
+  if (!ship) return;
+  const thrust = settings.settings.ship.thrustAccel; // AU/yr²
+  const rotSpeed = settings.settings.ship.rotateSpeed; // rad/s (real-time)
 
-  if (keys['ArrowLeft']  || keys['a'] || keys['A']) shipAngVel = -rotSpeed
-  if (keys['ArrowRight'] || keys['d'] || keys['D']) shipAngVel =  rotSpeed
-  if (!keys['ArrowLeft'] && !keys['ArrowRight'] && !keys['a'] && !keys['A'] && !keys['d'] && !keys['D']) {
-    shipAngVel *= Math.pow(0.01, realDt_s)
+  if (keys["ArrowLeft"] || keys["a"] || keys["A"]) shipAngVel = -rotSpeed;
+  if (keys["ArrowRight"] || keys["d"] || keys["D"]) shipAngVel = rotSpeed;
+  if (
+    !keys["ArrowLeft"] &&
+    !keys["ArrowRight"] &&
+    !keys["a"] &&
+    !keys["A"] &&
+    !keys["d"] &&
+    !keys["D"]
+  ) {
+    shipAngVel *= Math.pow(0.01, realDt_s);
   }
-  shipAngle += shipAngVel * realDt_s
+  shipAngle += shipAngVel * realDt_s;
 
-  if (keys['ArrowUp'] || keys['w'] || keys['W']) {
-    ship.vx += Math.cos(shipAngle) * thrust * dt_yr
-    ship.vy += Math.sin(shipAngle) * thrust * dt_yr
+  if (keys["ArrowUp"] || keys["w"] || keys["W"]) {
+    ship.vx += Math.cos(shipAngle) * thrust * dt_yr;
+    ship.vy += Math.sin(shipAngle) * thrust * dt_yr;
   }
-  if (keys['ArrowDown'] || keys['s'] || keys['S']) {
-    ship.vx -= Math.cos(shipAngle) * thrust * dt_yr * 0.4
-    ship.vy -= Math.sin(shipAngle) * thrust * dt_yr * 0.4
+  if (keys["ArrowDown"] || keys["s"] || keys["S"]) {
+    ship.vx -= Math.cos(shipAngle) * thrust * dt_yr * 0.4;
+    ship.vy -= Math.sin(shipAngle) * thrust * dt_yr * 0.4;
   }
 }
 
@@ -423,28 +874,67 @@ function applyShipInput(dt_yr, realDt_s) {
 // PATH PREDICTION — ship (ghost simulation, no side effects)
 // =============================================================================
 
-function computePrediction(realDt_yr) {
-  if (!ship) return []
-  if (orbitState.mode !== 'free') return []
+function computePrediction() {
+  if (!ship) return [];
+  if (orbitState.mode !== "free") return [];
 
-  const ghosts = bodies.map(b => ({
-    id: b.id, x: b.x, y: b.y, vx: b.vx, vy: b.vy,
-    mass: b.mass, isFixed: b.isFixed,
-  }))
+  const ghosts = bodies.map((b) => ({
+    id: b.id,
+    x: b.x,
+    y: b.y,
+    vx: b.vx,
+    vy: b.vy,
+    mass: b.mass,
+    isFixed: b.isFixed,
+    isPlanet: b.isPlanet,
+  }));
 
-  const shipIdx = ghosts.findIndex(g => g.id === 'ship')
-  if (shipIdx < 0) return []
+  const shipIdx = ghosts.findIndex((g) => g.id === "ship");
+  if (shipIdx < 0) return [];
 
-  const predDt = Math.min(PRED_DT_MULT * realDt_yr, 0.01)
-  const path   = []
+  const path = [{ x: ghosts[shipIdx].x, y: ghosts[shipIdx].y }];
+  const targetWorldSegment = PRED_TARGET_SEGMENT_PX / Math.max(scale(), 0.0001);
 
-  const boost = settings.settings.orbit.planetGravBoost
-  for (let step = 0; step < PRED_STEPS; step++) {
-    gravityStep(ghosts, predDt, boost)
-    if (step % 6 === 0) path.push({ x: ghosts[shipIdx].x, y: ghosts[shipIdx].y })
+  const boost = settings.settings.orbit.planetGravBoost;
+  let elapsed = 0;
+  let step = 0;
+  let lastX = ghosts[shipIdx].x;
+  let lastY = ghosts[shipIdx].y;
+
+  while (elapsed < PRED_HORIZON_YR && step < PRED_MAX_STEPS) {
+    const ghostShip = ghosts[shipIdx];
+    const speed = Math.sqrt(
+      ghostShip.vx * ghostShip.vx + ghostShip.vy * ghostShip.vy,
+    );
+    const speedDt = speed > 1e-6 ? targetWorldSegment / speed : PRED_BASE_DT_YR;
+    const predDt = Math.min(
+      PRED_BASE_DT_YR,
+      speedDt,
+      PRED_HORIZON_YR - elapsed,
+    );
+
+    applyBlackHoleGravityLocal(ghosts, predDt);
+    applySolarGravityWell(ghosts, predDt);
+    gravityStep(ghosts, predDt, boost);
+
+    const dx = ghosts[shipIdx].x - lastX;
+    const dy = ghosts[shipIdx].y - lastY;
+    if (Math.sqrt(dx * dx + dy * dy) >= targetWorldSegment * 0.6) {
+      path.push({ x: ghosts[shipIdx].x, y: ghosts[shipIdx].y });
+      lastX = ghosts[shipIdx].x;
+      lastY = ghosts[shipIdx].y;
+    }
+
+    elapsed += predDt;
+    step++;
   }
 
-  return path
+  const tail = path[path.length - 1];
+  const end = ghosts[shipIdx];
+  if (!tail || tail.x !== end.x || tail.y !== end.y)
+    path.push({ x: end.x, y: end.y });
+
+  return path;
 }
 
 // =============================================================================
@@ -452,29 +942,37 @@ function computePrediction(realDt_yr) {
 // =============================================================================
 
 function computeShotPrediction(planet, nx, ny, dv) {
-  if (!planet) return []
+  if (!planet) return [];
 
-  const ghosts = bodies.map(b => ({
-    id: b.id, x: b.x, y: b.y, vx: b.vx, vy: b.vy,
-    mass: b.mass, isFixed: b.isFixed,
-  }))
+  const ghosts = bodies.map((b) => ({
+    id: b.id,
+    x: b.x,
+    y: b.y,
+    vx: b.vx,
+    vy: b.vy,
+    mass: b.mass,
+    isFixed: b.isFixed,
+    isPlanet: b.isPlanet,
+  }));
 
-  const pidx = ghosts.findIndex(g => g.id === planet.id)
-  if (pidx < 0) return []
+  const pidx = ghosts.findIndex((g) => g.id === planet.id);
+  if (pidx < 0) return [];
 
   // Apply hypothetical impulse
-  ghosts[pidx].vx += -nx * dv
-  ghosts[pidx].vy += -ny * dv
+  ghosts[pidx].vx += -nx * dv;
+  ghosts[pidx].vy += -ny * dv;
 
-  const predDt = 0.005
-  const path   = []
+  const predDt = 0.005;
+  const path = [];
 
   for (let step = 0; step < SHOT_PRED_STEPS; step++) {
-    gravityStep(ghosts, predDt)
-    if (step % 5 === 0) path.push({ x: ghosts[pidx].x, y: ghosts[pidx].y })
+    applyBlackHoleGravityLocal(ghosts, predDt);
+    applySolarGravityWell(ghosts, predDt);
+    gravityStep(ghosts, predDt);
+    if (step % 5 === 0) path.push({ x: ghosts[pidx].x, y: ghosts[pidx].y });
   }
 
-  return path
+  return path;
 }
 
 // =============================================================================
@@ -482,162 +980,175 @@ function computeShotPrediction(planet, nx, ny, dv) {
 // =============================================================================
 
 function buildScene(w, h) {
-  bodies        = []
-  shipAngle     = -Math.PI / 2
-  shipAngVel    = 0
-  shipPredPath  = []
-  orbitState    = { mode: 'free', planet: null, shipOffset: null }
-  orbitDrag     = null
-  dockCooldown  = 0
-  camTargetZoom = cam.zoom
+  bodies = [];
+  buildStarfield(w, h);
+  shipAngle = -Math.PI / 2;
+  shipAngVel = 0;
+  shipPredPath = [];
+  debris = [];
+  blackHoleScore = 0;
+  shipLoss = null;
+  orbitState = { mode: "free", planet: null, shipOffset: null };
+  orbitDrag = null;
+  captureCooldown = 0;
+  camTargetZoom = cam.zoom;
 
   for (const bd of SOLAR_BODIES) {
-    const r = bd.orbR
-    let x = 0, y = 0, vx = 0, vy = 0
+    const r = bd.orbR;
+    let x = 0,
+      y = 0,
+      vx = 0,
+      vy = 0;
 
     if (!bd.isFixed && r > 0) {
-      const a = bd.angle
-      const v = Math.sqrt(G_SIM * 1.0 / r)
-      x  =  Math.cos(a) * r
-      y  =  Math.sin(a) * r
-      vx = -Math.sin(a) * v
-      vy =  Math.cos(a) * v
+      const a = bd.angle;
+      const v = Math.sqrt((G_SIM * 1.0) / r);
+      x = Math.cos(a) * r;
+      y = Math.sin(a) * r;
+      vx = -Math.sin(a) * v;
+      vy = Math.cos(a) * v;
     }
 
     bodies.push({
-      id:       bd.id,
-      name:     bd.name,
-      x, y, vx, vy,
-      mass:     bd.mass,
-      drawR:    bd.drawR,
-      color:    bd.color,
-      isFixed:  bd.isFixed,
-      isPlanet: !bd.isFixed && bd.id !== 'ship',
-      trail:    makeTrail(bd.isFixed ? 0 : settings.settings.visuals.trailLength),
-    })
+      id: bd.id,
+      name: bd.name,
+      x,
+      y,
+      vx,
+      vy,
+      mass: bd.mass,
+      drawR: bd.drawR,
+      color: bd.color,
+      isFixed: bd.isFixed,
+      isPlanet: !bd.isFixed && bd.id !== "ship",
+      trail: makeTrail(bd.isFixed ? 0 : settings.settings.visuals.trailLength),
+    });
   }
 
-  // Ship: start at 1.5 AU, circular orbit
-  const shipR   = 1.5
-  const shipOrb = Math.sqrt(G_SIM * 1.0 / shipR)
+  // Ship: start just behind Mars with a slight catch-up velocity for capture testing.
+  const marsDef = SOLAR_BODIES.find((b) => b.id === "mars");
+  const shipR = marsDef.orbR;
+  const shipA = marsDef.angle - 0.18;
+  const shipOrb = Math.sqrt((G_SIM * 1.0) / shipR) * 1.025;
   ship = {
-    id: 'ship', name: 'Ship',
-    x: shipR, y: 0,
-    vx: 0, vy: shipOrb,
+    id: "ship",
+    name: "Ship",
+    x: Math.cos(shipA) * shipR,
+    y: Math.sin(shipA) * shipR,
+    vx: -Math.sin(shipA) * shipOrb,
+    vy: Math.cos(shipA) * shipOrb,
     mass: SHIP_MASS,
     drawR: SHIP_LENGTH_AU / 2,
-    color: '#4fc3f7',
+    color: "#4fc3f7",
     isFixed: false,
     trail: makeTrail(settings.settings.visuals.trailLength),
-  }
-  bodies.push(ship)
+  };
+  bodies.push(ship);
 
-  cam.panX      = w / 2
-  cam.panY      = h / 2
-  cam.focus     = 'sun'
-  cam.zoom      = 0.33
-  camTargetZoom = 0.33
+  cam.panX = w / 2;
+  cam.panY = h / 2;
+  cam.focus = "ship";
+  cam.zoom = 4;
+  camTargetZoom = 4;
 }
 
 // =============================================================================
 // CAMERA HELPERS
 // =============================================================================
 
-function scale() { return cam.zoom * PX_PER_AU }
+function scale() {
+  return cam.zoom * PX_PER_AU;
+}
 
 function worldToScreen(wx, wy) {
-  const s = scale()
-  return { x: wx * s + cam.panX, y: wy * s + cam.panY }
+  const s = scale();
+  return { x: wx * s + cam.panX, y: wy * s + cam.panY };
 }
 
 function screenToWorld(sx, sy) {
-  const s = scale()
-  return { x: (sx - cam.panX) / s, y: (sy - cam.panY) / s }
+  const s = scale();
+  return { x: (sx - cam.panX) / s, y: (sy - cam.panY) / s };
 }
 
 function zoomAt(factor, mx, my) {
-  const s0 = scale()
-  const wx  = (mx - cam.panX) / s0
-  const wy  = (my - cam.panY) / s0
-  cam.zoom      = Math.max(0.004, Math.min(200000, cam.zoom * factor))
-  camTargetZoom = cam.zoom
-  const s1  = scale()
-  cam.panX  = mx - wx * s1
-  cam.panY  = my - wy * s1
+  const s0 = scale();
+  const wx = (mx - cam.panX) / s0;
+  const wy = (my - cam.panY) / s0;
+  cam.zoom = Math.max(0.004, Math.min(200000, cam.zoom * factor));
+  camTargetZoom = cam.zoom;
+  const s1 = scale();
+  cam.panX = mx - wx * s1;
+  cam.panY = my - wy * s1;
 }
 
 function applyFocusMode(w, h) {
   // Animate zoom toward target
-  cam.zoom += (camTargetZoom - cam.zoom) * 0.08
+  cam.zoom += (camTargetZoom - cam.zoom) * 0.08;
 
-  if (cam.focus === 'sun') {
-    cam.panX = w / 2
-    cam.panY = h / 2
-  } else if (cam.focus === 'ship' && ship) {
-    const s  = scale()
-    cam.panX = w / 2 - ship.x * s
-    cam.panY = h / 2 - ship.y * s
-  } else if (cam.focus === 'orbit' && orbitState.planet) {
-    const s  = scale()
-    const p  = orbitState.planet
-    cam.panX = w / 2 - p.x * s
-    cam.panY = h / 2 - p.y * s
+  if (cam.focus === "sun") {
+    cam.panX = w / 2;
+    cam.panY = h / 2;
+  } else if (cam.focus === "ship" && ship) {
+    const s = scale();
+    cam.panX = w / 2 - ship.x * s;
+    cam.panY = h / 2 - ship.y * s;
+  } else if (cam.focus === "orbit" && orbitState.planet) {
+    const s = scale();
+    const p = orbitState.planet;
+    cam.panX = w / 2 - p.x * s;
+    cam.panY = h / 2 - p.y * s;
   }
 }
 
 // =============================================================================
-// GRID DRAWING
+// STARFIELD
 // =============================================================================
 
-function drawGrid(ctx, w, h) {
-  const s   = scale()
-  const x0  = -cam.panX / s
-  const x1  = (w - cam.panX) / s
-  const y0  = -cam.panY / s
-  const y1  = (h - cam.panY) / s
-  const rng = x1 - x0
+function wrap(value, max) {
+  return ((value % max) + max) % max;
+}
 
-  const rawStep = rng / 6
-  const mag     = Math.pow(10, Math.floor(Math.log10(rawStep)))
-  const norm    = rawStep / mag
-  const step    = norm < 2 ? mag : norm < 5 ? 2 * mag : 5 * mag
+function drawStarfield(ctx, w, h) {
+  if (!starLayers.length) buildStarfield(w, h);
 
-  ctx.save()
-  ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY)
-  ctx.strokeStyle = 'rgba(255,255,255,0.055)'
-  ctx.lineWidth   = 1 / s
+  const t = Date.now() / 1000;
 
-  const startX = Math.floor(x0 / step) * step
-  const startY = Math.floor(y0 / step) * step
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = "#02040a";
+  ctx.fillRect(0, 0, w, h);
 
-  ctx.beginPath()
-  for (let x = startX; x <= x1 + step; x += step) {
-    ctx.moveTo(x, y0); ctx.lineTo(x, y1)
+  for (const layer of starLayers) {
+    const zoomDrift =
+      Math.log2(Math.max(cam.zoom, 0.004) / 0.33) * 18 * layer.depth;
+    const ox = wrap(cam.panX * layer.depth + zoomDrift, layer.tw);
+    const oy = wrap(cam.panY * layer.depth - zoomDrift * 0.6, layer.th);
+
+    for (const star of layer.stars) {
+      let x = wrap(star.x + ox, layer.tw);
+      let y = wrap(star.y + oy, layer.th);
+      if (x > w + 20) x -= layer.tw;
+      if (y > h + 20) y -= layer.th;
+      if (x < -20 || x > w + 20 || y < -20 || y > h + 20) continue;
+
+      const twinkle = 0.78 + 0.22 * Math.sin(t * 0.9 + star.twinkle);
+      const alpha = layer.alpha * twinkle;
+
+      ctx.fillStyle = `rgba(${star.color},${alpha})`;
+      ctx.beginPath();
+      ctx.arc(x, y, star.r, 0, Math.PI * 2);
+      ctx.fill();
+
+      if (star.r > 1.4) {
+        ctx.fillStyle = `rgba(${star.color},${alpha * 0.18})`;
+        ctx.beginPath();
+        ctx.arc(x, y, star.r * 2.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
   }
-  for (let y = startY; y <= y1 + step; y += step) {
-    ctx.moveTo(x0, y); ctx.lineTo(x1, y)
-  }
-  ctx.stroke()
 
-  ctx.strokeStyle = 'rgba(255,255,255,0.12)'
-  ctx.beginPath()
-  ctx.moveTo(0, y0); ctx.lineTo(0, y1)
-  ctx.moveTo(x0, 0); ctx.lineTo(x1, 0)
-  ctx.stroke()
-
-  ctx.restore()
-
-  ctx.save()
-  ctx.setTransform(1, 0, 0, 1, 0, 0)
-  const labelAU = step.toFixed(step < 0.1 ? 4 : step < 1 ? 2 : step < 10 ? 1 : 0) + ' AU'
-  const labelKM = step > 0.001
-    ? '  (' + (step * AU_KM).toExponential(2) + ' km)'
-    : ''
-  ctx.font      = '11px monospace'
-  ctx.fillStyle = 'rgba(255,255,255,0.2)'
-  ctx.textAlign = 'left'
-  ctx.fillText('grid: ' + labelAU + labelKM, 12, h - 12)
-  ctx.restore()
+  ctx.restore();
 }
 
 // =============================================================================
@@ -645,19 +1156,134 @@ function drawGrid(ctx, w, h) {
 // =============================================================================
 
 function drawOrbits(ctx) {
-  const s = scale()
-  ctx.save()
-  ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY)
-  ctx.strokeStyle = 'rgba(255,255,255,0.045)'
-  ctx.lineWidth   = 0.5 / s
+  const s = scale();
+  ctx.save();
+  ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY);
+  ctx.strokeStyle = "rgba(255,255,255,0.045)";
+  ctx.lineWidth = 0.5 / s;
 
   for (const bd of SOLAR_BODIES) {
-    if (bd.orbR === 0) continue
-    ctx.beginPath()
-    ctx.arc(0, 0, bd.orbR, 0, Math.PI * 2)
-    ctx.stroke()
+    if (bd.orbR === 0) continue;
+    ctx.beginPath();
+    ctx.arc(0, 0, bd.orbR, 0, Math.PI * 2);
+    ctx.stroke();
   }
-  ctx.restore()
+  ctx.restore();
+}
+
+// =============================================================================
+// BLACK HOLE
+// =============================================================================
+
+function drawBlackHole(ctx) {
+  const bh = settings.settings.blackhole;
+  if (!bh || bh.mass <= 0) return;
+
+  const s = scale();
+  const influenceR = bh.influenceRadius;
+  const coreR = BLACK_HOLE.drawR;
+  const outerR = Math.max(influenceR, coreR * 1.25);
+
+  ctx.save();
+  ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY);
+
+  if (influenceR > 0) {
+    ctx.setLineDash([0.035, 0.035]);
+    ctx.strokeStyle = "rgba(255,140,0,0.2)";
+    ctx.lineWidth = 1 / s;
+    ctx.beginPath();
+    ctx.arc(BLACK_HOLE.x, BLACK_HOLE.y, influenceR, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  const ringCount = 12;
+  for (let i = 1; i <= ringCount; i++) {
+    const t = i / ringCount;
+    const r = coreR + (outerR - coreR) * Math.pow(t, 1.8);
+    const edgePulse = i === ringCount ? 0.08 + 0.04 * Math.sin(Date.now() / 300) : 0;
+    ctx.strokeStyle = `rgba(255,140,0,${(0.22 * (1 - t * 0.78) + edgePulse).toFixed(3)})`;
+    ctx.lineWidth = (i === ringCount ? 1.15 : 0.7) / s;
+    ctx.beginPath();
+    ctx.arc(BLACK_HOLE.x, BLACK_HOLE.y, r, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  const spokeCount = 12;
+  for (let i = 0; i < spokeCount; i++) {
+    const angle = (i / spokeCount) * Math.PI * 2;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const grad = ctx.createLinearGradient(
+      BLACK_HOLE.x + cos * coreR,
+      BLACK_HOLE.y + sin * coreR,
+      BLACK_HOLE.x + cos * outerR,
+      BLACK_HOLE.y + sin * outerR,
+    );
+    grad.addColorStop(0, "rgba(255,140,0,0.12)");
+    grad.addColorStop(0.72, "rgba(255,140,0,0.045)");
+    grad.addColorStop(1, "rgba(255,140,0,0.16)");
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = 0.7 / s;
+    ctx.beginPath();
+    ctx.moveTo(BLACK_HOLE.x + cos * coreR, BLACK_HOLE.y + sin * coreR);
+    ctx.lineTo(BLACK_HOLE.x + cos * outerR, BLACK_HOLE.y + sin * outerR);
+    ctx.stroke();
+  }
+
+  const glow = ctx.createRadialGradient(
+    BLACK_HOLE.x,
+    BLACK_HOLE.y,
+    coreR * 0.8,
+    BLACK_HOLE.x,
+    BLACK_HOLE.y,
+    coreR * 3.4,
+  );
+  glow.addColorStop(0, "rgba(255,140,0,0.62)");
+  glow.addColorStop(0.42, "rgba(180,60,0,0.28)");
+  glow.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(BLACK_HOLE.x, BLACK_HOLE.y, coreR * 3.4, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = "#020202";
+  ctx.strokeStyle = "rgba(255,180,80,0.35)";
+  ctx.lineWidth = 1 / s;
+  ctx.beginPath();
+  ctx.arc(BLACK_HOLE.x, BLACK_HOLE.y, coreR, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawSolarGravityWell(ctx) {
+  const sun = bodies.find((b) => b.id === "sun");
+  if (!sun) return;
+
+  const s = scale();
+  ctx.save();
+  ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY);
+
+  const ringCount = 5;
+  for (let i = 1; i <= ringCount; i++) {
+    const t = i / ringCount;
+    const r = SUN_DESTRUCTION_R + (SUN_GRAVITY_WELL_R - SUN_DESTRUCTION_R) * t * t;
+    ctx.strokeStyle = `rgba(255,210,80,${(0.16 * (1 - t * 0.7)).toFixed(3)})`;
+    ctx.lineWidth = 0.8 / s;
+    ctx.beginPath();
+    ctx.arc(sun.x, sun.y, r, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle = "rgba(255,80,40,0.34)";
+  ctx.lineWidth = 1.4 / s;
+  ctx.beginPath();
+  ctx.arc(sun.x, sun.y, SUN_DESTRUCTION_R, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.restore();
 }
 
 // =============================================================================
@@ -665,96 +1291,230 @@ function drawOrbits(ctx) {
 // =============================================================================
 
 function drawCaptureRings(ctx) {
-  if (orbitState.mode === 'docked') return  // no rings when already docked
-  if (!ship) return
+  if (orbitState.mode === "slingshot") return;
+  if (!ship) return;
 
-  const s           = scale()
-  const ringMult    = settings.settings.orbit.ringRadiusMult
-  const threshold   = settings.settings.orbit.velMatchThreshold
+  const s = scale();
 
-  ctx.save()
-  ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY)
+  ctx.save();
+  ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY);
 
   for (const body of bodies) {
-    if (body.isFixed)       continue
-    if (body.id === 'sun')  continue
-    if (body.id === 'ship') continue
+    if (body.isFixed) continue;
+    if (body.id === "sun") continue;
+    if (body.id === "ship") continue;
 
-    const captureRingR = ringMult
+    const { dist, distancePct, matchPct, captureRingR } =
+      getApproachMatch(body);
+    if (dist > captureRingR * 2.5) continue;
 
-    // Distance from ship
-    const dx      = ship.x - body.x
-    const dy      = ship.y - body.y
-    const dist    = Math.sqrt(dx * dx + dy * dy)
-    const nearby  = dist < captureRingR * 2
+    const [r, g, b] = hexToRgb(body.color);
+    const radius = captureRingR * 0.92;
 
-    // Velocity match percentage (for color)
-    let matchPct = 0
-    if (nearby) {
-      const relVx      = ship.vx - body.vx
-      const relVy      = ship.vy - body.vy
-      const relSpeed   = Math.sqrt(relVx * relVx + relVy * relVy)
-      const planetSpeed = Math.sqrt(body.vx * body.vx + body.vy * body.vy)
-      matchPct = Math.max(0, Math.min(1, 1 - relSpeed / (planetSpeed * threshold)))
-    }
+    ctx.lineCap = "round";
+    ctx.strokeStyle = `rgba(255,255,255,${0.08 + distancePct * 0.24})`;
+    ctx.lineWidth = 3 / s;
+    ctx.beginPath();
+    ctx.arc(
+      body.x,
+      body.y,
+      radius * 1.12,
+      -Math.PI / 2,
+      -Math.PI / 2 + Math.PI * 2 * distancePct,
+    );
+    ctx.stroke();
 
-    const alpha = nearby
-      ? 0.65 + matchPct * 0.35
-      : 0.45
-
-    // Parse color for rgba
-    const [r, g, b] = hexToRgb(body.color)
-
-    ctx.strokeStyle = `rgba(${r},${g},${b},${alpha})`
-    ctx.lineWidth   = (nearby ? 2.0 : 1.5) / s
-    ctx.setLineDash([4 / s, 3 / s])
-    ctx.beginPath()
-    ctx.arc(body.x, body.y, captureRingR, 0, Math.PI * 2)
-    ctx.stroke()
-    ctx.setLineDash([])
-
-    // Docked glow ring
-    if (dist < captureRingR && matchPct > 0) {
-      // Show fill arc for match progress
-      ctx.strokeStyle = `rgba(${r},${g},${b},${0.1 + matchPct * 0.3})`
-      ctx.lineWidth   = 4 / s
-      ctx.beginPath()
-      ctx.arc(body.x, body.y, captureRingR * 0.92, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * matchPct)
-      ctx.stroke()
-    }
+    ctx.strokeStyle = `rgba(${r},${g},${b},${0.12 + matchPct * 0.42})`;
+    ctx.lineWidth = 4 / s;
+    ctx.beginPath();
+    ctx.arc(
+      body.x,
+      body.y,
+      radius,
+      -Math.PI / 2,
+      -Math.PI / 2 + Math.PI * 2 * matchPct,
+    );
+    ctx.stroke();
   }
 
-  ctx.restore()
+  ctx.restore();
 }
 
 // =============================================================================
-// DOCKED GLOW RING
+// CAPTURE TETHER
 // =============================================================================
 
-function drawDockedRing(ctx) {
-  if (orbitState.mode !== 'docked' || !orbitState.planet) return
-  const planet       = orbitState.planet
-  const ringMult     = settings.settings.orbit.ringRadiusMult
-  const captureRingR = ringMult
-  const s            = scale()
-  const [r, g, b]    = hexToRgb(planet.color)
+function getApproachMatch(body) {
+  if (!ship || !body)
+    return { dist: Infinity, distancePct: 0, matchPct: 0, captureRingR: 0 };
 
-  ctx.save()
-  ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY)
+  const captureRingR = settings.settings.orbit.ringRadiusMult;
+  const threshold = settings.settings.orbit.velMatchThreshold;
+  const dx = ship.x - body.x;
+  const dy = ship.y - body.y;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  const relVx = ship.vx - body.vx;
+  const relVy = ship.vy - body.vy;
+  const relSpeed = Math.sqrt(relVx * relVx + relVy * relVy);
+  const planetSpeed = Math.sqrt(body.vx * body.vx + body.vy * body.vy);
+  const denom = Math.max(planetSpeed * threshold, 1e-6);
+  const matchPct = Math.max(
+    0,
+    Math.min(1, 1 - (relSpeed - denom) / (denom * 2)),
+  );
+  const distancePct = Math.max(
+    0,
+    Math.min(1, 1 - (dist - captureRingR) / (captureRingR * 1.5)),
+  );
+
+  return { dist, distancePct, matchPct, captureRingR };
+}
+
+function drawCaptureTether(ctx) {
+  if (!ship) return;
+
+  let planet =
+    orbitState.mode === "slingshot" || orbitState.mode === "capturing"
+      ? orbitState.planet
+      : null;
+  let rangeGlow =
+    orbitState.mode === "slingshot"
+      ? 1
+      : orbitState.mode === "capturing"
+        ? 0.85
+        : 0;
+  let lockGlow = rangeGlow;
+
+  if (!planet) {
+    for (const body of bodies) {
+      if (body.isFixed || body.id === "sun" || body.id === "ship") continue;
+      const { dist, distancePct, matchPct, captureRingR } =
+        getApproachMatch(body);
+      if (dist > captureRingR * 2.5) continue;
+      const readiness =
+        distancePct * 0.75 + Math.min(distancePct, matchPct) * 0.25;
+      if (readiness > rangeGlow) {
+        rangeGlow = distancePct;
+        lockGlow = Math.min(distancePct, matchPct);
+        planet = body;
+      }
+    }
+  }
+
+  if (!planet || rangeGlow <= 0) return;
+
+  const s = scale();
+  const [r, g, b] = hexToRgb(planet.color);
+  const now = Date.now();
+  const pulse =
+    orbitState.mode === "slingshot"
+      ? 0.9 + 0.1 * Math.sin(now / 180)
+      : orbitState.mode === "capturing"
+        ? 0.75 + 0.2 * Math.sin(now / 110)
+        : rangeGlow * (0.82 + 0.18 * Math.sin(now / 150));
+  const alpha = 0.04 + pulse * 0.58 + lockGlow * 0.18;
+
+  ctx.save();
+  ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY);
+  ctx.lineCap = "round";
+
+  const dx = planet.x - ship.x;
+  const dy = planet.y - ship.y;
+  const dist = Math.max(Math.sqrt(dx * dx + dy * dy), 1e-6);
+  const nx = dx / dist;
+  const ny = dy / dist;
+  const px = -ny;
+  const py = nx;
+  const startW = Math.max(2.2 / s, dist * 0.005);
+  const endW = Math.min(dist * (0.04 + rangeGlow * 0.055), 0.075);
+  const scan = Math.sin(now / 360);
+
+  const grad = ctx.createLinearGradient(ship.x, ship.y, planet.x, planet.y);
+  grad.addColorStop(0, `rgba(79,195,247,${alpha * 0.16})`);
+  grad.addColorStop(0.35, `rgba(79,195,247,${alpha * 0.36})`);
+  grad.addColorStop(1, `rgba(${r},${g},${b},${alpha * 0.72})`);
+
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.moveTo(ship.x + px * startW, ship.y + py * startW);
+  ctx.lineTo(planet.x + px * endW, planet.y + py * endW);
+  ctx.lineTo(planet.x - px * endW, planet.y - py * endW);
+  ctx.lineTo(ship.x - px * startW, ship.y - py * startW);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.shadowColor = planet.color;
+  ctx.shadowBlur = (4 + pulse * 18 + lockGlow * 10) / s;
+  ctx.strokeStyle = `rgba(${r},${g},${b},${0.1 + rangeGlow * 0.28 + lockGlow * 0.18})`;
+  ctx.lineWidth = (0.7 + rangeGlow * 1.3 + lockGlow * 0.8) / s;
+  ctx.beginPath();
+  ctx.moveTo(ship.x + px * startW, ship.y + py * startW);
+  ctx.lineTo(planet.x + px * endW, planet.y + py * endW);
+  ctx.moveTo(ship.x - px * startW, ship.y - py * startW);
+  ctx.lineTo(planet.x - px * endW, planet.y - py * endW);
+  ctx.stroke();
+
+  if (orbitState.mode === "free") {
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = `rgba(255,255,255,${0.16 + rangeGlow * 0.32 + lockGlow * 0.2})`;
+    ctx.lineWidth = (0.8 + rangeGlow * 0.9) / s;
+    ctx.beginPath();
+    ctx.moveTo(ship.x, ship.y);
+    ctx.lineTo(planet.x + px * endW * scan, planet.y + py * endW * scan);
+    ctx.stroke();
+  }
+
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = `rgba(255,255,255,${0.08 + pulse * 0.18 + lockGlow * 0.14})`;
+  ctx.lineWidth = 0.7 / s;
+  ctx.beginPath();
+  ctx.moveTo(ship.x, ship.y);
+  ctx.lineTo(planet.x, planet.y);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+// =============================================================================
+// SLINGSHOT ORBIT GLOW RING
+// =============================================================================
+
+function drawSlingshotRing(ctx) {
+  if (orbitState.mode !== "slingshot" || !orbitState.planet) return;
+  const planet = orbitState.planet;
+  const ringMult = settings.settings.orbit.ringRadiusMult;
+  const captureRingR = ringMult;
+  const s = scale();
+  const [r, g, b] = hexToRgb(planet.color);
+
+  ctx.save();
+  ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY);
 
   // Pulsing glow ring — use sin of a timer
-  const pulse = 0.4 + 0.25 * Math.sin(Date.now() / 400)
+  const pulse = 0.4 + 0.25 * Math.sin(Date.now() / 400);
 
-  ctx.strokeStyle = `rgba(${r},${g},${b},${pulse})`
-  ctx.lineWidth   = 2 / s
-  ctx.shadowBlur  = 8 / s
-  ctx.shadowColor = planet.color
-  ctx.beginPath()
-  ctx.arc(planet.x, planet.y, captureRingR, 0, Math.PI * 2)
-  ctx.stroke()
-  ctx.shadowBlur = 0
+  ctx.strokeStyle = `rgba(${r},${g},${b},${pulse})`;
+  ctx.lineWidth = 2 / s;
+  ctx.shadowBlur = 8 / s;
+  ctx.shadowColor = planet.color;
+  ctx.beginPath();
+  ctx.arc(planet.x, planet.y, captureRingR, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.shadowBlur = 0;
 
-  ctx.restore()
+  ctx.strokeStyle = `rgba(${r},${g},${b},${0.4 + pulse * 0.4})`;
+  ctx.lineWidth = 1.5 / s;
+  ctx.beginPath();
+  ctx.arc(
+    planet.x,
+    planet.y,
+    orbitState.orbitR || getSlingshotOrbitRadius(planet),
+    0,
+    Math.PI * 2,
+  );
+  ctx.stroke();
+
+  ctx.restore();
 }
 
 // =============================================================================
@@ -762,112 +1522,124 @@ function drawDockedRing(ctx) {
 // =============================================================================
 
 function drawOrbitCue(ctx) {
-  if (orbitState.mode !== 'docked' || !orbitDrag) return
-  const planet = orbitState.planet
-  if (!planet) return
+  if (orbitState.mode !== "slingshot" || !orbitDrag) return;
+  const planet = orbitState.planet;
+  if (!planet) return;
 
-  const { startX, startY, curX, curY } = orbitDrag
-  const ddx  = curX - startX
-  const ddy  = curY - startY
-  const dist = Math.sqrt(ddx * ddx + ddy * ddy)
-  if (dist < 2) return
+  const { startX, startY, curX, curY } = orbitDrag;
+  const ddx = curX - startX;
+  const ddy = curY - startY;
+  const dist = Math.sqrt(ddx * ddx + ddy * ddy);
+  if (dist < 2) return;
 
-  const maxDrag = settings.settings.orbit.maxDrag
-  const clamped = Math.min(dist, maxDrag)
-  const nx      = ddx / dist
-  const ny      = ddy / dist
-  const power   = clamped / maxDrag  // 0..1
+  const maxDrag = settings.settings.orbit.maxDrag;
+  const clamped = Math.min(dist, maxDrag);
+  const nx = ddx / dist;
+  const ny = ddy / dist;
+  const power = clamped / maxDrag; // 0..1
 
-  const sp = worldToScreen(planet.x, planet.y)
-  const s  = scale()
-  const pxR = planet.drawR * s  // planet radius in pixels
+  const sp = worldToScreen(planet.x, planet.y);
+  const s = scale();
+  const pxR = planet.drawR * s; // planet radius in pixels
 
-  ctx.save()
-  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
 
   // Cue stick: extends from planet in drag direction (away from shot)
   const cueStart = {
     x: sp.x + nx * (pxR + 4),
     y: sp.y + ny * (pxR + 4),
-  }
+  };
   const cueEnd = {
     x: sp.x + nx * (clamped + pxR + 30),
     y: sp.y + ny * (clamped + pxR + 30),
-  }
+  };
 
-  ctx.setLineDash([6, 4])
-  ctx.strokeStyle = 'rgba(255,255,255,0.35)'
-  ctx.lineWidth   = 1.5
-  ctx.beginPath()
-  ctx.moveTo(cueStart.x, cueStart.y)
-  ctx.lineTo(cueEnd.x, cueEnd.y)
-  ctx.stroke()
-  ctx.setLineDash([])
+  ctx.setLineDash([6, 4]);
+  ctx.strokeStyle = "rgba(255,255,255,0.35)";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(cueStart.x, cueStart.y);
+  ctx.lineTo(cueEnd.x, cueEnd.y);
+  ctx.stroke();
+  ctx.setLineDash([]);
 
   // Shot direction arrow (opposite to drag)
-  const shotLen = clamped * 0.8
+  const shotLen = clamped * 0.8;
   const arrowTip = {
     x: sp.x - nx * (shotLen + pxR),
     y: sp.y - ny * (shotLen + pxR),
-  }
+  };
   const arrowBase = {
     x: sp.x - nx * pxR,
     y: sp.y - ny * pxR,
-  }
-  const perp = { x: -ny, y: nx }
+  };
+  const perp = { x: -ny, y: nx };
 
-  ctx.strokeStyle = 'rgba(79,195,247,0.75)'
-  ctx.fillStyle   = 'rgba(79,195,247,0.75)'
-  ctx.lineWidth   = 2
+  ctx.strokeStyle = "rgba(79,195,247,0.75)";
+  ctx.fillStyle = "rgba(79,195,247,0.75)";
+  ctx.lineWidth = 2;
 
   // Arrow shaft
-  ctx.beginPath()
-  ctx.moveTo(arrowBase.x, arrowBase.y)
-  ctx.lineTo(arrowTip.x, arrowTip.y)
-  ctx.stroke()
+  ctx.beginPath();
+  ctx.moveTo(arrowBase.x, arrowBase.y);
+  ctx.lineTo(arrowTip.x, arrowTip.y);
+  ctx.stroke();
 
   // Arrow head
-  const hw = 6
-  ctx.beginPath()
-  ctx.moveTo(arrowTip.x, arrowTip.y)
-  ctx.lineTo(arrowTip.x + nx * hw * 2 + perp.x * hw, arrowTip.y + ny * hw * 2 + perp.y * hw)
-  ctx.lineTo(arrowTip.x + nx * hw * 2 - perp.x * hw, arrowTip.y + ny * hw * 2 - perp.y * hw)
-  ctx.closePath()
-  ctx.fill()
+  const hw = 6;
+  ctx.beginPath();
+  ctx.moveTo(arrowTip.x, arrowTip.y);
+  ctx.lineTo(
+    arrowTip.x + nx * hw * 2 + perp.x * hw,
+    arrowTip.y + ny * hw * 2 + perp.y * hw,
+  );
+  ctx.lineTo(
+    arrowTip.x + nx * hw * 2 - perp.x * hw,
+    arrowTip.y + ny * hw * 2 - perp.y * hw,
+  );
+  ctx.closePath();
+  ctx.fill();
 
   // Power ring around planet
-  ctx.strokeStyle = `rgba(79,195,247,${0.3 + power * 0.5})`
-  ctx.lineWidth   = 3
-  ctx.beginPath()
-  ctx.arc(sp.x, sp.y, pxR + 6, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * power)
-  ctx.stroke()
+  ctx.strokeStyle = `rgba(79,195,247,${0.3 + power * 0.5})`;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(
+    sp.x,
+    sp.y,
+    pxR + 6,
+    -Math.PI / 2,
+    -Math.PI / 2 + Math.PI * 2 * power,
+  );
+  ctx.stroke();
 
   // Power percentage label
-  ctx.font      = '12px monospace'
-  ctx.fillStyle = 'rgba(79,195,247,0.9)'
-  ctx.textAlign = 'center'
-  ctx.fillText(`${Math.round(power * 100)}%`, sp.x, sp.y + pxR + 22)
+  ctx.font = "12px monospace";
+  ctx.fillStyle = "rgba(79,195,247,0.9)";
+  ctx.textAlign = "center";
+  ctx.fillText(`${Math.round(power * 100)}%`, sp.x, sp.y + pxR + 22);
 
-  ctx.restore()
+  ctx.restore();
 
   // Planet post-shot prediction path
-  const dv       = (clamped / maxDrag) * settings.settings.orbit.shotPower * 0.01
-  const predPath = computeShotPrediction(planet, nx, ny, dv)
+  const dv = (clamped / maxDrag) * settings.settings.orbit.shotPower * 0.01;
+  const predPath = computeShotPrediction(planet, nx, ny, dv);
   if (predPath.length >= 2) {
-    const [r, g, b] = hexToRgb(planet.color)
-    ctx.save()
-    ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY)
-    ctx.strokeStyle = `rgba(${r},${g},${b},0.4)`
-    ctx.lineWidth   = 1.5 / s
-    ctx.setLineDash([3 / s, 5 / s])
-    ctx.beginPath()
-    ctx.moveTo(predPath[0].x, predPath[0].y)
+    const [r, g, b] = hexToRgb(planet.color);
+    ctx.save();
+    ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY);
+    ctx.strokeStyle = `rgba(${r},${g},${b},0.4)`;
+    ctx.lineWidth = 1.5 / s;
+    ctx.setLineDash([3 / s, 5 / s]);
+    ctx.beginPath();
+    ctx.moveTo(predPath[0].x, predPath[0].y);
     for (let i = 1; i < predPath.length; i++) {
-      ctx.lineTo(predPath[i].x, predPath[i].y)
+      ctx.lineTo(predPath[i].x, predPath[i].y);
     }
-    ctx.stroke()
-    ctx.setLineDash([])
-    ctx.restore()
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
   }
 }
 
@@ -876,22 +1648,22 @@ function drawOrbitCue(ctx) {
 // =============================================================================
 
 function drawPredictionPath(ctx) {
-  if (shipPredPath.length < 2) return
-  const s = scale()
-  ctx.save()
-  ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY)
-  ctx.strokeStyle = 'rgba(79,195,247,0.4)'
-  ctx.lineWidth   = 1.5 / s
-  ctx.setLineDash([3 / s, 5 / s])
+  if (shipPredPath.length < 2) return;
+  const s = scale();
+  ctx.save();
+  ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY);
+  ctx.strokeStyle = "rgba(79,195,247,0.4)";
+  ctx.lineWidth = 1.5 / s;
+  ctx.setLineDash([3 / s, 5 / s]);
 
-  ctx.beginPath()
-  ctx.moveTo(shipPredPath[0].x, shipPredPath[0].y)
+  ctx.beginPath();
+  ctx.moveTo(shipPredPath[0].x, shipPredPath[0].y);
   for (let i = 1; i < shipPredPath.length; i++) {
-    ctx.lineTo(shipPredPath[i].x, shipPredPath[i].y)
+    ctx.lineTo(shipPredPath[i].x, shipPredPath[i].y);
   }
-  ctx.stroke()
-  ctx.setLineDash([])
-  ctx.restore()
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
 }
 
 // =============================================================================
@@ -899,16 +1671,16 @@ function drawPredictionPath(ctx) {
 // =============================================================================
 
 function hexToRgb(hex) {
-  const n = parseInt(hex.replace('#', ''), 16)
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+  const n = parseInt(hex.replace("#", ""), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 function lighten(hex, t) {
-  const [r, g, b] = hexToRgb(hex)
-  return `rgb(${Math.round(r + (255-r)*t)},${Math.round(g + (255-g)*t)},${Math.round(b + (255-b)*t)})`
+  const [r, g, b] = hexToRgb(hex);
+  return `rgb(${Math.round(r + (255 - r) * t)},${Math.round(g + (255 - g) * t)},${Math.round(b + (255 - b) * t)})`;
 }
 function darken(hex, t) {
-  const [r, g, b] = hexToRgb(hex)
-  return `rgb(${Math.round(r*(1-t))},${Math.round(g*(1-t))},${Math.round(b*(1-t))})`
+  const [r, g, b] = hexToRgb(hex);
+  return `rgb(${Math.round(r * (1 - t))},${Math.round(g * (1 - t))},${Math.round(b * (1 - t))})`;
 }
 
 // =============================================================================
@@ -916,441 +1688,548 @@ function darken(hex, t) {
 // =============================================================================
 
 function drawBody(ctx, body, w, h) {
-  const s       = scale()
-  const screenR = body.drawR * s
+  const s = scale();
+  const screenR = body.drawR * s;
 
   // Trail
-  const pts = body.trail?.points?.() || []
+  const pts = body.trail?.points?.() || [];
   if (pts.length >= 2) {
-    ctx.save()
-    ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY)
-    ctx.strokeStyle = body.id === 'ship'
-      ? 'rgba(79,195,247,0.35)'
-      : body.color + '55'
-    ctx.lineWidth = Math.max(0.8 / s, 0.00001)
-    ctx.beginPath()
-    ctx.moveTo(pts[0].x, pts[0].y)
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y)
-    ctx.stroke()
-    ctx.restore()
+    ctx.save();
+    ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY);
+    ctx.strokeStyle =
+      body.id === "ship" ? "rgba(79,195,247,0.35)" : body.color + "55";
+    ctx.lineWidth = Math.max(0.8 / s, 0.00001);
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.stroke();
+    ctx.restore();
   }
 
-  if (body.id === 'ship') {
-    drawShip(ctx, body, screenR, w, h)
-    return
+  if (body.id === "ship") {
+    drawShip(ctx, body, screenR, w, h);
+    return;
   }
 
-  const sp = worldToScreen(body.x, body.y)
-  if (sp.x < -60 || sp.x > w + 60 || sp.y < -60 || sp.y > h + 60) return
+  const sp = worldToScreen(body.x, body.y);
+  if (sp.x < -60 || sp.x > w + 60 || sp.y < -60 || sp.y > h + 60) return;
 
   if (screenR >= MIN_PLANET_PX) {
-    ctx.save()
-    ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY)
+    ctx.save();
+    ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY);
 
-    if (body.id === 'sun') {
-      const g = ctx.createRadialGradient(body.x, body.y, body.drawR * 0.8, body.x, body.y, body.drawR * 5)
-      g.addColorStop(0,   'rgba(255,220,80,0.5)')
-      g.addColorStop(0.4, 'rgba(255,140,0,0.15)')
-      g.addColorStop(1,   'rgba(255,80,0,0)')
-      ctx.fillStyle = g
-      ctx.beginPath()
-      ctx.arc(body.x, body.y, body.drawR * 5, 0, Math.PI * 2)
-      ctx.fill()
+    if (body.id === "sun") {
+      const g = ctx.createRadialGradient(
+        body.x,
+        body.y,
+        body.drawR * 0.8,
+        body.x,
+        body.y,
+        body.drawR * 5,
+      );
+      g.addColorStop(0, "rgba(255,220,80,0.5)");
+      g.addColorStop(0.4, "rgba(255,140,0,0.15)");
+      g.addColorStop(1, "rgba(255,80,0,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(body.x, body.y, body.drawR * 5, 0, Math.PI * 2);
+      ctx.fill();
     }
 
     // Sphere shading
-    const ox = body.x - body.drawR * 0.3
-    const oy = body.y - body.drawR * 0.3
-    const sg = ctx.createRadialGradient(ox, oy, 0, body.x, body.y, body.drawR)
-    sg.addColorStop(0,   lighten(body.color, 0.5))
-    sg.addColorStop(0.5, body.color)
-    sg.addColorStop(1,   darken(body.color, 0.55))
-    ctx.beginPath()
-    ctx.arc(body.x, body.y, body.drawR, 0, Math.PI * 2)
-    ctx.fillStyle = sg
-    ctx.fill()
+    const ox = body.x - body.drawR * 0.3;
+    const oy = body.y - body.drawR * 0.3;
+    const sg = ctx.createRadialGradient(ox, oy, 0, body.x, body.y, body.drawR);
+    sg.addColorStop(0, lighten(body.color, 0.5));
+    sg.addColorStop(0.5, body.color);
+    sg.addColorStop(1, darken(body.color, 0.55));
+    ctx.beginPath();
+    ctx.arc(body.x, body.y, body.drawR, 0, Math.PI * 2);
+    ctx.fillStyle = sg;
+    ctx.fill();
 
     // Saturn rings
-    if (body.id === 'saturn') {
-      ctx.save()
-      ctx.translate(body.x, body.y)
-      ctx.scale(1, 0.28)
-      ctx.strokeStyle = 'rgba(232,213,160,0.5)'
-      ctx.lineWidth   = body.drawR * 0.55 / 0.28
-      ctx.beginPath()
-      ctx.arc(0, 0, body.drawR * 2.3, 0, Math.PI * 2)
-      ctx.stroke()
-      ctx.restore()
+    if (body.id === "saturn") {
+      ctx.save();
+      ctx.translate(body.x, body.y);
+      ctx.scale(1, 0.28);
+      ctx.strokeStyle = "rgba(232,213,160,0.5)";
+      ctx.lineWidth = (body.drawR * 0.55) / 0.28;
+      ctx.beginPath();
+      ctx.arc(0, 0, body.drawR * 2.3, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
     }
 
-    ctx.restore()
+    ctx.restore();
   } else {
     // Icon mode
-    ctx.save()
-    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
 
-    if (body.id === 'sun') {
-      const g = ctx.createRadialGradient(sp.x, sp.y, 2, sp.x, sp.y, 22)
-      g.addColorStop(0,   'rgba(255,240,100,1)')
-      g.addColorStop(0.3, 'rgba(255,180,0,0.5)')
-      g.addColorStop(1,   'rgba(255,80,0,0)')
-      ctx.fillStyle = g
-      ctx.beginPath()
-      ctx.arc(sp.x, sp.y, 22, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.beginPath()
-      ctx.arc(sp.x, sp.y, 5, 0, Math.PI * 2)
-      ctx.fillStyle = '#FFE566'
-      ctx.fill()
+    if (body.id === "sun") {
+      const g = ctx.createRadialGradient(sp.x, sp.y, 2, sp.x, sp.y, 22);
+      g.addColorStop(0, "rgba(255,240,100,1)");
+      g.addColorStop(0.3, "rgba(255,180,0,0.5)");
+      g.addColorStop(1, "rgba(255,80,0,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(sp.x, sp.y, 22, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(sp.x, sp.y, 5, 0, Math.PI * 2);
+      ctx.fillStyle = "#FFE566";
+      ctx.fill();
     } else {
-      ctx.beginPath()
-      ctx.arc(sp.x, sp.y, 3, 0, Math.PI * 2)
-      ctx.fillStyle = body.color
-      ctx.fill()
-      ctx.beginPath()
-      ctx.arc(sp.x, sp.y, 7, 0, Math.PI * 2)
-      ctx.strokeStyle = body.color + '66'
-      ctx.lineWidth   = 1
-      ctx.stroke()
+      ctx.beginPath();
+      ctx.arc(sp.x, sp.y, 3, 0, Math.PI * 2);
+      ctx.fillStyle = body.color;
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(sp.x, sp.y, 7, 0, Math.PI * 2);
+      ctx.strokeStyle = body.color + "66";
+      ctx.lineWidth = 1;
+      ctx.stroke();
     }
 
-    ctx.font      = '10px monospace'
-    ctx.fillStyle = body.color + 'aa'
-    ctx.textAlign = 'center'
-    ctx.fillText(body.name, sp.x, sp.y + 18)
+    ctx.font = "10px monospace";
+    ctx.fillStyle = body.color + "aa";
+    ctx.textAlign = "center";
+    ctx.fillText(body.name, sp.x, sp.y + 18);
 
-    ctx.restore()
+    ctx.restore();
   }
 }
 
 function drawShip(ctx, body, screenLen, w, h) {
-  const s  = scale()
-  const sp = worldToScreen(body.x, body.y)
+  const s = scale();
+  const sp = worldToScreen(body.x, body.y);
 
-  if (sp.x < -60 || sp.x > w + 60 || sp.y < -60 || sp.y > h + 60) return
+  if (sp.x < -60 || sp.x > w + 60 || sp.y < -60 || sp.y > h + 60) return;
 
   if (screenLen >= MIN_SHIP_PX) {
-    ctx.save()
-    ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY)
-    ctx.translate(body.x, body.y)
-    ctx.rotate(shipAngle)
+    ctx.save();
+    ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY);
+    ctx.translate(body.x, body.y);
+    ctx.rotate(shipAngle);
 
-    const L  = SHIP_LENGTH_AU
-    const W  = SHIP_WIDTH_AU
-    const hw = W / 2
+    const L = SHIP_LENGTH_AU;
+    const W = SHIP_WIDTH_AU;
+    const hw = W / 2;
 
     // Hull
-    ctx.fillStyle   = '#2a3f5f'
-    ctx.strokeStyle = '#4fc3f7'
-    ctx.lineWidth   = W * 0.3
-    ctx.beginPath()
-    ctx.rect(-L * 0.6, -hw, L * 0.8, W)
-    ctx.fill()
-    ctx.stroke()
+    ctx.fillStyle = "#2a3f5f";
+    ctx.strokeStyle = "#4fc3f7";
+    ctx.lineWidth = W * 0.3;
+    ctx.beginPath();
+    ctx.rect(-L * 0.6, -hw, L * 0.8, W);
+    ctx.fill();
+    ctx.stroke();
 
     // Nose cone
-    ctx.fillStyle = '#4fc3f7'
-    ctx.beginPath()
-    ctx.moveTo(L * 0.2, 0)
-    ctx.lineTo(-L * 0.1, -hw * 1.2)
-    ctx.lineTo(-L * 0.1,  hw * 1.2)
-    ctx.closePath()
-    ctx.fill()
+    ctx.fillStyle = "#4fc3f7";
+    ctx.beginPath();
+    ctx.moveTo(L * 0.2, 0);
+    ctx.lineTo(-L * 0.1, -hw * 1.2);
+    ctx.lineTo(-L * 0.1, hw * 1.2);
+    ctx.closePath();
+    ctx.fill();
 
     // Engine glow (thrust)
-    if (keys['ArrowUp'] && orbitState.mode === 'free') {
-      const eg = ctx.createRadialGradient(-L * 0.6, 0, 0, -L * 0.6, 0, W * 3)
-      eg.addColorStop(0,   'rgba(255,140,0,0.9)')
-      eg.addColorStop(0.5, 'rgba(255,60,0,0.4)')
-      eg.addColorStop(1,   'rgba(255,0,0,0)')
-      ctx.fillStyle = eg
-      ctx.beginPath()
-      ctx.arc(-L * 0.6, 0, W * 3, 0, Math.PI * 2)
-      ctx.fill()
+    if (keys["ArrowUp"] && orbitState.mode === "free") {
+      const eg = ctx.createRadialGradient(-L * 0.6, 0, 0, -L * 0.6, 0, W * 3);
+      eg.addColorStop(0, "rgba(255,140,0,0.9)");
+      eg.addColorStop(0.5, "rgba(255,60,0,0.4)");
+      eg.addColorStop(1, "rgba(255,0,0,0)");
+      ctx.fillStyle = eg;
+      ctx.beginPath();
+      ctx.arc(-L * 0.6, 0, W * 3, 0, Math.PI * 2);
+      ctx.fill();
     }
-    if (keys['ArrowDown'] && orbitState.mode === 'free') {
-      const rg = ctx.createRadialGradient(L * 0.2, 0, 0, L * 0.2, 0, W * 2)
-      rg.addColorStop(0, 'rgba(0,150,255,0.7)')
-      rg.addColorStop(1, 'rgba(0,100,255,0)')
-      ctx.fillStyle = rg
-      ctx.beginPath()
-      ctx.arc(L * 0.2, 0, W * 2, 0, Math.PI * 2)
-      ctx.fill()
+    if (keys["ArrowDown"] && orbitState.mode === "free") {
+      const rg = ctx.createRadialGradient(L * 0.2, 0, 0, L * 0.2, 0, W * 2);
+      rg.addColorStop(0, "rgba(0,150,255,0.7)");
+      rg.addColorStop(1, "rgba(0,100,255,0)");
+      ctx.fillStyle = rg;
+      ctx.beginPath();
+      ctx.arc(L * 0.2, 0, W * 2, 0, Math.PI * 2);
+      ctx.fill();
     }
 
-    ctx.restore()
+    ctx.restore();
   } else {
     // Icon in screen space
-    ctx.save()
-    ctx.setTransform(1, 0, 0, 1, 0, 0)
-    ctx.translate(sp.x, sp.y)
-    ctx.rotate(shipAngle)
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.translate(sp.x, sp.y);
+    ctx.rotate(shipAngle);
 
-    const sz = 12
-    const now = Date.now()
+    const sz = 12;
+    const now = Date.now();
 
     // --- Forward main engine plume ---
-    if ((keys['ArrowUp'] || keys['w'] || keys['W']) && orbitState.mode === 'free') {
+    if (
+      (keys["ArrowUp"] || keys["w"] || keys["W"]) &&
+      orbitState.mode === "free"
+    ) {
       // Animated flicker: vary length with noise
-      const flicker = 0.7 + 0.3 * Math.sin(now / 40) + 0.15 * Math.sin(now / 17)
-      const plumeLen = sz * 2.2 * flicker
-      const grad = ctx.createLinearGradient(-sz, 0, -sz - plumeLen, 0)
-      grad.addColorStop(0,   'rgba(255,200,80,0.95)')
-      grad.addColorStop(0.3, 'rgba(255,100,20,0.7)')
-      grad.addColorStop(1,   'rgba(255,40,0,0)')
-      ctx.fillStyle = grad
-      ctx.beginPath()
-      ctx.moveTo(-sz, -sz * 0.35)
-      ctx.lineTo(-sz - plumeLen, 0)
-      ctx.lineTo(-sz,  sz * 0.35)
-      ctx.closePath()
-      ctx.fill()
+      const flicker =
+        0.7 + 0.3 * Math.sin(now / 40) + 0.15 * Math.sin(now / 17);
+      const plumeLen = sz * 2.2 * flicker;
+      const grad = ctx.createLinearGradient(-sz, 0, -sz - plumeLen, 0);
+      grad.addColorStop(0, "rgba(255,200,80,0.95)");
+      grad.addColorStop(0.3, "rgba(255,100,20,0.7)");
+      grad.addColorStop(1, "rgba(255,40,0,0)");
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.moveTo(-sz, -sz * 0.35);
+      ctx.lineTo(-sz - plumeLen, 0);
+      ctx.lineTo(-sz, sz * 0.35);
+      ctx.closePath();
+      ctx.fill();
     }
 
     // --- Retro brake plume (nose) ---
-    if ((keys['ArrowDown'] || keys['s'] || keys['S']) && orbitState.mode === 'free') {
-      const flicker = 0.7 + 0.3 * Math.sin(now / 35)
-      const plumeLen = sz * 1.4 * flicker
-      const grad = ctx.createLinearGradient(sz, 0, sz + plumeLen, 0)
-      grad.addColorStop(0,   'rgba(80,160,255,0.9)')
-      grad.addColorStop(1,   'rgba(0,80,255,0)')
-      ctx.fillStyle = grad
-      ctx.beginPath()
-      ctx.moveTo(sz, -sz * 0.25)
-      ctx.lineTo(sz + plumeLen, 0)
-      ctx.lineTo(sz,  sz * 0.25)
-      ctx.closePath()
-      ctx.fill()
+    if (
+      (keys["ArrowDown"] || keys["s"] || keys["S"]) &&
+      orbitState.mode === "free"
+    ) {
+      const flicker = 0.7 + 0.3 * Math.sin(now / 35);
+      const plumeLen = sz * 1.4 * flicker;
+      const grad = ctx.createLinearGradient(sz, 0, sz + plumeLen, 0);
+      grad.addColorStop(0, "rgba(80,160,255,0.9)");
+      grad.addColorStop(1, "rgba(0,80,255,0)");
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.moveTo(sz, -sz * 0.25);
+      ctx.lineTo(sz + plumeLen, 0);
+      ctx.lineTo(sz, sz * 0.25);
+      ctx.closePath();
+      ctx.fill();
     }
 
     // --- RCS rotation thrusters ---
-    const rotL = keys['ArrowLeft']  || keys['a'] || keys['A']
-    const rotR = keys['ArrowRight'] || keys['d'] || keys['D']
-    if ((rotL || rotR) && orbitState.mode === 'free') {
-      const flicker = 0.65 + 0.35 * Math.sin(now / 25)
-      const rcsLen  = sz * 1.1 * flicker
+    const rotL = keys["ArrowLeft"] || keys["a"] || keys["A"];
+    const rotR = keys["ArrowRight"] || keys["d"] || keys["D"];
+    if ((rotL || rotR) && orbitState.mode === "free") {
+      const flicker = 0.65 + 0.35 * Math.sin(now / 25);
+      const rcsLen = sz * 1.1 * flicker;
       // RCS fires on both ends perpendicular to ship axis, opposite sides
       // Turning left (CCW): nose fires right (+y), tail fires left (-y)
       // Turning right (CW): nose fires left (-y), tail fires right (+y)
-      const noseSign = rotL ?  1 : -1
-      const tailSign = rotL ? -1 :  1
-      ctx.fillStyle = 'rgba(120,200,255,0.75)'
+      const noseSign = rotL ? 1 : -1;
+      const tailSign = rotL ? -1 : 1;
+      ctx.fillStyle = "rgba(120,200,255,0.75)";
 
       // Nose RCS (fires sideways from front)
-      ctx.beginPath()
-      ctx.moveTo(sz * 0.5, 0)
-      ctx.lineTo(sz * 0.5 + rcsLen * 0.3, noseSign * rcsLen)
-      ctx.lineTo(sz * 0.1, noseSign * rcsLen * 0.3)
-      ctx.closePath()
-      ctx.fill()
+      ctx.beginPath();
+      ctx.moveTo(sz * 0.5, 0);
+      ctx.lineTo(sz * 0.5 + rcsLen * 0.3, noseSign * rcsLen);
+      ctx.lineTo(sz * 0.1, noseSign * rcsLen * 0.3);
+      ctx.closePath();
+      ctx.fill();
 
       // Tail RCS (fires opposite side from rear)
-      ctx.beginPath()
-      ctx.moveTo(-sz * 0.7, 0)
-      ctx.lineTo(-sz * 0.7 - rcsLen * 0.2, tailSign * rcsLen)
-      ctx.lineTo(-sz * 0.4, tailSign * rcsLen * 0.3)
-      ctx.closePath()
-      ctx.fill()
+      ctx.beginPath();
+      ctx.moveTo(-sz * 0.7, 0);
+      ctx.lineTo(-sz * 0.7 - rcsLen * 0.2, tailSign * rcsLen);
+      ctx.lineTo(-sz * 0.4, tailSign * rcsLen * 0.3);
+      ctx.closePath();
+      ctx.fill();
     }
 
     // Ship body
-    ctx.fillStyle   = '#4fc3f7'
-    ctx.strokeStyle = 'rgba(79,195,247,0.5)'
-    ctx.lineWidth   = 1
-    ctx.beginPath()
-    ctx.moveTo(sz,   0)
-    ctx.lineTo(-sz,  sz * 0.5)
-    ctx.lineTo(-sz * 0.6, 0)
-    ctx.lineTo(-sz, -sz * 0.5)
-    ctx.closePath()
-    ctx.fill()
-    ctx.stroke()
+    ctx.fillStyle = "#4fc3f7";
+    ctx.strokeStyle = "rgba(79,195,247,0.5)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(sz, 0);
+    ctx.lineTo(-sz, sz * 0.5);
+    ctx.lineTo(-sz * 0.6, 0);
+    ctx.lineTo(-sz, -sz * 0.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
 
-    ctx.restore()
+    ctx.restore();
 
-    ctx.save()
-    ctx.setTransform(1, 0, 0, 1, 0, 0)
-    ctx.font      = '10px monospace'
-    ctx.fillStyle = 'rgba(79,195,247,0.6)'
-    ctx.textAlign = 'center'
-    ctx.fillText('Ship', sp.x, sp.y + 20)
-    ctx.restore()
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.font = "10px monospace";
+    ctx.fillStyle = "rgba(79,195,247,0.6)";
+    ctx.textAlign = "center";
+    ctx.fillText("Ship", sp.x, sp.y + 20);
+    ctx.restore();
   }
 }
 
 // =============================================================================
-// VELOCITY MATCH INDICATOR (bottom-center HUD element while inside a ring)
+// APPROACH INDICATORS (bottom-center HUD while near a planet)
 // =============================================================================
 
 function drawVelocityMatchHUD(ctx, w, h) {
-  if (orbitState.mode !== 'free' || !ship) return
+  if (!ship) return;
+  if (orbitState.mode === "slingshot") return;
 
-  const ringMult  = settings.settings.orbit.ringRadiusMult
-  const threshold = settings.settings.orbit.velMatchThreshold
+  let bestPlanet = orbitState.mode === "capturing" ? orbitState.planet : null;
+  let best = bestPlanet
+    ? { distancePct: 1, matchPct: 1, dist: 0, captureRingR: 1 }
+    : null;
+  let bestScore = bestPlanet ? 2 : -1;
 
-  // Find nearest planet inside its ring
-  let bestPlanet = null, bestPct = -1
-
-  for (const body of bodies) {
-    if (body.isFixed || body.id === 'sun' || body.id === 'ship') continue
-
-    const captureRingR = ringMult
-    const dx   = ship.x - body.x
-    const dy   = ship.y - body.y
-    const dist = Math.sqrt(dx * dx + dy * dy)
-
-    if (dist > captureRingR) continue
-
-    const relVx       = ship.vx - body.vx
-    const relVy       = ship.vy - body.vy
-    const relSpeed    = Math.sqrt(relVx * relVx + relVy * relVy)
-    const planetSpeed = Math.sqrt(body.vx * body.vx + body.vy * body.vy)
-    const pct         = Math.max(0, Math.min(1, 1 - relSpeed / (planetSpeed * threshold)))
-
-    if (pct > bestPct) { bestPct = pct; bestPlanet = body }
-  }
-
-  if (!bestPlanet) {
-    // Show approach hint for nearby rings (within 2x ring radius)
+  if (orbitState.mode === "free") {
     for (const body of bodies) {
-      if (body.isFixed || body.id === 'sun' || body.id === 'ship') continue
-      const captureRingR = ringMult
-      const dx   = ship.x - body.x
-      const dy   = ship.y - body.y
-      const dist = Math.sqrt(dx * dx + dy * dy)
-      if (dist < captureRingR * 2) {
-        ctx.save()
-        ctx.setTransform(1, 0, 0, 1, 0, 0)
-        ctx.font      = '12px monospace'
-        ctx.fillStyle = 'rgba(255,255,255,0.35)'
-        ctx.textAlign = 'center'
-        ctx.fillText('MATCH VELOCITY TO DOCK', w / 2, h - 30)
-        ctx.restore()
-        return
+      if (body.isFixed || body.id === "sun" || body.id === "ship") continue;
+
+      const info = getApproachMatch(body);
+      if (info.dist > info.captureRingR * 2.5) continue;
+
+      const score = info.distancePct + info.matchPct;
+      if (score > bestScore) {
+        bestScore = score;
+        bestPlanet = body;
+        best = info;
       }
     }
-    return
   }
 
-  const pct    = Math.round(bestPct * 100)
-  const locked = pct >= 99
+  if (!bestPlanet || !best) return;
 
-  ctx.save()
-  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
 
-  const label = locked
-    ? `LOCKED — ${bestPlanet.name}`
-    : `MATCHING VELOCITY: ${pct}%`
+  const capturePct =
+    orbitState.mode === "capturing" && orbitState.capture
+      ? Math.min(1, orbitState.capture.age / orbitState.capture.duration)
+      : Math.min(best.distancePct, best.matchPct);
+  const title =
+    orbitState.mode === "capturing"
+      ? `CAPTURE PULL — ${bestPlanet.name.toUpperCase()}`
+      : `APPROACH — ${bestPlanet.name.toUpperCase()}`;
 
-  // Color: red → yellow → green
-  const r = Math.round(255 * (1 - bestPct))
-  const g = Math.round(220 * bestPct)
-  const color = `rgba(${r},${g},80,0.9)`
+  const panelW = 260;
+  const panelH = 58;
+  const panelX = w / 2 - panelW / 2;
+  const panelY = h - 78;
 
-  ctx.font      = 'bold 13px monospace'
-  ctx.fillStyle = color
-  ctx.textAlign = 'center'
-  ctx.fillText(label, w / 2, h - 30)
+  ctx.fillStyle = "rgba(0,0,0,0.48)";
+  ctx.strokeStyle = `rgba(79,195,247,${0.18 + capturePct * 0.45})`;
+  ctx.lineWidth = 1;
+  roundRect(ctx, panelX, panelY, panelW, panelH, 5);
+  ctx.fill();
+  ctx.stroke();
 
-  // Bar below text
-  const barW  = 200
-  const barH  = 4
-  const barX  = w / 2 - barW / 2
-  const barY  = h - 22
+  ctx.font = "bold 11px monospace";
+  ctx.fillStyle =
+    orbitState.mode === "capturing"
+      ? "rgba(127,232,232,0.95)"
+      : "rgba(255,255,255,0.62)";
+  ctx.textAlign = "center";
+  ctx.fillText(title, w / 2, panelY + 15);
 
-  ctx.fillStyle = 'rgba(255,255,255,0.1)'
-  ctx.fillRect(barX, barY, barW, barH)
-  ctx.fillStyle = color
-  ctx.fillRect(barX, barY, barW * bestPct, barH)
+  function drawMeter(label, value, y, color) {
+    const barX = panelX + 98;
+    const barW = 132;
+    const barH = 5;
+    ctx.font = "10px monospace";
+    ctx.fillStyle = "rgba(255,255,255,0.42)";
+    ctx.textAlign = "right";
+    ctx.fillText(label, barX - 8, y + 5);
 
-  ctx.restore()
+    ctx.fillStyle = "rgba(255,255,255,0.1)";
+    ctx.fillRect(barX, y, barW, barH);
+    ctx.fillStyle = color;
+    ctx.fillRect(barX, y, barW * value, barH);
+
+    ctx.fillStyle = "rgba(255,255,255,0.5)";
+    ctx.textAlign = "left";
+    ctx.fillText(`${Math.round(value * 100)}%`, barX + barW + 8, y + 5);
+  }
+
+  if (orbitState.mode === "capturing") {
+    drawMeter("PULL", capturePct, panelY + 29, "rgba(127,232,232,0.9)");
+    drawMeter(
+      "ORBIT",
+      easeInOutCubic(capturePct),
+      panelY + 43,
+      "rgba(79,195,247,0.9)",
+    );
+  } else {
+    drawMeter("RANGE", best.distancePct, panelY + 29, "rgba(255,255,255,0.78)");
+    drawMeter(
+      "TRAJECTORY",
+      best.matchPct,
+      panelY + 43,
+      `rgba(${Math.round(255 * (1 - best.matchPct))},${Math.round(220 * best.matchPct)},80,0.9)`,
+    );
+  }
+
+  ctx.restore();
 }
 
 // =============================================================================
 // HUD OVERLAY
 // =============================================================================
 
+function getTimeParts() {
+  const totalMonths = Math.max(0, Math.floor(simYears * 12));
+  const years = Math.floor(totalMonths / 12);
+  const monthInYear = (totalMonths % 12) + 1;
+  return { totalMonths, years, monthInYear };
+}
+
+function drawTimeScore(ctx, w) {
+  const { totalMonths, years, monthInYear } = getTimeParts();
+
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.textAlign = "center";
+
+  const x = w / 2;
+  const y = 13;
+  const panelW = 330;
+  const panelH = 76;
+  ctx.fillStyle = "rgba(0,0,0,0.42)";
+  ctx.strokeStyle = "rgba(255,255,255,0.16)";
+  ctx.lineWidth = 1;
+  roundRect(ctx, x - panelW / 2, y, panelW, panelH, 5);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.font = "bold 25px monospace";
+  ctx.fillStyle = "rgba(255,232,150,0.96)";
+  ctx.fillText(`MONTH ${totalMonths.toLocaleString()}`, x, y + 28);
+
+  ctx.font = "bold 24px monospace";
+  ctx.fillStyle = "rgba(127,232,232,0.92)";
+  ctx.fillText(`YEAR ${years.toLocaleString()}`, x, y + 57);
+
+  ctx.font = "10px monospace";
+  ctx.fillStyle = "rgba(255,255,255,0.48)";
+  ctx.fillText(`MONTH ${monthInYear} OF CURRENT YEAR`, x, y + 70);
+  ctx.restore();
+}
+
 function drawHUD(ctx, w, h) {
-  ctx.save()
-  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
 
   // Focus buttons
   const baseButtons = [
-    { label: 'Focus: Sun',  focus: 'sun'  },
-    { label: 'Focus: Ship', focus: 'ship' },
-  ]
-  const extraButtons = orbitState.mode === 'docked' && orbitState.planet
-    ? [{ label: `Focus: ${orbitState.planet.name}`, focus: 'orbit' }]
-    : []
-  const buttons = [...baseButtons, ...extraButtons]
+    { label: "Focus: Sun", focus: "sun" },
+    { label: "Focus: Ship", focus: "ship" },
+  ];
+  const extraButtons =
+    (orbitState.mode === "slingshot" || orbitState.mode === "capturing") &&
+    orbitState.planet
+      ? [{ label: `Focus: ${orbitState.planet.name}`, focus: "orbit" }]
+      : [];
+  const buttons = [...baseButtons, ...extraButtons];
 
-  const bw = 110, bh = 22, gap = 6, startX = 12, startY = 12
+  const bw = 110,
+    bh = 22,
+    gap = 6,
+    startX = 12,
+    startY = 12;
 
   buttons.forEach((btn, i) => {
-    const bx = startX + i * (bw + gap)
-    const active = cam.focus === btn.focus
-    ctx.fillStyle   = active ? 'rgba(79,195,247,0.25)' : 'rgba(0,0,0,0.5)'
-    ctx.strokeStyle = active ? '#4fc3f7' : 'rgba(255,255,255,0.2)'
-    ctx.lineWidth   = 1
-    roundRect(ctx, bx, startY, bw, bh, 3)
-    ctx.fill()
-    ctx.stroke()
+    const bx = startX + i * (bw + gap);
+    const active = cam.focus === btn.focus;
+    ctx.fillStyle = active ? "rgba(79,195,247,0.25)" : "rgba(0,0,0,0.5)";
+    ctx.strokeStyle = active ? "#4fc3f7" : "rgba(255,255,255,0.2)";
+    ctx.lineWidth = 1;
+    roundRect(ctx, bx, startY, bw, bh, 3);
+    ctx.fill();
+    ctx.stroke();
 
-    ctx.font      = '11px monospace'
-    ctx.fillStyle = active ? '#4fc3f7' : 'rgba(255,255,255,0.5)'
-    ctx.textAlign = 'center'
-    ctx.fillText(btn.label, bx + bw / 2, startY + bh / 2 + 4)
-  })
+    ctx.font = "11px monospace";
+    ctx.fillStyle = active ? "#4fc3f7" : "rgba(255,255,255,0.5)";
+    ctx.textAlign = "center";
+    ctx.fillText(btn.label, bx + bw / 2, startY + bh / 2 + 4);
+  });
 
-  // Docked mode status
-  if (orbitState.mode === 'docked' && orbitState.planet) {
-    const planet = orbitState.planet
-    const [r, g, b] = hexToRgb(planet.color)
+  ctx.restore();
+  drawTimeScore(ctx, w);
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
 
-    ctx.font      = 'bold 14px monospace'
-    ctx.fillStyle = `rgba(${r},${g},${b},0.95)`
-    ctx.textAlign = 'center'
-    ctx.fillText(`DOCKED: ${planet.name.toUpperCase()}`, w / 2, startY + bh + 24)
+  // Slingshot mode status
+  if (
+    (orbitState.mode === "slingshot" || orbitState.mode === "capturing") &&
+    orbitState.planet
+  ) {
+    const planet = orbitState.planet;
+    const [r, g, b] = hexToRgb(planet.color);
 
-    ctx.font      = '11px monospace'
-    ctx.fillStyle = 'rgba(255,255,255,0.5)'
-    ctx.fillText('PARTICLE ACCELERATOR ARMED  •  Drag to aim  •  [ESC] to undock', w / 2, startY + bh + 42)
+    ctx.font = "bold 14px monospace";
+    ctx.fillStyle = `rgba(${r},${g},${b},0.95)`;
+    ctx.textAlign = "center";
+    ctx.fillText(
+      orbitState.mode === "capturing"
+        ? `CAPTURED BY ${planet.name.toUpperCase()}`
+        : `SLINGSHOT ORBIT: ${planet.name.toUpperCase()}`,
+      w / 2,
+      112,
+    );
+
+    ctx.font = "11px monospace";
+    ctx.fillStyle = "rgba(255,255,255,0.5)";
+    ctx.fillText(
+      orbitState.mode === "capturing"
+        ? "AUTOPILOT CAPTURE IN PROGRESS"
+        : "SHOT SYSTEM ARMED  •  Drag to aim  •  [ESC] to break orbit",
+      w / 2,
+      130,
+    );
+  }
+
+  if (shipLoss) {
+    ctx.font = "bold 15px monospace";
+    ctx.fillStyle = "rgba(255,95,70,0.95)";
+    ctx.textAlign = "center";
+    ctx.fillText(`SHIP LOST: ${shipLoss}`, w / 2, 112);
   }
 
   // Speed / distance info (top-right)
   if (ship) {
-    const speed_au_yr = Math.sqrt(ship.vx ** 2 + ship.vy ** 2)
-    const speed_km_s  = speed_au_yr * AU_KM / (365.25 * 24 * 3600)
-    const sun         = bodies.find(b => b.id === 'sun')
-    const dist_au     = sun
+    const speed_au_yr = Math.sqrt(ship.vx ** 2 + ship.vy ** 2);
+    const speed_km_s = (speed_au_yr * AU_KM) / (365.25 * 24 * 3600);
+    const sun = bodies.find((b) => b.id === "sun");
+    const dist_au = sun
       ? Math.sqrt((ship.x - sun.x) ** 2 + (ship.y - sun.y) ** 2)
-      : 0
+      : 0;
 
-    ctx.font      = '11px monospace'
-    ctx.fillStyle = 'rgba(255,255,255,0.4)'
-    ctx.textAlign = 'right'
-    ctx.fillText(`Speed: ${speed_km_s.toFixed(2)} km/s`, w - 12, h - 26)
-    ctx.fillText(`Dist from Sun: ${dist_au.toFixed(4)} AU`, w - 12, h - 12)
+    ctx.font = "11px monospace";
+    ctx.fillStyle = "rgba(255,255,255,0.4)";
+    ctx.textAlign = "right";
+    ctx.fillText(`Black hole score: ${blackHoleScore}`, w - 12, h - 40);
+    ctx.fillText(`Speed: ${speed_km_s.toFixed(2)} km/s`, w - 12, h - 26);
+    ctx.fillText(`Dist from Sun: ${dist_au.toFixed(4)} AU`, w - 12, h - 12);
+  } else {
+    ctx.font = "11px monospace";
+    ctx.fillStyle = "rgba(255,255,255,0.4)";
+    ctx.textAlign = "right";
+    ctx.fillText(`Black hole score: ${blackHoleScore}`, w - 12, h - 26);
   }
 
-  ctx.restore()
+  ctx.restore();
 
   // Velocity match / approach indicator
-  drawVelocityMatchHUD(ctx, w, h)
+  drawVelocityMatchHUD(ctx, w, h);
 }
 
 function roundRect(ctx, x, y, w, h, r) {
-  ctx.beginPath()
-  ctx.moveTo(x + r, y)
-  ctx.lineTo(x + w - r, y)
-  ctx.arcTo(x + w, y, x + w, y + r, r)
-  ctx.lineTo(x + w, y + h - r)
-  ctx.arcTo(x + w, y + h, x + w - r, y + h, r)
-  ctx.lineTo(x + r, y + h)
-  ctx.arcTo(x, y + h, x, y + h - r, r)
-  ctx.lineTo(x, y + r)
-  ctx.arcTo(x, y, x + r, y, r)
-  ctx.closePath()
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+  ctx.lineTo(x + r, y + h);
+  ctx.arcTo(x, y + h, x, y + h - r, r);
+  ctx.lineTo(x, y + r);
+  ctx.arcTo(x, y, x + r, y, r);
+  ctx.closePath();
 }
 
 // =============================================================================
@@ -1359,60 +2238,98 @@ function roundRect(ctx, x, y, w, h, r) {
 
 function tickShockwaves(realDt) {
   for (const sw of shockwaves) {
-    sw.age += realDt
-    const t  = Math.min(sw.age / sw.duration, 1)
+    sw.age += realDt;
+    const t = Math.min(sw.age / sw.duration, 1);
     // Ease-out cubic: fast at start, decelerates
-    const et = 1 - Math.pow(1 - t, 3)
-    sw.r     = sw.maxR * et
-    sw.alpha = 1 - t              // linear fade over full duration
+    const et = 1 - Math.pow(1 - t, 3);
+    sw.r = sw.maxR * et;
+    sw.alpha = 1 - t; // linear fade over full duration
   }
   for (let i = shockwaves.length - 1; i >= 0; i--) {
-    if (shockwaves[i].age >= shockwaves[i].duration) shockwaves.splice(i, 1)
+    if (shockwaves[i].age >= shockwaves[i].duration) shockwaves.splice(i, 1);
   }
 }
 
+function tickDebris(dt_yr, realDt) {
+  for (const piece of debris) {
+    piece.age += realDt;
+    piece.x += piece.vx * dt_yr;
+    piece.y += piece.vy * dt_yr;
+    piece.vx *= Math.pow(0.25, realDt);
+    piece.vy *= Math.pow(0.25, realDt);
+  }
+  for (let i = debris.length - 1; i >= 0; i--) {
+    if (debris[i].age >= debris[i].duration) debris.splice(i, 1);
+  }
+}
+
+function drawDebris(ctx) {
+  if (debris.length === 0) return;
+  const s = scale();
+  ctx.save();
+  ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY);
+
+  for (const piece of debris) {
+    const t = Math.min(piece.age / piece.duration, 1);
+    const alpha = Math.pow(1 - t, 1.4);
+    const pxSize = piece.size / s;
+    const heat = piece.heat * (1 - t);
+    ctx.fillStyle = `rgba(255,${Math.round(150 + heat * 80)},${Math.round(60 + heat * 80)},${alpha * 0.85})`;
+    ctx.beginPath();
+    ctx.arc(piece.x, piece.y, pxSize, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = `rgba(${piece.color},${alpha * 0.45})`;
+    ctx.beginPath();
+    ctx.arc(piece.x - piece.vx * 0.01, piece.y - piece.vy * 0.01, pxSize * 1.8, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
 function drawShockwaves(ctx) {
-  if (shockwaves.length === 0) return
-  const s = scale()
-  ctx.save()
-  ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY)
+  if (shockwaves.length === 0) return;
+  const s = scale();
+  ctx.save();
+  ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY);
 
   for (const sw of shockwaves) {
-    if (sw.r <= 0) continue
-    const a         = Math.max(0, sw.alpha)
-    const t         = sw.age / sw.duration
-    const [r, g, b] = hexToRgb(sw.color)
+    if (sw.r <= 0) continue;
+    const a = Math.max(0, sw.alpha);
+    const t = sw.age / sw.duration;
+    const [r, g, b] = hexToRgb(sw.color);
 
     // Leading bright white ring — thick at start, thins as it expands
-    const ringW = Math.max(0.5, (1 - t) * 8 + 1)
-    ctx.beginPath()
-    ctx.arc(sw.x, sw.y, sw.r, 0, Math.PI * 2)
-    ctx.strokeStyle = `rgba(255,255,255,${a * 0.95})`
-    ctx.lineWidth   = ringW / s
-    ctx.stroke()
+    const ringW = Math.max(0.5, (1 - t) * 8 + 1);
+    ctx.beginPath();
+    ctx.arc(sw.x, sw.y, sw.r, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(255,255,255,${a * 0.95})`;
+    ctx.lineWidth = ringW / s;
+    ctx.stroke();
 
     // Colored glow halo just inside the leading ring
-    ctx.beginPath()
-    ctx.arc(sw.x, sw.y, sw.r * 0.88, 0, Math.PI * 2)
-    ctx.strokeStyle = `rgba(${r},${g},${b},${a * 0.55})`
-    ctx.lineWidth   = (ringW * 2.5) / s
-    ctx.stroke()
+    ctx.beginPath();
+    ctx.arc(sw.x, sw.y, sw.r * 0.88, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(${r},${g},${b},${a * 0.55})`;
+    ctx.lineWidth = (ringW * 2.5) / s;
+    ctx.stroke();
 
     // Soft inner fill — big radial glow at start
     if (t < 0.5) {
-      const fillA = a * (0.5 - t) * 0.4
-      const grad  = ctx.createRadialGradient(sw.x, sw.y, 0, sw.x, sw.y, sw.r)
-      grad.addColorStop(0,   `rgba(255,255,255,${fillA})`)
-      grad.addColorStop(0.4, `rgba(${r},${g},${b},${fillA * 0.5})`)
-      grad.addColorStop(1,   `rgba(${r},${g},${b},0)`)
-      ctx.beginPath()
-      ctx.arc(sw.x, sw.y, sw.r, 0, Math.PI * 2)
-      ctx.fillStyle = grad
-      ctx.fill()
+      const fillA = a * (0.5 - t) * 0.4;
+      const grad = ctx.createRadialGradient(sw.x, sw.y, 0, sw.x, sw.y, sw.r);
+      grad.addColorStop(0, `rgba(255,255,255,${fillA})`);
+      grad.addColorStop(0.4, `rgba(${r},${g},${b},${fillA * 0.5})`);
+      grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+      ctx.beginPath();
+      ctx.arc(sw.x, sw.y, sw.r, 0, Math.PI * 2);
+      ctx.fillStyle = grad;
+      ctx.fill();
     }
   }
 
-  ctx.restore()
+  ctx.restore();
 }
 
 // =============================================================================
@@ -1420,220 +2337,250 @@ function drawShockwaves(ctx) {
 // =============================================================================
 
 function render(ctx, w, h, realDt) {
-  ctx.clearRect(0, 0, w, h)
+  ctx.clearRect(0, 0, w, h);
 
-  tickShockwaves(realDt)
-  applyFocusMode(w, h)
+  tickShockwaves(realDt);
+  applyFocusMode(w, h);
 
-  drawGrid(ctx, w, h)
-  drawOrbits(ctx)
-  drawCaptureRings(ctx)
-  drawPredictionPath(ctx)
+  drawStarfield(ctx, w, h);
+  drawOrbits(ctx);
+  drawSolarGravityWell(ctx);
+  drawBlackHole(ctx);
+  drawCaptureRings(ctx);
+  drawPredictionPath(ctx);
+  drawCaptureTether(ctx);
 
   for (const body of bodies) {
-    drawBody(ctx, body, w, h)
+    drawBody(ctx, body, w, h);
   }
 
-  drawShockwaves(ctx)
-  drawDockedRing(ctx)
-  drawOrbitCue(ctx)
-  drawHUD(ctx, w, h)
+  drawShockwaves(ctx);
+  drawDebris(ctx);
+  drawSlingshotRing(ctx);
+  drawOrbitCue(ctx);
+  drawHUD(ctx, w, h);
 }
 
 // =============================================================================
 // MAIN LOOP
 // =============================================================================
 
-let rafId    = null
-let lastTime = null
-let _w = 0, _h = 0
-let simYears = 0
+let rafId = null;
+let lastTime = null;
+let _w = 0,
+  _h = 0;
+let simYears = 0;
 
 function initCanvas(canvas) {
-  if (!canvas) return
-  let ctx = null
+  if (!canvas) return;
+  let ctx = null;
 
   // --- Keyboard ---
   function onKeyDown(e) {
-    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) {
-      e.preventDefault()
+    if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
+      e.preventDefault();
     }
-    // Escape: undock
-    if (e.key === 'Escape' && orbitState.mode === 'docked') {
-      undock(true)
-      return
+    // Escape: break orbit/capture
+    if (
+      e.key === "Escape" &&
+      (orbitState.mode === "slingshot" || orbitState.mode === "capturing")
+    ) {
+      breakOrbit(true);
+      return;
     }
-    keys[e.key] = true
+    keys[e.key] = true;
   }
-  function onKeyUp(e) { keys[e.key] = false }
-  window.addEventListener('keydown', onKeyDown)
-  window.addEventListener('keyup',   onKeyUp)
+  function onKeyUp(e) {
+    keys[e.key] = false;
+  }
+  window.addEventListener("keydown", onKeyDown);
+  window.addEventListener("keyup", onKeyUp);
 
   // --- Mouse ---
   function onMouseDown(e) {
-    if (e.button !== 0) return
+    if (e.button !== 0) return;
 
-    // Docked mode: start drag for aiming shot
-    if (orbitState.mode === 'docked') {
-      const rect = canvas.getBoundingClientRect()
-      const cx   = e.clientX - rect.left
-      const cy   = e.clientY - rect.top
-      orbitDrag  = { startX: cx, startY: cy, curX: cx, curY: cy }
-      return
+    // Slingshot mode: start drag for aiming shot
+    if (orbitState.mode === "slingshot") {
+      const rect = canvas.getBoundingClientRect();
+      const cx = e.clientX - rect.left;
+      const cy = e.clientY - rect.top;
+      orbitDrag = { startX: cx, startY: cy, curX: cx, curY: cy };
+      return;
     }
 
     // Free mode: start camera pan
-    cam._dragActive = true
-    cam._dragLastX  = e.clientX
-    cam._dragLastY  = e.clientY
+    cam._dragActive = true;
+    cam._dragLastX = e.clientX;
+    cam._dragLastY = e.clientY;
   }
 
   function onMouseMove(e) {
-    if (orbitState.mode === 'docked' && orbitDrag) {
-      const rect    = canvas.getBoundingClientRect()
-      orbitDrag.curX = e.clientX - rect.left
-      orbitDrag.curY = e.clientY - rect.top
-      return
+    if (orbitState.mode === "slingshot" && orbitDrag) {
+      const rect = canvas.getBoundingClientRect();
+      orbitDrag.curX = e.clientX - rect.left;
+      orbitDrag.curY = e.clientY - rect.top;
+      return;
     }
 
-    if (!cam._dragActive) return
-    const dx = e.clientX - cam._dragLastX
-    const dy = e.clientY - cam._dragLastY
-    if (Math.abs(dx) + Math.abs(dy) > 2) cam.focus = 'free'
-    cam.panX       += dx
-    cam.panY       += dy
-    cam._dragLastX  = e.clientX
-    cam._dragLastY  = e.clientY
+    if (!cam._dragActive) return;
+    const dx = e.clientX - cam._dragLastX;
+    const dy = e.clientY - cam._dragLastY;
+    if (Math.abs(dx) + Math.abs(dy) > 2) cam.focus = "free";
+    cam.panX += dx;
+    cam.panY += dy;
+    cam._dragLastX = e.clientX;
+    cam._dragLastY = e.clientY;
   }
 
   function onMouseUp(e) {
-    // Fire shot if docked and dragging
-    if (orbitState.mode === 'docked' && orbitDrag) {
-      fireShot()
-      orbitDrag = null
-      return
+    // Fire shot if in slingshot orbit and dragging
+    if (orbitState.mode === "slingshot" && orbitDrag) {
+      fireShot();
+      orbitDrag = null;
+      return;
     }
-    cam._dragActive = false
+    cam._dragActive = false;
   }
 
   function onWheel(e) {
-    e.preventDefault()
-    const factor = Math.pow(1.12, -e.deltaY / 100)
-    zoomAt(factor, e.offsetX, e.offsetY)
+    e.preventDefault();
+    const factor = Math.pow(1.12, -e.deltaY / 100);
+    zoomAt(factor, e.offsetX, e.offsetY);
   }
 
   // --- HUD button click ---
   function onCanvasClick(e) {
-    const rect    = canvas.getBoundingClientRect()
-    const cx      = e.clientX - rect.left
-    const cy      = e.clientY - rect.top
-    const bw = 110, bh = 22, gap = 6, startX = 12, startY = 12
+    const rect = canvas.getBoundingClientRect();
+    const cx = e.clientX - rect.left;
+    const cy = e.clientY - rect.top;
+    const bw = 110,
+      bh = 22,
+      gap = 6,
+      startX = 12,
+      startY = 12;
 
-    const focusModes = ['sun', 'ship']
-    if (orbitState.mode === 'docked' && orbitState.planet) focusModes.push('orbit')
+    const focusModes = ["sun", "ship"];
+    if (
+      (orbitState.mode === "slingshot" || orbitState.mode === "capturing") &&
+      orbitState.planet
+    )
+      focusModes.push("orbit");
 
     focusModes.forEach((fm, i) => {
-      const bx = startX + i * (bw + gap)
+      const bx = startX + i * (bw + gap);
       if (cx >= bx && cx <= bx + bw && cy >= startY && cy <= startY + bh) {
-        cam.focus = fm
+        cam.focus = fm;
       }
-    })
+    });
   }
 
-  canvas.addEventListener('mousedown',  onMouseDown)
-  canvas.addEventListener('mousemove',  onMouseMove)
-  canvas.addEventListener('mouseup',    onMouseUp)
-  canvas.addEventListener('mouseleave', onMouseUp)
-  canvas.addEventListener('wheel',      onWheel, { passive: false })
-  canvas.addEventListener('click',      onCanvasClick)
+  canvas.addEventListener("mousedown", onMouseDown);
+  canvas.addEventListener("mousemove", onMouseMove);
+  canvas.addEventListener("mouseup", onMouseUp);
+  canvas.addEventListener("mouseleave", onMouseUp);
+  canvas.addEventListener("wheel", onWheel, { passive: false });
+  canvas.addEventListener("click", onCanvasClick);
 
   // --- Resize ---
   function resizeCanvas() {
-    const rect  = canvas.parentElement.getBoundingClientRect()
-    _w = rect.width
-    _h = rect.height - 36
-    canvas.width        = _w
-    canvas.height       = _h
-    canvas.style.width  = _w + 'px'
-    canvas.style.height = _h + 'px'
-    ctx = canvas.getContext('2d')
-    buildScene(_w, _h)
+    const rect = canvas.parentElement.getBoundingClientRect();
+    _w = rect.width;
+    _h = rect.height - 96;
+    canvas.width = _w;
+    canvas.height = _h;
+    canvas.style.width = _w + "px";
+    canvas.style.height = _h + "px";
+    ctx = canvas.getContext("2d");
+    buildScene(_w, _h);
   }
 
-  const observer = new ResizeObserver(resizeCanvas)
-  observer.observe(canvas.parentElement)
-  resizeCanvas()
+  const observer = new ResizeObserver(resizeCanvas);
+  observer.observe(canvas.parentElement);
+  resizeCanvas();
 
   // --- Animation loop ---
   function loop(ts) {
-    let realDt = 0
+    let realDt = 0;
     if (lastTime !== null) {
-      realDt             = Math.min((ts - lastTime) / 1000, MAX_DT)  // seconds
-      const simScale     = timeScale.value
-      const dt_yr        = realDt * simScale / (365.25 * 24 * 3600)  // yr per frame
+      realDt = Math.min((ts - lastTime) / 1000, MAX_DT); // seconds
+      const simScale = timeScale.value;
+      const dt_yr = (realDt * simScale) / (365.25 * 24 * 3600); // yr per frame
 
       if (isPlaying.value) {
-        simStep(dt_yr, realDt)
-        simYears += dt_yr
+        simStep(dt_yr, realDt);
+        tickDebris(dt_yr, realDt);
+        simYears += dt_yr;
 
         for (const body of bodies) {
-          if (body.trail && body.trail.push) body.trail.push(body.x, body.y)
+          if (body.trail && body.trail.push) body.trail.push(body.x, body.y);
         }
 
-        bodyCount.value = bodies.length
-        const yr  = Math.floor(simYears)
-        const day = (simYears - yr) * 365.25
-        elapsedLabel.value = `Yr ${yr.toLocaleString()} Day ${day.toFixed(1)}`
+        bodyCount.value = bodies.length;
+        const { totalMonths, years, monthInYear } = getTimeParts();
+        elapsedLabel.value = `Month ${totalMonths.toLocaleString()} • Year ${years.toLocaleString()} M${monthInYear}`;
 
         // Prediction (only in free mode)
-        predCountdown--
+        predCountdown--;
         if (predCountdown <= 0) {
-          predCountdown = PRED_INTERVAL
-          shipPredPath  = computePrediction(dt_yr)
+          predCountdown = PRED_INTERVAL;
+          shipPredPath = computePrediction();
         }
       }
     }
-    lastTime = ts
-    if (ctx) render(ctx, _w, _h, realDt)
-    rafId = requestAnimationFrame(loop)
+    lastTime = ts;
+    if (ctx) render(ctx, _w, _h, realDt);
+    rafId = requestAnimationFrame(loop);
   }
 
-  rafId = requestAnimationFrame(loop)
+  rafId = requestAnimationFrame(loop);
 
   onUnmounted(() => {
-    cancelAnimationFrame(rafId)
-    observer.disconnect()
-    window.removeEventListener('keydown', onKeyDown)
-    window.removeEventListener('keyup',   onKeyUp)
-    canvas.removeEventListener('mousedown',  onMouseDown)
-    canvas.removeEventListener('mousemove',  onMouseMove)
-    canvas.removeEventListener('mouseup',    onMouseUp)
-    canvas.removeEventListener('mouseleave', onMouseUp)
-    canvas.removeEventListener('wheel',      onWheel)
-    canvas.removeEventListener('click',      onCanvasClick)
-  })
+    cancelAnimationFrame(rafId);
+    observer.disconnect();
+    window.removeEventListener("keydown", onKeyDown);
+    window.removeEventListener("keyup", onKeyUp);
+    canvas.removeEventListener("mousedown", onMouseDown);
+    canvas.removeEventListener("mousemove", onMouseMove);
+    canvas.removeEventListener("mouseup", onMouseUp);
+    canvas.removeEventListener("mouseleave", onMouseUp);
+    canvas.removeEventListener("wheel", onWheel);
+    canvas.removeEventListener("click", onCanvasClick);
+  });
 }
 
 // =============================================================================
 // CONTROLS
 // =============================================================================
 
-function togglePlay() { isPlaying.value = !isPlaying.value }
-function setTimeScale(s) { timeScale.value = s }
+function togglePlay() {
+  isPlaying.value = !isPlaying.value;
+}
+function setTimeScale(s) {
+  timeScale.value = s;
+}
 function reset() {
-  simYears      = 0
-  shipPredPath  = []
-  predCountdown = 0
-  lastTime      = null
-  isPlaying.value  = true
-  timeScale.value  = settings.settings.sim.baseSpeed
-  buildScene(_w, _h)
+  simYears = 0;
+  shipPredPath = [];
+  predCountdown = 0;
+  lastTime = null;
+  isPlaying.value = true;
+  timeScale.value = settings.settings.sim.baseSpeed;
+  buildScene(_w, _h);
 }
 
-watch(() => settings.settings.sim.baseSpeed, (v) => { timeScale.value = v })
-watch(() => settings.settings.visuals.trailLength, (v) => {
-  for (const b of bodies) {
-    if (b.trail) b.trail = makeTrail(v)
-  }
-})
+watch(
+  () => settings.settings.sim.baseSpeed,
+  (v) => {
+    timeScale.value = v;
+  },
+);
+watch(
+  () => settings.settings.visuals.trailLength,
+  (v) => {
+    for (const b of bodies) {
+      if (b.trail) b.trail = makeTrail(v);
+    }
+  },
+);
 </script>
