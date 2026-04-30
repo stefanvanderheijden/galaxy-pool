@@ -7,19 +7,38 @@
 
     <div class="controls">
       <div class="controls-center">
-        <label class="speed-control">
-          <span class="speed-title">Speed</span>
-          <input
-            class="speed-slider"
-            type="range"
-            :min="timeScaleMin"
-            :max="timeScaleMax"
-            :step="timeScaleStep"
-            :value="timeScale"
-            @input="$emit('set-timescale', Number($event.target.value))"
-          />
-          <span class="speed-value">{{ timeScale }}x</span>
-        </label>
+        <div class="speed-display">
+          <span class="speed-label">SPEED</span>
+          <div class="speed-track-wrap">
+            <div class="speed-track">
+              <div
+                class="speed-fill"
+                :style="{ width: fillPct + '%' }"
+              ></div>
+              <div
+                class="speed-thumb"
+                :style="{ left: fillPct + '%' }"
+              ></div>
+              <div
+                v-for="(step, i) in STEPS"
+                :key="i"
+                class="speed-node"
+                :class="{ active: isActiveStep(i) }"
+                :style="{ left: stepPct(i) + '%' }"
+              ></div>
+            </div>
+            <div class="speed-labels">
+              <span
+                v-for="(step, i) in STEPS"
+                :key="i"
+                class="speed-step-label"
+                :class="{ active: isActiveStep(i) }"
+                :style="{ left: stepPct(i) + '%' }"
+              >{{ step.label }}</span>
+            </div>
+          </div>
+          <span class="speed-value">{{ formatSpeed(timeScale) }}</span>
+        </div>
       </div>
 
       <div class="controls-row">
@@ -42,14 +61,14 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
-defineProps({
+const props = defineProps({
   isPlaying:     { type: Boolean, default: true },
   timeScale:     { type: Number,  default: 1 },
-  timeScaleMin:  { type: Number,  default: 0.25 },
-  timeScaleMax:  { type: Number,  default: 20 },
-  timeScaleStep: { type: Number,  default: 0.25 },
+  timeScaleMin:  { type: Number,  default: 0 },
+  timeScaleMax:  { type: Number,  default: 5000000 },
+  timeScaleStep: { type: Number,  default: 1 },
   bodyCount:     { type: Number,  default: 0 },
   elapsed:       { type: Number,  default: 0 },
   elapsedLabel:  { type: String,  default: '' },
@@ -61,6 +80,42 @@ const canvasRef = ref(null)
 defineExpose({ canvasRef })
 
 onMounted(() => emit('canvas-ready', canvasRef.value))
+
+// The four fixed steps — mirrors TIME_STEPS in the sketch
+const STEPS = [
+  { value: 1,       label: '1×'    },
+  { value: 100000,  label: '100K×' },
+  { value: 1000000, label: '1M×'   },
+  { value: 5000000, label: '5M×'   },
+]
+
+// All four steps use log scale across the full track width
+function stepPct(i) {
+  const logMin = Math.log(STEPS[0].value)
+  const logMax = Math.log(STEPS[STEPS.length - 1].value)
+  return (Math.log(STEPS[i].value) - logMin) / (logMax - logMin) * 100
+}
+
+// Current animated timescale mapped to track position (log scale).
+const fillPct = computed(() => {
+  const ts = Math.max(1, props.timeScale)
+  const logMin = Math.log(STEPS[0].value)
+  const logMax = Math.log(STEPS[STEPS.length - 1].value)
+  const t = (Math.log(Math.min(ts, STEPS[STEPS.length - 1].value)) - logMin) / (logMax - logMin)
+  return t * 100
+})
+
+function isActiveStep(i) {
+  const ratio = props.timeScale / STEPS[i].value
+  return ratio > 0.85 && ratio < 1.15
+}
+
+function formatSpeed(ts) {
+  if (ts <= 1) return '1×'
+  if (ts >= 1e6) return (ts / 1e6).toFixed(ts >= 1e7 ? 0 : 1) + 'M×'
+  if (ts >= 1e3) return Math.round(ts / 1e3) + 'K×'
+  return Math.round(ts) + '×'
+}
 </script>
 
 <style scoped>
@@ -131,95 +186,125 @@ onMounted(() => emit('canvas-ready', canvasRef.value))
 }
 .ctrl-btn:hover { background: #2a2a4e; }
 
-.ctrl-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: #aaa;
-  min-width: 0;
+.info {
+  color: #666;
 }
 
-input[type='range'] {
-  accent-color: #4fc3f7;
-  width: 100%;
-  appearance: none;
-  background: transparent;
-}
-
-.speed-control {
+/* ── Speed display ── */
+.speed-display {
   width: 100%;
   display: grid;
-  grid-template-columns: 74px minmax(0, 1fr) 128px;
+  grid-template-columns: 56px 1fr 88px;
   align-items: center;
-  gap: 16px;
+  gap: 18px;
   padding: 10px 18px;
-  border: 1px solid rgba(79, 195, 247, 0.3);
+  border: 1px solid rgba(79, 195, 247, 0.22);
   border-radius: 8px;
   background:
-    linear-gradient(180deg, rgba(12, 24, 44, 0.92), rgba(7, 12, 24, 0.88)),
-    rgba(9, 16, 30, 0.9);
+    linear-gradient(180deg, rgba(12, 24, 44, 0.92), rgba(7, 12, 24, 0.88));
   box-shadow:
-    0 0 22px rgba(79, 195, 247, 0.14),
-    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+    0 0 22px rgba(79, 195, 247, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
-.speed-title {
-  color: rgba(255, 255, 255, 0.7);
+
+.speed-label {
+  color: rgba(255, 255, 255, 0.45);
   font-weight: 700;
-  letter-spacing: 0.04em;
+  font-size: 11px;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
 }
+
 .speed-value {
   color: #4fc3f7;
   font-family: monospace;
   font-weight: 700;
   text-align: right;
   font-size: 14px;
-}
-.speed-slider {
-  width: 100%;
-  height: 32px;
-  cursor: pointer;
-  min-width: 0;
-}
-.speed-slider::-webkit-slider-runnable-track {
-  height: 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.16);
-  background:
-    linear-gradient(90deg, rgba(79,195,247,0.8), rgba(255,232,150,0.95)),
-    rgba(255,255,255,0.08);
-  box-shadow: inset 0 0 10px rgba(0,0,0,0.35);
-}
-.speed-slider::-webkit-slider-thumb {
-  appearance: none;
-  width: 30px;
-  height: 30px;
-  margin-top: -10px;
-  border-radius: 50%;
-  border: 2px solid #dff7ff;
-  background: #4fc3f7;
-  box-shadow:
-    0 0 18px rgba(79, 195, 247, 0.95),
-    0 2px 8px rgba(0,0,0,0.45);
-}
-.speed-slider::-moz-range-track {
-  height: 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.16);
-  background:
-    linear-gradient(90deg, rgba(79,195,247,0.8), rgba(255,232,150,0.95)),
-    rgba(255,255,255,0.08);
-}
-.speed-slider::-moz-range-thumb {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  border: 2px solid #dff7ff;
-  background: #4fc3f7;
-  box-shadow: 0 0 16px rgba(79, 195, 247, 0.8);
+  letter-spacing: 0.04em;
 }
 
-.info {
-  color: #666;
+/* Track wrapper + labels below */
+.speed-track-wrap {
+  position: relative;
+  padding-bottom: 18px; /* space for labels */
+}
+
+.speed-track {
+  position: relative;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.speed-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(79, 195, 247, 0.5), rgba(79, 195, 247, 0.9));
+  transition: width 0.05s linear;
+  pointer-events: none;
+}
+
+/* Animated glowing thumb */
+.speed-thumb {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #4fc3f7;
+  border: 2px solid #dff7ff;
+  box-shadow:
+    0 0 10px rgba(79, 195, 247, 0.9),
+    0 0 24px rgba(79, 195, 247, 0.5);
+  transition: left 0.05s linear;
+  pointer-events: none;
+}
+
+/* Step nodes — small diamond ticks */
+.speed-node {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%) rotate(45deg);
+  width: 7px;
+  height: 7px;
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  transition: background 0.2s, box-shadow 0.2s;
+  pointer-events: none;
+}
+.speed-node.active {
+  background: #4fc3f7;
+  border-color: #dff7ff;
+  box-shadow: 0 0 8px rgba(79, 195, 247, 0.8);
+}
+
+/* Step labels */
+.speed-labels {
+  position: absolute;
+  top: 14px;
+  left: 0;
+  right: 0;
+  height: 16px;
+}
+.speed-step-label {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: 10px;
+  font-family: monospace;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.3);
+  white-space: nowrap;
+  transition: color 0.2s;
+  pointer-events: none;
+  user-select: none;
+}
+.speed-step-label.active {
+  color: #4fc3f7;
 }
 </style>
