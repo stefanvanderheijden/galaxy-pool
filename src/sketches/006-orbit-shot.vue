@@ -2565,7 +2565,6 @@ function initCanvas(canvas) {
     }
     if (e.key === "e" || e.key === "E") {
       timeScale.value = Math.min(10000000, timeScale.value + 80000);
-      return;
     }
     keys[e.key] = true;
   }

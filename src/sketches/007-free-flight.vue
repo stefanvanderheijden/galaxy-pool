@@ -356,6 +356,7 @@ let shipLoss = null;
 let sunPenalty = 0;
 let totalEnergySpent = 0;
 let finalScoreShown = false;
+let deathFocus = null;
 
 const TOTAL_PLANETS = SOLAR_BODIES.filter((b) => !b.isFixed).length;
 
@@ -849,11 +850,13 @@ function consumeBodyInBlackHole(body, index) {
 function destroyBodyInSun(body, index) {
   bodies.splice(index, 1);
   if (body.id === "ship") {
+    deathFocus = { x: body.x, y: body.y, zoom: 55 };
+    cam.focus = "death";
+    camTargetZoom = deathFocus.zoom;
     ship = null;
     shipLoss = "SUN IMPACT";
     orbitState = { mode: "free", planet: null, shipOffset: null };
     orbitDrag = null;
-    cam.focus = "sun";
   } else {
     sunPenalty++;
   }
@@ -1181,6 +1184,7 @@ function buildScene(w, h) {
   totalEnergySpent = 0;
   finalScoreShown = false;
   shipLoss = null;
+  deathFocus = null;
   orbitState = { mode: "free", planet: null, shipOffset: null };
   orbitDrag = null;
   captureCooldown = 0;
@@ -1279,11 +1283,16 @@ function applyFocusMode(w, h) {
   // Animate zoom toward target
   cam.zoom += (camTargetZoom - cam.zoom) * 0.08;
 
-  if (orbitState.mode === "free" && ship) cam.focus = "ship";
+  if (deathFocus) cam.focus = "death";
+  else if (orbitState.mode === "free" && ship) cam.focus = "ship";
 
   if (cam.focus === "sun") {
     cam.panX = w / 2;
     cam.panY = h / 2;
+  } else if (cam.focus === "death" && deathFocus) {
+    const s = scale();
+    cam.panX = w / 2 - deathFocus.x * s;
+    cam.panY = h / 2 - deathFocus.y * s;
   } else if (cam.focus === "ship" && ship) {
     const s = scale();
     cam.panX = w / 2 - ship.x * s;
@@ -1929,8 +1938,6 @@ function drawBody(ctx, body, w, h) {
   }
 
   if (body.id === "ship") {
-    if (orbitState.mode === "slingshot") return;
-    drawShip(ctx, body, screenR, w, h);
     return;
   }
 
@@ -2481,6 +2488,23 @@ function drawHUD(ctx, w, h) {
     ctx.fillStyle = "rgba(255,95,70,0.95)";
     ctx.textAlign = "center";
     ctx.fillText(`SHIP LOST: ${shipLoss}`, w / 2, 112);
+  }
+
+  if (shipLoss === "SUN IMPACT" && deathFocus) {
+    const sp = worldToScreen(deathFocus.x, deathFocus.y);
+    const y = Math.min(h - 72, sp.y + 92);
+
+    ctx.textAlign = "center";
+    ctx.font = "900 58px Impact, Arial Black, sans-serif";
+    ctx.lineWidth = 8;
+    ctx.strokeStyle = "rgba(20,4,0,0.86)";
+    ctx.fillStyle = "rgba(255,82,34,0.96)";
+    ctx.strokeText("SUN BURNED", w / 2, y);
+    ctx.fillText("SUN BURNED", w / 2, y);
+
+    ctx.font = "bold 12px monospace";
+    ctx.fillStyle = "rgba(255,210,150,0.74)";
+    ctx.fillText("MISSION TERMINATED BY SOLAR CONTACT", w / 2, y + 22);
   }
 
   // Speed / distance info (top-right)
