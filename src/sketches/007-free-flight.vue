@@ -562,8 +562,9 @@ function simStep(dt_yr, realDt_s) {
     stepSystemWhileShipAutopilots(dt_yr, boost);
     const planet = orbitState.planet;
     if (planet && ship) {
-      ship.x = planet.x;
-      ship.y = planet.y;
+      const offset = orbitState.shipOffset || getDockedShipOffset(planet);
+      ship.x = planet.x + offset.dx;
+      ship.y = planet.y + offset.dy;
       ship.vx = planet.vx;
       ship.vy = planet.vy;
     }
@@ -615,6 +616,7 @@ function beginOrbitCapture(planet) {
 
   const dx = ship.x - planet.x;
   const dy = ship.y - planet.y;
+  const dockOffset = getDockedShipOffset(planet, dx, dy);
   const startRelVx = ship.vx - planet.vx;
   const startRelVy = ship.vy - planet.vy;
 
@@ -622,6 +624,7 @@ function beginOrbitCapture(planet) {
     mode: "capturing",
     planet,
     shipOffset: { dx, dy },
+    dockOffset,
     capture: {
       age: 0,
       simAge: 0,
@@ -654,10 +657,11 @@ function updateCapture(dt_yr, realDt_s) {
   const t = easeInOutCubic(rawT);
   const driftDx = capture.startDx + capture.startRelVx * capture.simAge;
   const driftDy = capture.startDy + capture.startRelVy * capture.simAge;
+  const dockOffset = orbitState.dockOffset || getDockedShipOffset(planet);
 
   orbitState.shipOffset = {
-    dx: driftDx * (1 - t),
-    dy: driftDy * (1 - t),
+    dx: driftDx + (dockOffset.dx - driftDx) * t,
+    dy: driftDy + (dockOffset.dy - driftDy) * t,
   };
 
   const prevX = ship.x;
@@ -670,16 +674,26 @@ function updateCapture(dt_yr, realDt_s) {
   }
 
   if (rawT >= 1) {
-    ship.x = planet.x;
-    ship.y = planet.y;
+    ship.x = planet.x + dockOffset.dx;
+    ship.y = planet.y + dockOffset.dy;
     ship.vx = planet.vx;
     ship.vy = planet.vy;
     orbitState = {
       mode: "slingshot",
       planet,
-      shipOffset: { dx: 0, dy: 0 },
+      shipOffset: { ...dockOffset },
     };
   }
+}
+
+function getDockedShipOffset(planet, fromDx = 1, fromDy = 0) {
+  const dist = Math.sqrt(fromDx * fromDx + fromDy * fromDy);
+  const angle = dist > 1e-6 ? Math.atan2(fromDy, fromDx) : 0;
+  const r = getSlingshotOrbitRadius(planet);
+  return {
+    dx: Math.cos(angle) * r,
+    dy: Math.sin(angle) * r,
+  };
 }
 
 // =============================================================================
