@@ -83,6 +83,11 @@ const sketches = [
     name: 'Orbit Shot',
     description: 'Fly into a planet\'s orbit ring to dock, then drag to aim and launch the planet like a pool shot.',
   },
+  {
+    id: '007',
+    name: 'Free Flight',
+    description: 'Mouse-aimed ship: face the cursor, click-hold to thrust with magnitude-based power. Scroll to zoom.',
+  },
 ]
 
 const exampleJson = `{
