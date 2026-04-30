@@ -145,10 +145,10 @@
             label="Trail length"
             v-model="settings.settings.visuals.trailLength"
             :min="50"
-            :max="2000"
+            :max="5000"
             :step="50"
             :decimals="0"
-            tooltip="Number of past positions in the spaceship trail."
+            tooltip="Number of past positions in body trails."
           />
         </SettingsSection>
       </SettingsPanel>
@@ -188,14 +188,12 @@ const MIN_PLANET_PX = 3; // px
 const MIN_SHIP_PX = 30; // px (length in screen pixels)
 
 // Prediction config
-const PRED_HORIZON_YR = 1.25; // simulated years to preview
+const PRED_HORIZON_YR = 0.5; // simulated years to preview
 const PRED_BASE_DT_YR = 0.001; // max ghost timestep before adaptive tightening
 const PRED_TARGET_SEGMENT_PX = 7; // keeps fast projected curves visually smooth
 const PRED_MAX_STEPS = 3000;
-const PRED_INTERVAL = 6; // recalculate every N rendered frames
+const PRED_INTERVAL = 3; // recalculate every N rendered frames
 
-// Planet-shot prediction
-const SHOT_PRED_STEPS = 300;
 const CAPTURE_DURATION_S = 1.25;
 const SLINGSHOT_ORBIT_MIN_R = 0.018;
 const SLINGSHOT_ORBIT_R_MULT = 2.8;
@@ -281,7 +279,7 @@ const settings = useSettings(PROTOTYPE_ID, {
     mass: 0.8,
     influenceRadius: 0.45,
   },
-  visuals: { trailLength: 800 },
+  visuals: { trailLength: 1600 },
 });
 
 function onImport(parsed) {
@@ -563,43 +561,11 @@ function simStep(dt_yr, realDt_s) {
   } else if (orbitState.mode === "slingshot") {
     stepSystemWhileShipAutopilots(dt_yr, boost);
     const planet = orbitState.planet;
-    if (planet) {
-      // Drag rotates the ship around the planet; this is an aiming orbit,
-      // not a physically simulated satellite orbit.
-      let orbitAngle;
-      if (orbitDrag) {
-        const ddx = orbitDrag.curX - orbitDrag.startX;
-        const ddy = orbitDrag.curY - orbitDrag.startY;
-        const dd = Math.sqrt(ddx * ddx + ddy * ddy);
-        if (dd > 2) {
-          // drag direction in screen space = orbit angle (ship is on that side of planet)
-          orbitAngle = Math.atan2(ddy, ddx);
-        } else {
-          orbitAngle = Math.atan2(
-            orbitState.shipOffset.dy,
-            orbitState.shipOffset.dx,
-          );
-        }
-      } else {
-        orbitAngle = Math.atan2(
-          orbitState.shipOffset.dy,
-          orbitState.shipOffset.dx,
-        );
-      }
-
-      const orbitR = orbitState.orbitR || getSlingshotOrbitRadius(planet);
-      orbitState.shipOffset.dx = Math.cos(orbitAngle) * orbitR;
-      orbitState.shipOffset.dy = Math.sin(orbitAngle) * orbitR;
-
-      ship.x = planet.x + orbitState.shipOffset.dx;
-      ship.y = planet.y + orbitState.shipOffset.dy;
+    if (planet && ship) {
+      ship.x = planet.x;
+      ship.y = planet.y;
       ship.vx = planet.vx;
       ship.vy = planet.vy;
-      // Nose always points toward planet center
-      shipAngle = Math.atan2(
-        -orbitState.shipOffset.dy,
-        -orbitState.shipOffset.dx,
-      );
     }
   }
 }
@@ -649,9 +615,6 @@ function beginOrbitCapture(planet) {
 
   const dx = ship.x - planet.x;
   const dy = ship.y - planet.y;
-  const startDist = Math.max(Math.sqrt(dx * dx + dy * dy), 1e-6);
-  const startAngle = Math.atan2(dy, dx);
-  const orbitR = getSlingshotOrbitRadius(planet);
   const startRelVx = ship.vx - planet.vx;
   const startRelVy = ship.vy - planet.vy;
 
@@ -659,7 +622,6 @@ function beginOrbitCapture(planet) {
     mode: "capturing",
     planet,
     shipOffset: { dx, dy },
-    orbitR,
     capture: {
       age: 0,
       simAge: 0,
@@ -668,7 +630,6 @@ function beginOrbitCapture(planet) {
       startDy: dy,
       startRelVx,
       startRelVy,
-      startAngle,
     },
   };
 
@@ -693,12 +654,10 @@ function updateCapture(dt_yr, realDt_s) {
   const t = easeInOutCubic(rawT);
   const driftDx = capture.startDx + capture.startRelVx * capture.simAge;
   const driftDy = capture.startDy + capture.startRelVy * capture.simAge;
-  const targetDx = Math.cos(capture.startAngle) * orbitState.orbitR;
-  const targetDy = Math.sin(capture.startAngle) * orbitState.orbitR;
 
   orbitState.shipOffset = {
-    dx: driftDx + (targetDx - driftDx) * t,
-    dy: driftDy + (targetDy - driftDy) * t,
+    dx: driftDx * (1 - t),
+    dy: driftDy * (1 - t),
   };
 
   const prevX = ship.x;
@@ -709,16 +668,16 @@ function updateCapture(dt_yr, realDt_s) {
     ship.vx = (ship.x - prevX) / dt_yr;
     ship.vy = (ship.y - prevY) / dt_yr;
   }
-  shipAngle = Math.atan2(-orbitState.shipOffset.dy, -orbitState.shipOffset.dx);
 
   if (rawT >= 1) {
+    ship.x = planet.x;
+    ship.y = planet.y;
     ship.vx = planet.vx;
     ship.vy = planet.vy;
     orbitState = {
       mode: "slingshot",
       planet,
-      orbitR: orbitState.orbitR,
-      shipOffset: { ...orbitState.shipOffset },
+      shipOffset: { dx: 0, dy: 0 },
     };
   }
 }
@@ -780,20 +739,19 @@ function fireShot() {
   const nx = ddx / dist; // drag direction unit vector
   const ny = ddy / dist;
 
-  // dv proportional to drag fraction, shot direction is OPPOSITE to drag
+  // dv proportional to aim distance, shot direction follows the mouse.
   const power = clamped / maxDrag;
   const dv = power * settings.settings.orbit.shotPower * 0.01;
   totalEnergySpent += power * settings.settings.orbit.shotPower;
 
-  // Apply impulse to planet (opposite to drag direction)
-  planet.vx += -nx * dv;
-  planet.vy += -ny * dv;
+  planet.vx += nx * dv;
+  planet.vy += ny * dv;
 
-  // Recoil to ship (same as drag direction = opposite of planet shot)
+  // Recoil to ship: opposite of planet impulse.
   const recoil = dv * settings.settings.orbit.recoilMult;
   if (ship) {
-    ship.vx += nx * recoil;
-    ship.vy += ny * recoil;
+    ship.vx -= nx * recoil;
+    ship.vy -= ny * recoil;
   }
 
   captureReleaseLockPlanetId = planet.id;
@@ -1019,7 +977,7 @@ function applyBrakeThrust(thrust, dt_yr, realDt_s) {
 function spawnThrustParticles(power, realDt_s, forceAngle = shipAngle) {
   if (!ship || power <= 0) return;
 
-  const count = Math.min(26, Math.ceil((4 + power * power * 26) * realDt_s * 60));
+  const count = Math.min(18, Math.ceil((8 + power * 12) * realDt_s * 60));
   const backX = -Math.cos(forceAngle);
   const backY = -Math.sin(forceAngle);
   const sideX = -backY;
@@ -1028,21 +986,22 @@ function spawnThrustParticles(power, realDt_s, forceAngle = shipAngle) {
   const nozzleOffset = Math.max(SHIP_LENGTH_AU * 0.5, 10 / s);
 
   for (let i = 0; i < count; i++) {
-    const spread = (Math.random() - 0.5) * (0.18 + power * 0.18);
+    const spread = (Math.random() - 0.5) * (0.035 + power * 0.045);
     const exhaustX = backX * Math.cos(spread) + sideX * Math.sin(spread);
     const exhaustY = backY * Math.cos(spread) + sideY * Math.sin(spread);
-    const speed = 6 + power * 30.7 + Math.random() * (4 + power * 14.7);
-    const sideKick = (Math.random() - 0.5) * power * 1.33;
+    const speed = 3.2 + power * 9 + (Math.random() - 0.5) * (0.5 + power * 1.4);
+    const sideKick = (Math.random() - 0.5) * power * 0.18;
+    const offset = (Math.random() - 0.5) * 1.8 / s;
 
     thrustParticles.push({
-      x: ship.x + backX * nozzleOffset + sideX * ((Math.random() - 0.5) * 4 / s),
-      y: ship.y + backY * nozzleOffset + sideY * ((Math.random() - 0.5) * 4 / s),
+      x: ship.x + backX * nozzleOffset + sideX * offset,
+      y: ship.y + backY * nozzleOffset + sideY * offset,
       vx: ship.vx + exhaustX * speed + sideX * sideKick,
       vy: ship.vy + exhaustY * speed + sideY * sideKick,
-      size: 0.45 + Math.random() * (0.75 + power * 1.1),
+      size: 0.6 + power * 0.75 + Math.random() * 0.25,
       age: 0,
-      duration: 0.08 + Math.random() * 0.1 + power * 0.07,
-      heat: 0.45 + Math.random() * 0.55,
+      duration: 0.3 + power * 0.28 + Math.random() * 0.08,
+      phase: Math.random() * Math.PI * 2,
     });
   }
 
@@ -1058,8 +1017,17 @@ function spawnThrustParticles(power, realDt_s, forceAngle = shipAngle) {
 function computePrediction() {
   if (!ship) return [];
   if (orbitState.mode !== "free") return [];
+  if (shouldHidePredictionWhileBraking()) return [];
 
-  const ghosts = bodies.map((b) => ({
+  return computeProjectedPath({
+    targetId: "ship",
+    targetBody: ship,
+    gravityBoost: settings.settings.orbit.planetGravBoost,
+  });
+}
+
+function makePredictionGhosts() {
+  return bodies.map((b) => ({
     id: b.id,
     x: b.x,
     y: b.y,
@@ -1069,24 +1037,32 @@ function computePrediction() {
     isFixed: b.isFixed,
     isPlanet: b.isPlanet,
   }));
+}
 
-  const shipIdx = ghosts.findIndex((g) => g.id === "ship");
-  if (shipIdx < 0) return [];
+function computeProjectedPath({
+  targetId,
+  targetBody,
+  applyInitialImpulse = null,
+  gravityBoost = 1,
+}) {
+  const ghosts = makePredictionGhosts();
+  const targetIdx = ghosts.findIndex((g) => g.id === targetId);
+  if (targetIdx < 0) return [];
 
-  const path = [{ x: ghosts[shipIdx].x, y: ghosts[shipIdx].y }];
+  if (applyInitialImpulse) applyInitialImpulse(ghosts[targetIdx]);
+
+  const path = [{ x: ghosts[targetIdx].x, y: ghosts[targetIdx].y, t: 0 }];
   const targetWorldSegment = PRED_TARGET_SEGMENT_PX / Math.max(scale(), 0.0001);
-
-  const boost = settings.settings.orbit.planetGravBoost;
+  const ghostSun = ghosts.find((g) => g.id === "sun");
+  const crashRadius = getPredictionCrashRadius(targetBody);
   let elapsed = 0;
   let step = 0;
-  let lastX = ghosts[shipIdx].x;
-  let lastY = ghosts[shipIdx].y;
+  let lastX = ghosts[targetIdx].x;
+  let lastY = ghosts[targetIdx].y;
 
   while (elapsed < PRED_HORIZON_YR && step < PRED_MAX_STEPS) {
-    const ghostShip = ghosts[shipIdx];
-    const speed = Math.sqrt(
-      ghostShip.vx * ghostShip.vx + ghostShip.vy * ghostShip.vy,
-    );
+    const target = ghosts[targetIdx];
+    const speed = Math.sqrt(target.vx * target.vx + target.vy * target.vy);
     const speedDt = speed > 1e-6 ? targetWorldSegment / speed : PRED_BASE_DT_YR;
     const predDt = Math.min(
       PRED_BASE_DT_YR,
@@ -1096,26 +1072,65 @@ function computePrediction() {
 
     applyBlackHoleGravityLocal(ghosts, predDt);
     applySolarGravityWell(ghosts, predDt);
-    gravityStep(ghosts, predDt, boost);
+    gravityStep(ghosts, predDt, gravityBoost);
+    elapsed += predDt;
 
-    const dx = ghosts[shipIdx].x - lastX;
-    const dy = ghosts[shipIdx].y - lastY;
-    if (Math.sqrt(dx * dx + dy * dy) >= targetWorldSegment * 0.6) {
-      path.push({ x: ghosts[shipIdx].x, y: ghosts[shipIdx].y });
-      lastX = ghosts[shipIdx].x;
-      lastY = ghosts[shipIdx].y;
+    const t = elapsed / PRED_HORIZON_YR;
+    if (
+      isPredictionInBlackHole(ghosts[targetIdx]) ||
+      isPredictionInSun(ghosts[targetIdx], ghostSun, crashRadius)
+    ) {
+      path.push({ x: ghosts[targetIdx].x, y: ghosts[targetIdx].y, t });
+      break;
     }
 
-    elapsed += predDt;
+    const dx = ghosts[targetIdx].x - lastX;
+    const dy = ghosts[targetIdx].y - lastY;
+    if (Math.sqrt(dx * dx + dy * dy) >= targetWorldSegment * 0.6) {
+      path.push({ x: ghosts[targetIdx].x, y: ghosts[targetIdx].y, t });
+      lastX = ghosts[targetIdx].x;
+      lastY = ghosts[targetIdx].y;
+    }
+
     step++;
   }
 
   const tail = path[path.length - 1];
-  const end = ghosts[shipIdx];
+  const end = ghosts[targetIdx];
   if (!tail || tail.x !== end.x || tail.y !== end.y)
-    path.push({ x: end.x, y: end.y });
+    path.push({ x: end.x, y: end.y, t: elapsed / PRED_HORIZON_YR });
 
   return path;
+}
+
+function isPredictionInBlackHole(predictedShip) {
+  const bh = settings.settings.blackhole;
+  if (!bh || bh.mass <= 0) return false;
+
+  const dx = predictedShip.x - BLACK_HOLE.x;
+  const dy = predictedShip.y - BLACK_HOLE.y;
+  return Math.sqrt(dx * dx + dy * dy) <= BLACK_HOLE.captureR;
+}
+
+function isPredictionInSun(predictedBody, predictedSun, crashRadius) {
+  if (!predictedSun) return false;
+
+  const dx = predictedBody.x - predictedSun.x;
+  const dy = predictedBody.y - predictedSun.y;
+  return Math.sqrt(dx * dx + dy * dy) <= crashRadius;
+}
+
+function getPredictionCrashRadius(body) {
+  return SUN_DESTRUCTION_R + (body?.drawR || 0);
+}
+
+function shouldHidePredictionWhileBraking() {
+  if (!ship) return false;
+  const state = getMouseThrustState();
+  if (state.mode !== "brake") return false;
+
+  const speed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
+  return speed < 0.35;
 }
 
 // =============================================================================
@@ -1125,35 +1140,14 @@ function computePrediction() {
 function computeShotPrediction(planet, nx, ny, dv) {
   if (!planet) return [];
 
-  const ghosts = bodies.map((b) => ({
-    id: b.id,
-    x: b.x,
-    y: b.y,
-    vx: b.vx,
-    vy: b.vy,
-    mass: b.mass,
-    isFixed: b.isFixed,
-    isPlanet: b.isPlanet,
-  }));
-
-  const pidx = ghosts.findIndex((g) => g.id === planet.id);
-  if (pidx < 0) return [];
-
-  // Apply hypothetical impulse
-  ghosts[pidx].vx += -nx * dv;
-  ghosts[pidx].vy += -ny * dv;
-
-  const predDt = 0.005;
-  const path = [];
-
-  for (let step = 0; step < SHOT_PRED_STEPS; step++) {
-    applyBlackHoleGravityLocal(ghosts, predDt);
-    applySolarGravityWell(ghosts, predDt);
-    gravityStep(ghosts, predDt);
-    if (step % 5 === 0) path.push({ x: ghosts[pidx].x, y: ghosts[pidx].y });
-  }
-
-  return path;
+  return computeProjectedPath({
+    targetId: planet.id,
+    targetBody: planet,
+    applyInitialImpulse(target) {
+      target.vx += nx * dv;
+      target.vy += ny * dv;
+    },
+  });
 }
 
 // =============================================================================
@@ -1692,18 +1686,6 @@ function drawSlingshotRing(ctx) {
   ctx.stroke();
   ctx.shadowBlur = 0;
 
-  ctx.strokeStyle = `rgba(${r},${g},${b},${0.4 + pulse * 0.4})`;
-  ctx.lineWidth = 1.5 / s;
-  ctx.beginPath();
-  ctx.arc(
-    planet.x,
-    planet.y,
-    orbitState.orbitR || getSlingshotOrbitRadius(planet),
-    0,
-    Math.PI * 2,
-  );
-  ctx.stroke();
-
   ctx.restore();
 }
 
@@ -1735,7 +1717,7 @@ function drawOrbitCue(ctx) {
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 
-  // Cue stick: extends from planet in drag direction (away from shot)
+  // Aim guide: extends from planet toward the shot direction.
   const cueStart = {
     x: sp.x + nx * (pxR + 4),
     y: sp.y + ny * (pxR + 4),
@@ -1754,15 +1736,15 @@ function drawOrbitCue(ctx) {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // Shot direction arrow (opposite to drag)
+  // Shot direction arrow.
   const shotLen = clamped * 0.8;
   const arrowTip = {
-    x: sp.x - nx * (shotLen + pxR),
-    y: sp.y - ny * (shotLen + pxR),
+    x: sp.x + nx * (shotLen + pxR),
+    y: sp.y + ny * (shotLen + pxR),
   };
   const arrowBase = {
-    x: sp.x - nx * pxR,
-    y: sp.y - ny * pxR,
+    x: sp.x + nx * pxR,
+    y: sp.y + ny * pxR,
   };
   const perp = { x: -ny, y: nx };
 
@@ -1781,12 +1763,12 @@ function drawOrbitCue(ctx) {
   ctx.beginPath();
   ctx.moveTo(arrowTip.x, arrowTip.y);
   ctx.lineTo(
-    arrowTip.x + nx * hw * 2 + perp.x * hw,
-    arrowTip.y + ny * hw * 2 + perp.y * hw,
+    arrowTip.x - nx * hw * 2 + perp.x * hw,
+    arrowTip.y - ny * hw * 2 + perp.y * hw,
   );
   ctx.lineTo(
-    arrowTip.x + nx * hw * 2 - perp.x * hw,
-    arrowTip.y + ny * hw * 2 - perp.y * hw,
+    arrowTip.x - nx * hw * 2 - perp.x * hw,
+    arrowTip.y - ny * hw * 2 - perp.y * hw,
   );
   ctx.closePath();
   ctx.fill();
@@ -1817,19 +1799,7 @@ function drawOrbitCue(ctx) {
   const predPath = computeShotPrediction(planet, nx, ny, dv);
   if (predPath.length >= 2) {
     const [r, g, b] = hexToRgb(planet.color);
-    ctx.save();
-    ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY);
-    ctx.strokeStyle = `rgba(${r},${g},${b},0.4)`;
-    ctx.lineWidth = 1.5 / s;
-    ctx.setLineDash([3 / s, 5 / s]);
-    ctx.beginPath();
-    ctx.moveTo(predPath[0].x, predPath[0].y);
-    for (let i = 1; i < predPath.length; i++) {
-      ctx.lineTo(predPath[i].x, predPath[i].y);
-    }
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.restore();
+    drawProjectionCorridor(ctx, predPath, `${r},${g},${b}`, 0.34);
   }
 }
 
@@ -1838,23 +1808,49 @@ function drawOrbitCue(ctx) {
 // =============================================================================
 
 function drawPredictionPath(ctx) {
+  if (shouldHidePredictionWhileBraking()) return;
   if (shipPredPath.length < 2) return;
+  drawProjectionCorridor(ctx, shipPredPath, "79,195,247", 0.3);
+}
+
+function drawProjectionCorridor(ctx, path, color, maxAlpha) {
+  if (path.length < 2) return;
   const s = scale();
   ctx.save();
   ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY);
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-  ctx.lineWidth = 3.2 / s;
 
-  for (let i = 1; i < shipPredPath.length; i++) {
-    const t = i / (shipPredPath.length - 1);
-    const alpha = 0.28 * Math.pow(1 - t, 1.35);
+  for (let i = 1; i < path.length; i++) {
+    const t = Math.max(0, Math.min(1, path[i].t ?? i / (path.length - 1)));
+    const alpha = maxAlpha * Math.pow(1 - t, 1.35);
     if (alpha <= 0.003) continue;
 
-    ctx.strokeStyle = `rgba(79,195,247,${alpha})`;
+    const dx = path[i].x - path[i - 1].x;
+    const dy = path[i].y - path[i - 1].y;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len <= 1e-8) continue;
+
+    const nx = -dy / len;
+    const ny = dx / len;
+    const prevT = Math.max(
+      0,
+      Math.min(1, path[i - 1].t ?? (i - 1) / (path.length - 1)),
+    );
+    const prevOffset = (Math.pow(prevT, 0.9) * 42) / s;
+    const offset = (Math.pow(t, 0.9) * 42) / s;
+
+    ctx.lineWidth = 1.4 / s;
+    ctx.strokeStyle = `rgba(${color},${alpha})`;
+
     ctx.beginPath();
-    ctx.moveTo(shipPredPath[i - 1].x, shipPredPath[i - 1].y);
-    ctx.lineTo(shipPredPath[i].x, shipPredPath[i].y);
+    ctx.moveTo(path[i - 1].x + nx * prevOffset, path[i - 1].y + ny * prevOffset);
+    ctx.lineTo(path[i].x + nx * offset, path[i].y + ny * offset);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(path[i - 1].x - nx * prevOffset, path[i - 1].y - ny * prevOffset);
+    ctx.lineTo(path[i].x - nx * offset, path[i].y - ny * offset);
     ctx.stroke();
   }
 
@@ -1891,17 +1887,35 @@ function drawBody(ctx, body, w, h) {
   if (pts.length >= 2) {
     ctx.save();
     ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY);
-    ctx.strokeStyle =
-      body.id === "ship" ? "rgba(79,195,247,0.35)" : body.color + "55";
-    ctx.lineWidth = Math.max(0.8 / s, 0.00001);
-    ctx.beginPath();
-    ctx.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-    ctx.stroke();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    if (body.id === "ship") {
+      ctx.lineWidth = Math.max(3 / s, 0.00001);
+      for (let i = 1; i < pts.length; i++) {
+        const t = i / (pts.length - 1);
+        ctx.strokeStyle = `rgba(255,132,38,${0.03 + t * 0.3})`;
+        ctx.beginPath();
+        ctx.moveTo(pts[i - 1].x, pts[i - 1].y);
+        ctx.lineTo(pts[i].x, pts[i].y);
+        ctx.stroke();
+      }
+    } else {
+      const [r, g, b] = hexToRgb(body.color);
+      ctx.lineWidth = Math.max(1.35 / s, 0.00001);
+      for (let i = 1; i < pts.length; i++) {
+        const t = i / (pts.length - 1);
+        ctx.strokeStyle = `rgba(${r},${g},${b},${0.02 + t * 0.22})`;
+        ctx.beginPath();
+        ctx.moveTo(pts[i - 1].x, pts[i - 1].y);
+        ctx.lineTo(pts[i].x, pts[i].y);
+        ctx.stroke();
+      }
+    }
     ctx.restore();
   }
 
   if (body.id === "ship") {
+    if (orbitState.mode === "slingshot") return;
     drawShip(ctx, body, screenR, w, h);
     return;
   }
@@ -2587,15 +2601,65 @@ function drawThrustParticles(ctx) {
 
   for (const particle of thrustParticles) {
     const t = Math.min(1, particle.age / particle.duration);
-    const alpha = Math.pow(1 - t, 1.25);
-    const r = Math.max(0.45 / s, (particle.size * (1 + t * 0.35)) / s);
-    const heat = particle.heat * (1 - t);
+    const alpha = Math.pow(1 - t, 1.7);
+    const r = Math.max(0.55 / s, (particle.size * (1 - t * 0.15)) / s);
+    const core = 0.65 + 0.35 * Math.sin(particle.phase + particle.age * 24);
 
-    ctx.fillStyle = `rgba(255,${Math.round(130 + heat * 100)},${Math.round(35 + heat * 70)},${alpha * 0.92})`;
+    ctx.fillStyle = `rgba(${Math.round(130 + core * 90)},${Math.round(210 + core * 35)},255,${alpha * 0.72})`;
     ctx.beginPath();
     ctx.arc(particle.x, particle.y, r, 0, Math.PI * 2);
     ctx.fill();
   }
+
+  ctx.restore();
+}
+
+function drawIonPlumeCore(ctx) {
+  if (!ship || orbitState.mode !== "free") return;
+
+  const state = getMouseThrustState();
+  let forceAngle = shipAngle;
+  let power = 0;
+
+  if (state.mode === "forward") {
+    power = state.power;
+  } else if (state.mode === "brake") {
+    const speed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
+    if (speed > 1e-6) {
+      forceAngle = Math.atan2(-ship.vy, -ship.vx);
+      power = Math.min(1, speed / 2.5);
+    }
+  }
+  if (power <= 0) return;
+
+  const sp = worldToScreen(ship.x, ship.y);
+  const backX = -Math.cos(forceAngle);
+  const backY = -Math.sin(forceAngle);
+  const start = 11;
+  const len = 34 + power * 44;
+  const width = 1.5 + power * 2.2;
+
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalCompositeOperation = "lighter";
+  ctx.lineCap = "round";
+
+  const grad = ctx.createLinearGradient(
+    sp.x + backX * start,
+    sp.y + backY * start,
+    sp.x + backX * (start + len),
+    sp.y + backY * (start + len),
+  );
+  grad.addColorStop(0, `rgba(210,245,255,${0.42 * power})`);
+  grad.addColorStop(0.45, `rgba(99,202,255,${0.24 * power})`);
+  grad.addColorStop(1, "rgba(52,130,255,0)");
+
+  ctx.strokeStyle = grad;
+  ctx.lineWidth = width;
+  ctx.beginPath();
+  ctx.moveTo(sp.x + backX * start, sp.y + backY * start);
+  ctx.lineTo(sp.x + backX * (start + len), sp.y + backY * (start + len));
+  ctx.stroke();
 
   ctx.restore();
 }
@@ -2782,6 +2846,7 @@ function render(ctx, w, h, realDt) {
   drawPredictionPath(ctx);
   drawCaptureTether(ctx);
 
+  drawIonPlumeCore(ctx);
   drawThrustParticles(ctx);
 
   for (const body of bodies) {
