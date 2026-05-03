@@ -680,16 +680,16 @@ function updateSolarCharge(realDt_s) {
 function tickSolarParticles(realDt_s, w, h) {
   // Panel and gauge/bar positions (must match drawEnergyHUD)
   const panelX = 12;
-  const panelY = 12;
+  const panelY = 46;
   const panelW = 84;
-  const panelH = h - 24;
-  const gaugeR   = 30;
-  const gaugeSectionH = gaugeR * 2 + 40;
+  const panelH = h - panelY - 12;
+  const gaugeR        = 32;
+  const gaugeSectionH = gaugeR * 2 + 52;
   const barX  = panelX + 22;
   const barW  = 40;
   const barCx = barX + barW / 2;
-  const barY  = panelY + 28;
-  const barH  = panelH - gaugeSectionH - barY + panelY - 8;
+  const barY  = panelY + 32;
+  const barH  = panelH - gaugeSectionH - 32 - 16;
   const gaugeCx = barCx;
   const gaugeCy = panelY + panelH - gaugeR - 18;
 
@@ -2636,9 +2636,9 @@ function drawEnergyHUD(ctx, w, h) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 
   const panelX = 12;
-  const panelY = 12;
+  const panelY = 46;   // clear of focus buttons (12 + 22 + 12)
   const panelW = 84;
-  const panelH = h - 24;
+  const panelH = h - panelY - 12;
 
   // Panel background
   ctx.fillStyle = "rgba(2,8,20,0.80)";
@@ -2649,13 +2649,13 @@ function drawEnergyHUD(ctx, w, h) {
   ctx.stroke();
 
   // --- Layout constants ---
-  const gaugeR   = 30;
-  const gaugeSectionH = gaugeR * 2 + 40; // arc + label above + % below
+  const gaugeR        = 32;
+  const gaugeSectionH = gaugeR * 2 + 52; // label above + arc + % below
   const barX  = panelX + 22;
   const barW  = 40;
   const barCx = barX + barW / 2;
-  const barY  = panelY + 28;
-  const barH  = panelH - gaugeSectionH - barY + panelY - 8;
+  const barY  = panelY + 32;
+  const barH  = panelH - gaugeSectionH - 32 - 16; // top margin + bottom gap
 
   const energyFrac = shipEnergy / SOLAR_MAX_ENERGY;
 
