@@ -88,6 +88,11 @@ const sketches = [
     name: 'Free Flight',
     description: 'Mouse-aimed ship: face the cursor, click-hold to thrust with magnitude-based power. Scroll to zoom.',
   },
+  {
+    id: '008',
+    name: 'WASD Flight',
+    description: 'WASD-controlled ship: A/D to rotate, W to thrust, S to brake. Mouse still used for slingshot aiming.',
+  },
 ]
 
 const exampleJson = `{
