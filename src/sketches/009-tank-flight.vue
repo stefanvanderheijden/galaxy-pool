@@ -1148,10 +1148,24 @@ function applyShipInput(dt_yr, realDt_s) {
   if (!ship) return;
   const thrust = settings.settings.ship.thrustAccel;
 
-  // Compute screen-axis thrust vector: W=up, S=down, A=left, D=right
+  // S = retrograde brake (same as 008)
+  if (keys.s) {
+    const speed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
+    if (speed > 1e-6) {
+      const maxBrakeDv = thrust * dt_yr;
+      const brakeDv = Math.min(speed, maxBrakeDv);
+      const brakePower = brakeDv / maxBrakeDv;
+      ship.vx -= (ship.vx / speed) * brakeDv;
+      ship.vy -= (ship.vy / speed) * brakeDv;
+      spawnThrustParticles(brakePower, realDt_s, Math.atan2(ship.vy, ship.vx), dt_yr);
+    }
+    thrustActiveLastFrame = true;
+    return;
+  }
+
+  // W=up, A=left, D=right in screen space
   let fx = 0, fy = 0;
   if (keys.w) fy -= 1;
-  if (keys.s) fy += 1;
   if (keys.a) fx -= 1;
   if (keys.d) fx += 1;
 
@@ -1169,11 +1183,9 @@ function applyShipInput(dt_yr, realDt_s) {
   fx /= flen;
   fy /= flen;
 
-  // In world space, screen-up is -Y (cam not rotated)
   ship.vx += fx * thrust * dt_yr;
   ship.vy += fy * thrust * dt_yr;
 
-  // Ship faces the thrust direction
   const forceAngle = Math.atan2(fy, fx);
   shipAngle = forceAngle;
 
@@ -1182,8 +1194,9 @@ function applyShipInput(dt_yr, realDt_s) {
 
 function getWASDThrustState() {
   if (!ship) return { mode: "coast", power: 0 };
+  if (keys.s) return { mode: "brake", power: 1 };
   const fx = (keys.d ? 1 : 0) - (keys.a ? 1 : 0);
-  const fy = (keys.s ? 1 : 0) - (keys.w ? 1 : 0);
+  const fy = keys.w ? -1 : 0;
   if (fx !== 0 || fy !== 0) return { mode: "forward", power: 1 };
   return { mode: "coast", power: 0 };
 }
