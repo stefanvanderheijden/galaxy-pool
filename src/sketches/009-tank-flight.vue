@@ -317,6 +317,7 @@ const keys = {
   a: false,
   s: false,
   d: false,
+  space: false,
 };
 
 // Prediction path
@@ -1148,8 +1149,8 @@ function applyShipInput(dt_yr, realDt_s) {
   if (!ship) return;
   const thrust = settings.settings.ship.thrustAccel;
 
-  // S = retrograde brake (same as 008)
-  if (keys.s) {
+  // Spacebar = retrograde brake
+  if (keys.space) {
     const speed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
     if (speed > 1e-6) {
       const maxBrakeDv = thrust * dt_yr;
@@ -1163,16 +1164,16 @@ function applyShipInput(dt_yr, realDt_s) {
     return;
   }
 
-  // W=up, A=left, D=right in screen space
+  // W=up, A=left, S=down, D=right in screen space
   let fx = 0, fy = 0;
   if (keys.w) fy -= 1;
+  if (keys.s) fy += 1;
   if (keys.a) fx -= 1;
   if (keys.d) fx += 1;
 
   const thrustingThisFrame = fx !== 0 || fy !== 0;
   if (!thrustingThisFrame) {
     thrustActiveLastFrame = false;
-    // Ship faces velocity direction when coasting
     const speed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
     if (speed > 1e-4) shipAngle = Math.atan2(ship.vy, ship.vx);
     return;
@@ -1194,9 +1195,9 @@ function applyShipInput(dt_yr, realDt_s) {
 
 function getWASDThrustState() {
   if (!ship) return { mode: "coast", power: 0 };
-  if (keys.s) return { mode: "brake", power: 1 };
+  if (keys.space) return { mode: "brake", power: 1 };
   const fx = (keys.d ? 1 : 0) - (keys.a ? 1 : 0);
-  const fy = keys.w ? -1 : 0;
+  const fy = (keys.s ? 1 : 0) - (keys.w ? 1 : 0);
   if (fx !== 0 || fy !== 0) return { mode: "forward", power: 1 };
   return { mode: "coast", power: 0 };
 }
@@ -3361,6 +3362,7 @@ function initCanvas(canvas) {
     if (e.key === "a" || e.key === "A") { keys.a = true; e.preventDefault(); }
     if (e.key === "s" || e.key === "S") { keys.s = true; e.preventDefault(); }
     if (e.key === "d" || e.key === "D") { keys.d = true; e.preventDefault(); }
+    if (e.key === " ") { keys.space = true; e.preventDefault(); }
   }
 
   function onKeyUp(e) {
@@ -3368,6 +3370,7 @@ function initCanvas(canvas) {
     if (e.key === "a" || e.key === "A") keys.a = false;
     if (e.key === "s" || e.key === "S") keys.s = false;
     if (e.key === "d" || e.key === "D") keys.d = false;
+    if (e.key === " ") keys.space = false;
   }
 
   window.addEventListener("keydown", onKeyDown);
@@ -3525,7 +3528,7 @@ function initCanvas(canvas) {
     observer.disconnect();
     window.removeEventListener("keydown", onKeyDown);
     window.removeEventListener("keyup", onKeyUp);
-    keys.w = keys.a = keys.s = keys.d = false;
+    keys.w = keys.a = keys.s = keys.d = keys.space = false;
     canvas.removeEventListener("mousedown", onMouseDown);
     canvas.removeEventListener("mousemove", onMouseMove);
     canvas.removeEventListener("mouseup", onMouseUp);
