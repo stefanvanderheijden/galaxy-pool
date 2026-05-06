@@ -93,6 +93,11 @@ const sketches = [
     name: 'WASD Flight',
     description: 'WASD-controlled ship: A/D to rotate, W to thrust, S to brake. Mouse still used for slingshot aiming.',
   },
+  {
+    id: '009',
+    name: 'Tank Flight',
+    description: 'Screen-space WASD: W=up, S=down, A=left, D=right. Ship faces the thrust direction. Slingshot via mouse.',
+  },
 ]
 
 const exampleJson = `{
