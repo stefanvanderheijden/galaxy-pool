@@ -1153,12 +1153,13 @@ function applyShipInput(dt_yr, realDt_s) {
   if (keys.space) {
     const speed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
     if (speed > 1e-6) {
+      const retroAngle = Math.atan2(-ship.vy, -ship.vx); // opposite of velocity = thrust direction
       const maxBrakeDv = thrust * dt_yr;
       const brakeDv = Math.min(speed, maxBrakeDv);
       const brakePower = brakeDv / maxBrakeDv;
       ship.vx -= (ship.vx / speed) * brakeDv;
       ship.vy -= (ship.vy / speed) * brakeDv;
-      spawnThrustParticles(brakePower, realDt_s, Math.atan2(ship.vy, ship.vx), dt_yr);
+      spawnThrustParticles(brakePower, realDt_s, retroAngle, dt_yr);
     }
     thrustActiveLastFrame = true;
     return;
