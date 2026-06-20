@@ -5,6 +5,9 @@
     <!-- Settings panel slot -->
     <slot name="settings" />
 
+    <!-- Default slot: floating overlays (help button/modal, etc.) -->
+    <slot />
+
     <div class="controls">
       <div class="controls-center">
         <div class="speed-display">

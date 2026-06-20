@@ -8,6 +8,71 @@
     @toggle-play="togglePlay"
     @reset="reset"
   >
+    <!-- Help button (top-right, left of Settings) -->
+    <button class="help-toggle" @click="helpOpen = true">? Help</button>
+
+    <!-- Help modal -->
+    <div v-if="helpOpen" class="modal-backdrop" @click.self="helpOpen = false">
+      <div class="modal-box help-box">
+        <div class="modal-title">Galaxy Pool — How to play</div>
+        <div class="modal-body help-body">
+          <p>
+            <strong>Goal.</strong> Cosmic pool: pocket every planet into the
+            <strong>black hole</strong>. Each one scores +1. Lose a planet to the
+            <strong>sun</strong> and it's a −1 penalty. Sink them all for a perfect run.
+          </p>
+
+          <div class="help-h">Flying</div>
+          <p>
+            You pilot one ship. Steering mode is set in Settings (default
+            <strong>Drift</strong>):
+            <strong>W</strong> speed up · <strong>S</strong> brake ·
+            <strong>A/D</strong> strafe port/starboard · <strong>Space</strong> full brake. Only the
+            sun's gravity pulls the ship — slingshot around it.
+          </p>
+
+          <div class="help-h">Shooting a planet</div>
+          <p>
+            Drift into a planet to <strong>dock</strong> (it must be fully observed first — see
+            below). Then <strong>drag back</strong> with the mouse and release to fire it like a cue
+            ball — the pulled-back distance sets the power. Shots cost
+            <strong>solar energy</strong>; the energy bar previews the draw and caps at what you've
+            stored. Click near the planet (the red <strong>RELEASE</strong> ring) to cancel.
+          </p>
+
+          <div class="help-h">Energy</div>
+          <p>
+            The left dial shows stored <strong>energy</strong> and your
+            <strong>solar</strong> charge rate — fly nearer the sun to recharge faster.
+          </p>
+
+          <div class="help-h">Fog of war &amp; radar</div>
+          <p>
+            Space is dark until explored. Your <strong>vision</strong> circle permanently clears the
+            grid as you fly. The rotating <strong>radar</strong> sweep detects bodies it crosses and
+            tracks them through the fog as dots. Approaching a new body runs an
+            <strong>observation</strong> scan; only once it completes does its name and detail
+            readout (bottom-right screen) unlock — and you can dock it.
+          </p>
+
+          <div class="help-h">Watch out</div>
+          <p>
+            <strong>Gas clouds</strong> bleed off velocity like atmospheric drag. The
+            <strong>sun</strong> destroys anything that falls in.
+          </p>
+
+          <div class="help-h">Keys</div>
+          <p class="help-keys">
+            <strong>W A S D</strong> thrust · <strong>Space</strong> brake ·
+            <strong>1–4</strong> / <strong>Q E</strong> time speed · <strong>Z</strong> focus sun ·
+            <strong>X</strong> focus ship · <strong>Esc</strong> release dock ·
+            <strong>R</strong> reset · <strong>Mouse wheel</strong> zoom.
+          </p>
+        </div>
+        <button class="modal-close" @click="helpOpen = false">Close</button>
+      </div>
+    </div>
+
     <template #settings>
       <SettingsPanel @export="settings.exportJSON()" @import="onImport">
         <SettingsSection title="Spaceship">
@@ -268,6 +333,7 @@ const STEERING_OPTIONS = [
   { value: 'drift', label: 'Drift' },
 ]
 const steeringModalOpen = ref(false)
+const helpOpen = ref(false)
 
 // Unit system (AU, Solar masses, Julian years) and the physics/render tunables
 // G_SIM, SOFTENING, AU_KM, PX_PER_AU, MAX_DT, SECONDS_PER_YEAR come from
@@ -5009,5 +5075,47 @@ watch(
 .modal-close:hover {
   background: #1a1a40;
   color: #e0e0e0;
+}
+
+/* Help button — sits at the top-right, just left of the Settings toggle. */
+.help-toggle {
+  position: absolute;
+  top: 12px;
+  right: 104px;
+  z-index: 100;
+  background: rgba(15, 15, 30, 0.9);
+  color: #aaa;
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  padding: 5px 12px;
+  cursor: pointer;
+  font-family: monospace;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+}
+.help-toggle:hover {
+  background: #1a1a40;
+  color: #e0e0e0;
+}
+
+/* Help modal — wider than the default modal and scrollable for the longer copy. */
+.help-box {
+  max-width: 440px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+.help-body p {
+  margin: 0 0 12px;
+}
+.help-body .help-h {
+  color: #4fc3f7;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin: 14px 0 4px;
+}
+.help-body .help-keys {
+  color: #99a;
+  font-size: 11px;
 }
 </style>
