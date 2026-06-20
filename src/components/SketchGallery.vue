@@ -90,13 +90,18 @@ const sketches = [
   },
   {
     id: '008',
-    name: 'WASD Flight',
-    description: 'WASD-controlled ship: A/D to rotate, W to thrust, S to brake. Mouse still used for slingshot aiming.',
+    name: 'Tank Flight',
+    description: 'Turn-and-drive controls: A/D rotate the ship, W thrusts along its heading, S brakes. Mouse still used for slingshot aiming.',
   },
   {
     id: '009',
-    name: 'Tank Flight',
-    description: 'Screen-space WASD: W=up, S=down, A=left, D=right. Ship faces the thrust direction. Slingshot via mouse.',
+    name: 'Screen Flight',
+    description: 'Absolute screen-direction thrust: W=up, S=down, A=left, D=right. Ship faces the thrust direction. Slingshot via mouse.',
+  },
+  {
+    id: '010',
+    name: 'Drift Flight',
+    description: 'Thrust relative to your direction of travel: W prograde (speed up), S retrograde (brake), A/D thrust to port/starboard. Slingshot via mouse.',
   },
 ]
 
