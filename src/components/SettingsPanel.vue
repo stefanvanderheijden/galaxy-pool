@@ -8,19 +8,15 @@
     <!-- Panel -->
     <div v-if="open" class="panel">
       <div class="panel-inner">
-
         <slot />
 
         <div class="panel-footer">
-          <button class="footer-btn export-btn" @click="$emit('export')">
-            ↓ Export settings
-          </button>
+          <button class="footer-btn export-btn" @click="$emit('export')">↓ Export settings</button>
           <label class="footer-btn import-btn">
             ↑ Import settings
             <input type="file" accept=".json" class="file-input" @change="onFileChange" />
           </label>
         </div>
-
       </div>
     </div>
   </div>
@@ -88,7 +84,7 @@ function onFileChange(e) {
   border: 1px solid #2a2a4a;
   border-radius: 6px;
   width: 260px;
-  box-shadow: 0 4px 24px rgba(0,0,0,0.6);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.6);
   max-height: calc(100vh - 80px);
   display: flex;
   flex-direction: column;
@@ -124,15 +120,32 @@ function onFileChange(e) {
   border: 1px solid #333;
   background: #111128;
   color: #aaa;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
-.footer-btn:hover { background: #1a1a40; color: #e0e0e0; }
+.footer-btn:hover {
+  background: #1a1a40;
+  color: #e0e0e0;
+}
 
-.export-btn { border-color: #2a4a2a; color: #7bc87b; }
-.export-btn:hover { background: #0f2010; color: #a5d6a7; }
+.export-btn {
+  border-color: #2a4a2a;
+  color: #7bc87b;
+}
+.export-btn:hover {
+  background: #0f2010;
+  color: #a5d6a7;
+}
 
-.import-btn { border-color: #2a3a4a; color: #7bafd6; }
-.import-btn:hover { background: #0f1a28; color: #4fc3f7; }
+.import-btn {
+  border-color: #2a3a4a;
+  color: #7bafd6;
+}
+.import-btn:hover {
+  background: #0f1a28;
+  color: #4fc3f7;
+}
 
 .file-input {
   display: none;

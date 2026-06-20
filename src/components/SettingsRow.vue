@@ -3,7 +3,9 @@
     <div class="row-header">
       <span class="row-label">
         {{ label }}
-        <button v-if="tooltip" class="info-btn" title="More info" @click.stop="modalOpen = true">i</button>
+        <button v-if="tooltip" class="info-btn" title="More info" @click.stop="modalOpen = true">
+          i
+        </button>
       </span>
       <span class="row-value">{{ displayValue }}</span>
     </div>
@@ -35,13 +37,13 @@ export default { inheritAttrs: false }
 import { ref, computed } from 'vue'
 
 const props = defineProps({
-  label:       { type: String,  required: true },
-  modelValue:  { type: Number,  required: true },
-  min:         { type: Number,  default: 0 },
-  max:         { type: Number,  default: 1 },
-  step:        { type: Number,  default: 0.01 },
-  decimals:    { type: Number,  default: 2 },
-  tooltip:     { type: String,  default: '' },
+  label: { type: String, required: true },
+  modelValue: { type: Number, required: true },
+  min: { type: Number, default: 0 },
+  max: { type: Number, default: 1 },
+  step: { type: Number, default: 0.01 },
+  decimals: { type: Number, default: 2 },
+  tooltip: { type: String, default: '' },
 })
 
 defineEmits(['update:modelValue'])
@@ -127,7 +129,7 @@ input[type='range'] {
   max-width: 320px;
   width: 90%;
   font-family: monospace;
-  box-shadow: 0 8px 40px rgba(0,0,0,0.7);
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.7);
 }
 
 .modal-title {

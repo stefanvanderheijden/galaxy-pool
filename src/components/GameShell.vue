@@ -11,14 +11,8 @@
           <span class="speed-label">SPEED</span>
           <div class="speed-track-wrap">
             <div class="speed-track">
-              <div
-                class="speed-fill"
-                :style="{ width: fillPct + '%' }"
-              ></div>
-              <div
-                class="speed-thumb"
-                :style="{ left: fillPct + '%' }"
-              ></div>
+              <div class="speed-fill" :style="{ width: fillPct + '%' }"></div>
+              <div class="speed-thumb" :style="{ left: fillPct + '%' }"></div>
               <div
                 v-for="(step, i) in STEPS"
                 :key="i"
@@ -34,7 +28,8 @@
                 class="speed-step-label"
                 :class="{ active: isActiveStep(i) }"
                 :style="{ left: stepPct(i) + '%' }"
-              >{{ step.label }}</span>
+                >{{ step.label }}</span
+              >
             </div>
           </div>
           <span class="speed-value">{{ formatSpeed(timeScale) }}</span>
@@ -64,10 +59,10 @@ import { computed, onMounted, ref } from 'vue'
 import { TIME_STEPS as STEPS } from '../timeSteps.js'
 
 const props = defineProps({
-  isPlaying:    { type: Boolean, default: true },
-  timeScale:    { type: Number,  default: 1 },
-  bodyCount:    { type: Number,  default: 0 },
-  elapsedLabel: { type: String,  default: '' },
+  isPlaying: { type: Boolean, default: true },
+  timeScale: { type: Number, default: 1 },
+  bodyCount: { type: Number, default: 0 },
+  elapsedLabel: { type: String, default: '' },
 })
 
 const emit = defineEmits(['toggle-play', 'reset', 'canvas-ready'])
@@ -81,7 +76,7 @@ onMounted(() => emit('canvas-ready', canvasRef.value))
 function stepPct(i) {
   const logMin = Math.log(STEPS[0].value)
   const logMax = Math.log(STEPS[STEPS.length - 1].value)
-  return (Math.log(STEPS[i].value) - logMin) / (logMax - logMin) * 100
+  return ((Math.log(STEPS[i].value) - logMin) / (logMax - logMin)) * 100
 }
 
 // Current animated timescale mapped to track position (log scale).
@@ -172,7 +167,9 @@ function formatSpeed(ts) {
   font-family: monospace;
   font-size: 13px;
 }
-.ctrl-btn:hover { background: #2a2a4e; }
+.ctrl-btn:hover {
+  background: #2a2a4e;
+}
 
 .info {
   color: #666;
@@ -188,8 +185,7 @@ function formatSpeed(ts) {
   padding: 10px 18px;
   border: 1px solid rgba(79, 195, 247, 0.22);
   border-radius: 8px;
-  background:
-    linear-gradient(180deg, rgba(12, 24, 44, 0.92), rgba(7, 12, 24, 0.88));
+  background: linear-gradient(180deg, rgba(12, 24, 44, 0.92), rgba(7, 12, 24, 0.88));
   box-shadow:
     0 0 22px rgba(79, 195, 247, 0.1),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
@@ -263,7 +259,9 @@ function formatSpeed(ts) {
   height: 7px;
   background: rgba(255, 255, 255, 0.18);
   border: 1px solid rgba(255, 255, 255, 0.25);
-  transition: background 0.2s, box-shadow 0.2s;
+  transition:
+    background 0.2s,
+    box-shadow 0.2s;
   pointer-events: none;
 }
 .speed-node.active {
