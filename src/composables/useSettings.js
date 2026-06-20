@@ -1,31 +1,31 @@
 import { reactive, watch } from 'vue'
 
 /**
- * Central settings store for a sketch.
- * Each sketch defines its own defaults; this composable handles
- * export/import and merges safely (unknown keys are ignored on import,
- * missing keys fall back to defaults).
+ * Central settings store for the game.
+ * The caller defines defaults; this composable handles export/import and
+ * merges safely (unknown keys are ignored on import, missing keys fall back
+ * to defaults).
  *
- * @param {string} prototypeId  - e.g. '001'
- * @param {object} defaults     - flat or sectioned object of default values
+ * @param {string} id        - identifier stamped into exported files (e.g. 'galaxy-pool')
+ * @param {object} defaults  - flat or sectioned object of default values
  * @returns {{ settings, exportJSON, importJSON }}
  */
-export function useSettings(prototypeId, defaults) {
+export function useSettings(id, defaults) {
   const settings = reactive(deepClone(defaults))
 
   /**
-   * Export current settings as a JSON string (triggers download).
+   * Export current settings as a JSON file (triggers download).
    */
   function exportJSON() {
     const payload = {
-      prototypeId,
+      id,
       settings: deepClone(settings),
     }
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `galaxy-pool-${prototypeId}.json`
+    a.download = `${id}.json`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -34,13 +34,11 @@ export function useSettings(prototypeId, defaults) {
    * Apply settings from a parsed JSON object.
    * Unknown keys in the JSON are silently ignored.
    * Missing keys keep their current (default) value.
-   * @param {object} parsed - the full JSON payload ({ prototypeId, settings })
-   * @returns {string} the prototypeId found in the JSON (so caller can route)
+   * @param {object} parsed - the full JSON payload ({ id, settings })
    */
   function importJSON(parsed) {
     const incoming = parsed?.settings ?? {}
     mergeInto(settings, incoming)
-    return parsed?.prototypeId ?? null
   }
 
   return { settings, exportJSON, importJSON }

@@ -1,13 +1,17 @@
 <template>
   <div class="app">
     <header class="app-header">
-      <router-link to="/" class="app-title">Galaxy Pool</router-link>
+      <span class="app-title">Galaxy Pool</span>
     </header>
     <main class="app-main">
-      <router-view />
+      <Game />
     </main>
   </div>
 </template>
+
+<script setup>
+import Game from './Game.vue'
+</script>
 
 <style>
 .app {
@@ -29,10 +33,8 @@
   font-size: 0.9rem;
   letter-spacing: 0.15em;
   color: #4fc3f7;
-  text-decoration: none;
   text-transform: uppercase;
 }
-.app-title:hover { color: #81d4fa; }
 
 .app-main {
   flex: 1 1 auto;

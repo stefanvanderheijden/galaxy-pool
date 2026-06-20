@@ -12,6 +12,25 @@
     <template #settings>
       <SettingsPanel @export="settings.exportJSON()" @import="onImport">
         <SettingsSection title="Spaceship">
+          <div class="steering-field">
+            <div class="steering-header">
+              <span class="steering-label">
+                Steering
+                <button class="info-btn" @click.stop="steeringModalOpen = true" title="More info">i</button>
+              </span>
+            </div>
+            <div class="steering-options">
+              <button
+                v-for="opt in STEERING_OPTIONS"
+                :key="opt.value"
+                class="steering-btn"
+                :class="{ active: settings.settings.ship.steering === opt.value }"
+                @click="settings.settings.ship.steering = opt.value"
+              >
+                {{ opt.label }}
+              </button>
+            </div>
+          </div>
           <SettingsRow
             label="Thrust"
             v-model="settings.settings.ship.thrustAccel"
@@ -22,15 +41,32 @@
             tooltip="Thrust acceleration in AU/yr²."
           />
           <SettingsRow
+            v-if="settings.settings.ship.steering === 'tank'"
             label="Turn speed"
             v-model="settings.settings.ship.turnSpeed"
             :min="0.5"
             :max="10"
             :step="0.5"
             :decimals="1"
-            tooltip="How fast the ship rotates with A/D keys (rad/s)."
+            tooltip="How fast the ship rotates with A/D keys in Tank steering (rad/s)."
           />
         </SettingsSection>
+
+        <!-- Steering mode explainer modal -->
+        <div v-if="steeringModalOpen" class="modal-backdrop" @click.self="steeringModalOpen = false">
+          <div class="modal-box">
+            <div class="modal-title">Steering mode</div>
+            <div class="modal-body">
+              How W/A/S/D drive the ship:<br /><br />
+              <strong>Tank</strong> — A/D rotate the ship, W thrusts along its heading, S brakes.<br /><br />
+              <strong>Screen</strong> — W/A/S/D push up/down/left/right in screen space.<br /><br />
+              <strong>Drift</strong> — relative to your direction of travel: W prograde (speed up),
+              S retrograde (brake), A/D thrust to port/starboard.<br /><br />
+              Spacebar is a full retrograde brake in every mode.
+            </div>
+            <button class="modal-close" @click="steeringModalOpen = false">Close</button>
+          </div>
+        </div>
         <SettingsSection title="Orbit Shot">
           <SettingsRow
             label="Ring radius (AU)"
@@ -142,18 +178,26 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onUnmounted } from "vue";
-import SketchWrapper from "../components/SketchWrapper.vue";
-import SettingsPanel from "../components/SettingsPanel.vue";
-import SettingsSection from "../components/SettingsSection.vue";
-import SettingsRow from "../components/SettingsRow.vue";
-import { useSettings } from "../composables/useSettings.js";
+import { ref, watch, onUnmounted } from "vue";
+import SketchWrapper from "./components/SketchWrapper.vue";
+import SettingsPanel from "./components/SettingsPanel.vue";
+import SettingsSection from "./components/SettingsSection.vue";
+import SettingsRow from "./components/SettingsRow.vue";
+import { useSettings } from "./composables/useSettings.js";
 
 // =============================================================================
 // CONSTANTS
 // =============================================================================
 
-const PROTOTYPE_ID = "008";
+const GAME_ID = "galaxy-pool";
+
+// Steering modes — how W/A/S/D drive the ship. See applyShipInput().
+const STEERING_OPTIONS = [
+  { value: "tank", label: "Tank" },
+  { value: "screen", label: "Screen" },
+  { value: "drift", label: "Drift" },
+];
+const steeringModalOpen = ref(false);
 
 // Unit system: AU (astronomical unit), Solar masses, Julian years
 // G in these units = 4π² (from Kepler's 3rd law: T²=a³ for M_sun)
@@ -246,11 +290,12 @@ const SOLAR_BODIES = [
 // SETTINGS
 // =============================================================================
 
-const settings = useSettings(PROTOTYPE_ID, {
+const settings = useSettings(GAME_ID, {
   sim: { baseSpeed: 1000000 },
   ship: {
     thrustAccel: 360,
-    turnSpeed: 3.5,
+    turnSpeed: 3.5, // Tank steering only: A/D rotation rate (rad/s)
+    steering: "drift", // "tank" | "screen" | "drift"
   },
   orbit: {
     ringRadiusMult: 0.1,
@@ -273,11 +318,6 @@ function onImport(parsed) {
   settings.importJSON(parsed);
   reset();
 }
-
-onMounted(() => {
-  const imported = history.state?.importedSettings;
-  if (imported) settings.importJSON(imported);
-});
 
 // =============================================================================
 // REACTIVE STATE
@@ -327,6 +367,7 @@ const keys = {
   a: false,
   s: false,
   d: false,
+  space: false,
 };
 
 // Prediction path
@@ -1154,9 +1195,60 @@ function spawnSunDebris(body) {
 // SPACESHIP INPUT
 // =============================================================================
 
+// Three steering modes drive the ship from W/A/S/D, selected via the Steering
+// setting. Spacebar is a full retrograde brake in every mode.
+//
+//   Tank   — A/D rotate the ship; W thrusts along its heading; S brakes.
+//   Screen — W/A/S/D push up/down/left/right in absolute screen space.
+//   Drift  — relative to direction of travel: W prograde, S retrograde,
+//            A/D thrust to port/starboard.
+//
+// In Drift (and when computing a travel frame) a near-stationary ship has no
+// direction of travel, so we fall back to the ship's facing (shipAngle).
+const SPEED_FRAME_MIN = 1e-3; // AU/yr below which velocity gives no usable heading
+
+// Full retrograde brake, clamped so it can never push the ship past a standstill.
+// Shared by the spacebar brake in all modes (and by Drift's S-alone input).
+function applyRetrogradeBrake(dt_yr, realDt_s, thrust) {
+  const speed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
+  if (speed > 1e-6) {
+    const retroAngle = Math.atan2(-ship.vy, -ship.vx);
+    const maxBrakeDv = thrust * dt_yr;
+    const brakeDv = Math.min(speed, maxBrakeDv);
+    const brakePower = brakeDv / maxBrakeDv;
+    ship.vx -= (ship.vx / speed) * brakeDv;
+    ship.vy -= (ship.vy / speed) * brakeDv;
+    spawnThrustParticles(brakePower, realDt_s, retroAngle, dt_yr);
+  }
+  thrustActiveLastFrame = true;
+}
+
 function applyShipInput(dt_yr, realDt_s) {
   if (!ship) return;
   const thrust = settings.settings.ship.thrustAccel;
+
+  // Spacebar = full retrograde brake, in every steering mode.
+  if (keys.space) {
+    applyRetrogradeBrake(dt_yr, realDt_s, thrust);
+    return;
+  }
+
+  switch (settings.settings.ship.steering) {
+    case "tank":
+      applyTankInput(dt_yr, realDt_s, thrust);
+      break;
+    case "screen":
+      applyScreenInput(dt_yr, realDt_s, thrust);
+      break;
+    case "drift":
+    default:
+      applyDriftInput(dt_yr, realDt_s, thrust);
+      break;
+  }
+}
+
+// Tank: A/D rotate the heading, W thrusts forward along it, S brakes retrograde.
+function applyTankInput(dt_yr, realDt_s, thrust) {
   const turnSpeed = settings.settings.ship.turnSpeed ?? 3.5;
 
   const thrustingThisFrame = keys.w || keys.s;
@@ -1191,10 +1283,110 @@ function applyShipInput(dt_yr, realDt_s) {
   }
 }
 
+// Screen: W=up, S=down, A=left, D=right thrust in absolute screen space.
+function applyScreenInput(dt_yr, realDt_s, thrust) {
+  let fx = 0, fy = 0;
+  if (keys.w) fy -= 1;
+  if (keys.s) fy += 1;
+  if (keys.a) fx -= 1;
+  if (keys.d) fx += 1;
+
+  const thrustingThisFrame = fx !== 0 || fy !== 0;
+  if (!thrustingThisFrame) {
+    thrustActiveLastFrame = false;
+    const speed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
+    if (speed > 1e-4) shipAngle = Math.atan2(ship.vy, ship.vx);
+    return;
+  }
+
+  // Normalize diagonal thrust
+  const flen = Math.sqrt(fx * fx + fy * fy);
+  fx /= flen;
+  fy /= flen;
+
+  ship.vx += fx * thrust * dt_yr;
+  ship.vy += fy * thrust * dt_yr;
+
+  const forceAngle = Math.atan2(fy, fx);
+  shipAngle = forceAngle;
+
+  spawnThrustParticles(1.0, realDt_s, forceAngle, dt_yr);
+}
+
+// Drift: thrust relative to the direction of travel.
+//   W = prograde, S = retrograde (brake), A = port, D = starboard.
+function applyDriftInput(dt_yr, realDt_s, thrust) {
+  const speed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
+
+  // Travel-frame basis: forward = direction of travel; left = forward rotated +90°.
+  let fwdAngle;
+  if (speed > SPEED_FRAME_MIN) {
+    fwdAngle = Math.atan2(ship.vy, ship.vx);
+  } else {
+    fwdAngle = shipAngle; // stationary: steer relative to where the nose points
+  }
+  const fwdX = Math.cos(fwdAngle);
+  const fwdY = Math.sin(fwdAngle);
+  const leftX = fwdY;   // (fwd rotated +90° in screen coords, where +y is down)
+  const leftY = -fwdX;
+
+  // Longitudinal (prograde/retrograde) and lateral (port/starboard) components.
+  const longitudinal = (keys.w ? 1 : 0) - (keys.s ? 1 : 0);
+  const lateral = (keys.a ? 1 : 0) - (keys.d ? 1 : 0); // A = +left, D = +right
+
+  if (longitudinal === 0 && lateral === 0) {
+    thrustActiveLastFrame = false;
+    if (speed > 1e-4) shipAngle = fwdAngle;
+    return;
+  }
+
+  // Pure retrograde (S alone, no lateral): brake clamped at standstill, like spacebar.
+  if (longitudinal < 0 && lateral === 0) {
+    applyRetrogradeBrake(dt_yr, realDt_s, thrust);
+    if (speed > 1e-6) shipAngle = fwdAngle;
+    return;
+  }
+
+  // Build the thrust vector in the travel frame, then normalize so diagonals
+  // (e.g. prograde + port) don't exceed single-axis thrust.
+  let tx = fwdX * longitudinal + leftX * lateral;
+  let ty = fwdY * longitudinal + leftY * lateral;
+  const tlen = Math.sqrt(tx * tx + ty * ty);
+  if (tlen < 1e-9) {
+    thrustActiveLastFrame = false;
+    return;
+  }
+  tx /= tlen;
+  ty /= tlen;
+
+  ship.vx += tx * thrust * dt_yr;
+  ship.vy += ty * thrust * dt_yr;
+
+  const forceAngle = Math.atan2(ty, tx);
+  shipAngle = forceAngle;
+
+  spawnThrustParticles(1.0, realDt_s, forceAngle, dt_yr);
+}
+
+// Drives the THRUST/BRAKE/COAST HUD indicator; per-mode so it reads correctly.
 function getWASDThrustState() {
   if (!ship) return { mode: "coast", power: 0 };
-  if (keys.s) return { mode: "brake", power: 1 };
-  if (keys.w) return { mode: "forward", power: 1 };
+  if (keys.space) return { mode: "brake", power: 1 };
+
+  const steering = settings.settings.ship.steering;
+  if (steering === "tank") {
+    if (keys.s) return { mode: "brake", power: 1 };
+    if (keys.w) return { mode: "forward", power: 1 };
+    return { mode: "coast", power: 0 };
+  }
+
+  const longitudinal = (keys.w ? 1 : 0) - (keys.s ? 1 : 0);
+  const lateral = (keys.a ? 1 : 0) - (keys.d ? 1 : 0);
+  if (steering === "drift") {
+    // S alone (pure retrograde) reads as a brake; everything else is thrust.
+    if (longitudinal < 0 && lateral === 0) return { mode: "brake", power: 1 };
+  }
+  if (longitudinal !== 0 || lateral !== 0) return { mode: "forward", power: 1 };
   return { mode: "coast", power: 0 };
 }
 
@@ -3358,6 +3550,7 @@ function initCanvas(canvas) {
     if (e.key === "a" || e.key === "A") { keys.a = true; e.preventDefault(); }
     if (e.key === "s" || e.key === "S") { keys.s = true; e.preventDefault(); }
     if (e.key === "d" || e.key === "D") { keys.d = true; e.preventDefault(); }
+    if (e.key === " ") { keys.space = true; e.preventDefault(); }
   }
 
   function onKeyUp(e) {
@@ -3365,6 +3558,7 @@ function initCanvas(canvas) {
     if (e.key === "a" || e.key === "A") keys.a = false;
     if (e.key === "s" || e.key === "S") keys.s = false;
     if (e.key === "d" || e.key === "D") keys.d = false;
+    if (e.key === " ") keys.space = false;
   }
 
   window.addEventListener("keydown", onKeyDown);
@@ -3522,7 +3716,7 @@ function initCanvas(canvas) {
     observer.disconnect();
     window.removeEventListener("keydown", onKeyDown);
     window.removeEventListener("keyup", onKeyUp);
-    keys.w = keys.a = keys.s = keys.d = false;
+    keys.w = keys.a = keys.s = keys.d = keys.space = false;
     canvas.removeEventListener("mousedown", onMouseDown);
     canvas.removeEventListener("mousemove", onMouseMove);
     canvas.removeEventListener("mouseup", onMouseUp);
@@ -3560,3 +3754,134 @@ watch(
   },
 );
 </script>
+
+<style scoped>
+/* Steering mode selector — sits in the Spaceship settings section */
+.steering-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.steering-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.steering-label {
+  color: #99a;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.steering-options {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+
+.steering-btn {
+  padding: 5px 0;
+  background: #111128;
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  color: #889;
+  font-family: monospace;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.steering-btn:hover {
+  background: #161640;
+  color: #aab;
+}
+.steering-btn.active {
+  background: #0d1a2a;
+  border-color: #4fc3f7;
+  color: #4fc3f7;
+}
+
+.info-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid #4a5a6a;
+  background: #151530;
+  color: #7bafd6;
+  font-size: 9px;
+  font-style: italic;
+  font-family: serif;
+  font-weight: bold;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.info-btn:hover {
+  border-color: #4fc3f7;
+  color: #4fc3f7;
+  background: #0d1a2a;
+}
+
+/* Steering explainer modal — matches SettingsRow's modal styling */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.modal-box {
+  background: #0d0d1e;
+  border: 1px solid #2a2a4a;
+  border-radius: 8px;
+  padding: 20px 24px;
+  max-width: 340px;
+  width: 90%;
+  font-family: monospace;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.7);
+}
+
+.modal-title {
+  font-size: 13px;
+  color: #4fc3f7;
+  margin-bottom: 10px;
+  letter-spacing: 0.05em;
+}
+
+.modal-body {
+  font-size: 12px;
+  color: #aab;
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
+.modal-body strong {
+  color: #7bafd6;
+}
+
+.modal-close {
+  display: block;
+  width: 100%;
+  padding: 6px;
+  background: #111128;
+  border: 1px solid #333;
+  border-radius: 4px;
+  color: #aaa;
+  font-family: monospace;
+  font-size: 12px;
+  cursor: pointer;
+}
+.modal-close:hover {
+  background: #1a1a40;
+  color: #e0e0e0;
+}
+</style>
