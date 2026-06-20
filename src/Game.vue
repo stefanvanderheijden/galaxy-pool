@@ -184,6 +184,10 @@ import SettingsSection from "./components/SettingsSection.vue";
 import SettingsRow from "./components/SettingsRow.vue";
 import { useSettings } from "./composables/useSettings.js";
 import { TIME_STEP_VALUES } from "./timeSteps.js";
+import { G_SIM, SOFTENING, AU_KM, PX_PER_AU, MAX_DT, SECONDS_PER_YEAR } from "./engine/units.js";
+import { seededRandom } from "./engine/rng.js";
+import { makeTrail } from "./engine/trail.js";
+import { computeThrust, getThrustState as classifyThrust } from "./engine/steering.js";
 
 // =============================================================================
 // CONSTANTS
@@ -199,13 +203,9 @@ const STEERING_OPTIONS = [
 ];
 const steeringModalOpen = ref(false);
 
-// Unit system: AU (astronomical unit), Solar masses, Julian years
-// G in these units = 4π² (from Kepler's 3rd law: T²=a³ for M_sun)
-const G_SIM = 4 * Math.PI * Math.PI; // ~39.478 AU³ / (M☉ · yr²)
-const PX_PER_AU = 100; // pixels per AU at zoom = 1
-const AU_KM = 1.496e8; // km per AU (for display labels)
-const SOFTENING = 1e-5; // AU² — prevents singularities
-const MAX_DT = 0.05; // real-time seconds cap per frame
+// Unit system (AU, Solar masses, Julian years) and the physics/render tunables
+// G_SIM, SOFTENING, AU_KM, PX_PER_AU, MAX_DT, SECONDS_PER_YEAR come from
+// engine/units.js — see that file for the derivations.
 
 // Spaceship physical dimensions
 const SHIP_LENGTH_AU = 1000 / AU_KM; // 1000 km in AU ≈ 6.684e-6 AU
@@ -413,47 +413,9 @@ let shipEnergy = 30;
 let solarEfficiency = 0;             // 0..1, recomputed each frame
 
 // =============================================================================
-// TRAIL CIRCULAR BUFFER
+// STARFIELD DATA
 // =============================================================================
-
-function makeTrail(cap) {
-  // cap <= 0 → inert trail (fixed bodies like the sun keep none). Guards against
-  // `% 0 = NaN` in push() and avoids allocating a buffer that's never read.
-  if (!(cap > 0)) {
-    return { push() {}, points: () => [], clear() {}, get length() { return 0; } };
-  }
-  const buf = new Array(cap);
-  let head = 0,
-    size = 0;
-  return {
-    push(x, y) {
-      buf[head] = { x, y };
-      head = (head + 1) % cap;
-      if (size < cap) size++;
-    },
-    points() {
-      const out = [];
-      const start = (head - size + cap) % cap;
-      for (let i = 0; i < size; i++) out.push(buf[(start + i) % cap]);
-      return out;
-    },
-    clear() {
-      head = 0;
-      size = 0;
-    },
-    get length() {
-      return size;
-    },
-  };
-}
-
-function seededRandom(seed) {
-  let s = seed >>> 0;
-  return () => {
-    s = (s * 1664525 + 1013904223) >>> 0;
-    return s / 4294967296;
-  };
-}
+// makeTrail (ring buffer) and seededRandom (PRNG) come from engine/.
 
 // Stellar color palette by spectral class frequency
 const STAR_COLORS = [
@@ -1209,9 +1171,9 @@ function spawnSunDebris(body) {
 //   Drift  — relative to direction of travel: W prograde, S retrograde,
 //            A/D thrust to port/starboard.
 //
-// In Drift (and when computing a travel frame) a near-stationary ship has no
-// direction of travel, so we fall back to the ship's facing (shipAngle).
-const SPEED_FRAME_MIN = 1e-3; // AU/yr below which velocity gives no usable heading
+// The steering MATH lives in engine/steering.js (pure, unit-tested). The
+// functions here are thin adapters: snapshot ship+input state, ask the engine
+// what to do, then mutate the ship and spawn particles accordingly.
 
 // Full retrograde brake, clamped so it can never push the ship past a standstill.
 // Shared by the spacebar brake in all modes (and by Drift's S-alone input).
@@ -1231,157 +1193,39 @@ function applyRetrogradeBrake(dt_yr, realDt_s, thrust) {
 
 function applyShipInput(dt_yr, realDt_s) {
   if (!ship) return;
-  const thrust = settings.settings.ship.thrustAccel;
 
-  // Spacebar = full retrograde brake, in every steering mode.
-  if (keys.space) {
-    applyRetrogradeBrake(dt_yr, realDt_s, thrust);
+  const result = computeThrust({
+    vx: ship.vx,
+    vy: ship.vy,
+    shipAngle,
+    keys,
+    steering: settings.settings.ship.steering,
+    thrust: settings.settings.ship.thrustAccel,
+    dt_yr,
+    realDt_s,
+    turnSpeed: settings.settings.ship.turnSpeed,
+  });
+
+  // Heading always tracks the engine's decision (rotation, travel-align, etc.).
+  shipAngle = result.shipAngle;
+
+  if (result.brake) {
+    applyRetrogradeBrake(dt_yr, realDt_s, settings.settings.ship.thrustAccel);
     return;
   }
 
-  switch (settings.settings.ship.steering) {
-    case "tank":
-      applyTankInput(dt_yr, realDt_s, thrust);
-      break;
-    case "screen":
-      applyScreenInput(dt_yr, realDt_s, thrust);
-      break;
-    case "drift":
-    default:
-      applyDriftInput(dt_yr, realDt_s, thrust);
-      break;
+  ship.vx += result.dvx;
+  ship.vy += result.dvy;
+  if (result.particle) {
+    spawnThrustParticles(result.particle.power, realDt_s, result.particle.angle, dt_yr);
   }
+  thrustActiveLastFrame = result.active;
 }
 
-// Tank: A/D rotate the heading, W thrusts forward along it, S brakes retrograde.
-function applyTankInput(dt_yr, realDt_s, thrust) {
-  const turnSpeed = settings.settings.ship.turnSpeed ?? 3.5;
-
-  const thrustingThisFrame = keys.w || keys.s;
-  if (!thrustingThisFrame) thrustActiveLastFrame = false;
-
-  // A/D rotate the ship
-  if (keys.a) shipAngle -= turnSpeed * realDt_s;
-  if (keys.d) shipAngle += turnSpeed * realDt_s;
-
-  // W = forward thrust
-  if (keys.w) {
-    const fx = Math.cos(shipAngle);
-    const fy = Math.sin(shipAngle);
-    ship.vx += fx * thrust * dt_yr;
-    ship.vy += fy * thrust * dt_yr;
-    spawnThrustParticles(1.0, realDt_s, shipAngle, dt_yr);
-  }
-
-  // S = retrograde brake (shared, NaN-guarded helper)
-  if (keys.s) applyRetrogradeBrake(dt_yr, realDt_s, thrust);
-}
-
-// Screen: W=up, S=down, A=left, D=right thrust in absolute screen space.
-function applyScreenInput(dt_yr, realDt_s, thrust) {
-  let fx = 0, fy = 0;
-  if (keys.w) fy -= 1;
-  if (keys.s) fy += 1;
-  if (keys.a) fx -= 1;
-  if (keys.d) fx += 1;
-
-  const thrustingThisFrame = fx !== 0 || fy !== 0;
-  if (!thrustingThisFrame) {
-    thrustActiveLastFrame = false;
-    const speed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
-    if (speed > 1e-4) shipAngle = Math.atan2(ship.vy, ship.vx);
-    return;
-  }
-
-  // Normalize diagonal thrust
-  const flen = Math.sqrt(fx * fx + fy * fy);
-  fx /= flen;
-  fy /= flen;
-
-  ship.vx += fx * thrust * dt_yr;
-  ship.vy += fy * thrust * dt_yr;
-
-  const forceAngle = Math.atan2(fy, fx);
-  shipAngle = forceAngle;
-
-  spawnThrustParticles(1.0, realDt_s, forceAngle, dt_yr);
-}
-
-// Drift: thrust relative to the direction of travel.
-//   W = prograde, S = retrograde (brake), A = port, D = starboard.
-function applyDriftInput(dt_yr, realDt_s, thrust) {
-  const speed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
-
-  // Travel-frame basis: forward = direction of travel; left = forward rotated +90°.
-  let fwdAngle;
-  if (speed > SPEED_FRAME_MIN) {
-    fwdAngle = Math.atan2(ship.vy, ship.vx);
-  } else {
-    fwdAngle = shipAngle; // stationary: steer relative to where the nose points
-  }
-  const fwdX = Math.cos(fwdAngle);
-  const fwdY = Math.sin(fwdAngle);
-  const leftX = fwdY;   // (fwd rotated +90° in screen coords, where +y is down)
-  const leftY = -fwdX;
-
-  // Longitudinal (prograde/retrograde) and lateral (port/starboard) components.
-  const longitudinal = (keys.w ? 1 : 0) - (keys.s ? 1 : 0);
-  const lateral = (keys.a ? 1 : 0) - (keys.d ? 1 : 0); // A = +left, D = +right
-
-  if (longitudinal === 0 && lateral === 0) {
-    thrustActiveLastFrame = false;
-    if (speed > 1e-4) shipAngle = fwdAngle;
-    return;
-  }
-
-  // Pure retrograde (S alone, no lateral): brake clamped at standstill, like spacebar.
-  if (longitudinal < 0 && lateral === 0) {
-    applyRetrogradeBrake(dt_yr, realDt_s, thrust);
-    if (speed > 1e-6) shipAngle = fwdAngle;
-    return;
-  }
-
-  // Build the thrust vector in the travel frame, then normalize so diagonals
-  // (e.g. prograde + port) don't exceed single-axis thrust.
-  let tx = fwdX * longitudinal + leftX * lateral;
-  let ty = fwdY * longitudinal + leftY * lateral;
-  const tlen = Math.sqrt(tx * tx + ty * ty);
-  if (tlen < 1e-9) {
-    thrustActiveLastFrame = false;
-    return;
-  }
-  tx /= tlen;
-  ty /= tlen;
-
-  ship.vx += tx * thrust * dt_yr;
-  ship.vy += ty * thrust * dt_yr;
-
-  const forceAngle = Math.atan2(ty, tx);
-  shipAngle = forceAngle;
-
-  spawnThrustParticles(1.0, realDt_s, forceAngle, dt_yr);
-}
-
-// Drives the THRUST/BRAKE/COAST HUD indicator; per-mode so it reads correctly.
+// Wraps the pure HUD classifier with the local ship/keys/steering snapshot.
 function getThrustState() {
   if (!ship) return { mode: "coast", power: 0 };
-  if (keys.space) return { mode: "brake", power: 1 };
-
-  const steering = settings.settings.ship.steering;
-  if (steering === "tank") {
-    if (keys.s) return { mode: "brake", power: 1 };
-    if (keys.w) return { mode: "forward", power: 1 };
-    return { mode: "coast", power: 0 };
-  }
-
-  const longitudinal = (keys.w ? 1 : 0) - (keys.s ? 1 : 0);
-  const lateral = (keys.a ? 1 : 0) - (keys.d ? 1 : 0);
-  if (steering === "drift") {
-    // S alone (pure retrograde) reads as a brake; everything else is thrust.
-    if (longitudinal < 0 && lateral === 0) return { mode: "brake", power: 1 };
-  }
-  if (longitudinal !== 0 || lateral !== 0) return { mode: "forward", power: 1 };
-  return { mode: "coast", power: 0 };
+  return classifyThrust({ keys, steering: settings.settings.ship.steering });
 }
 
 // Each thrust particle: { x, y, vx, vy, age, duration, size, spread, burstId }
@@ -3072,7 +2916,7 @@ function drawHUD(ctx, w, h) {
   // Speed / distance info (top-right)
   if (ship) {
     const speed_au_yr = Math.sqrt(ship.vx ** 2 + ship.vy ** 2);
-    const speed_km_s = (speed_au_yr * AU_KM) / (365.25 * 24 * 3600);
+    const speed_km_s = (speed_au_yr * AU_KM) / SECONDS_PER_YEAR;
     const sun = bodies.find((b) => b.id === "sun");
     const dist_au = sun
       ? Math.sqrt((ship.x - sun.x) ** 2 + (ship.y - sun.y) ** 2)
@@ -3649,7 +3493,7 @@ function initCanvas(canvas) {
       }
 
       const simScale = timeScale.value;
-      const dt_yr = (realDt * simScale) / (365.25 * 24 * 3600); // yr per frame
+      const dt_yr = (realDt * simScale) / SECONDS_PER_YEAR; // yr per frame
 
       if (isPlaying.value) {
         simStep(dt_yr, realDt);
