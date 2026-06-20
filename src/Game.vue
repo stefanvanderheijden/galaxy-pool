@@ -16,57 +16,115 @@
       <div class="modal-box help-box">
         <div class="modal-title">Galaxy Pool — How to play</div>
         <div class="modal-body help-body">
-          <p>
-            <strong>Goal.</strong> Cosmic pool: pocket every planet into the
-            <strong>black hole</strong>. Each one scores +1. Lose a planet to the
-            <strong>sun</strong> and it's a −1 penalty. Sink them all for a perfect run.
+          <p class="help-intro">
+            Galaxy Pool is cosmic billiards. You fly a single ship through a solar system and use
+            it to knock the planets into a black hole — like sinking balls into a pocket. The catch
+            is that everything obeys real orbital gravity, so a good shot is about angle, timing and
+            momentum, not just power.
           </p>
 
-          <div class="help-h">Flying</div>
+          <div class="help-h">1 · The objective</div>
           <p>
-            You pilot one ship. Steering mode is set in Settings (default
+            Drop <strong>every planet</strong> into the black hole. Each planet that goes in scores
+            <strong>+1</strong>. If a planet falls into the <strong>sun</strong> instead, that's a
+            <strong>−1 penalty</strong> and it's gone for good. Sink the whole set with no losses for
+            a <strong>perfect run</strong>. Your running tally (planets, consumed, speed, distance)
+            shows on the screen at the bottom-right.
+          </p>
+
+          <div class="help-h">2 · The playfield</div>
+          <p>
+            <strong>Sun</strong> — fixed at the centre; its gravity is the only force acting on your
+            ship, and it destroys anything that touches it.<br />
+            <strong>Planets</strong> — orbit the sun on stable paths. These are your "balls".<br />
+            <strong>Black hole</strong> — the pocket. It only swallows a planet that enters from the
+            open mouth of its <strong>gravity cone</strong>; hit it from the wrong side and the
+            planet bounces off. Lining shots up with the cone is the core skill.<br />
+            <strong>Gas clouds</strong> — drag regions that bleed off the velocity of anything
+            passing through, ship included.
+          </p>
+
+          <div class="help-h">3 · Flying the ship</div>
+          <p>
+            Choose a steering mode in <strong>Settings → Spaceship</strong> (default
             <strong>Drift</strong>):
-            <strong>W</strong> speed up · <strong>S</strong> brake ·
-            <strong>A/D</strong> strafe port/starboard · <strong>Space</strong> full brake. Only the
-            sun's gravity pulls the ship — slingshot around it.
           </p>
-
-          <div class="help-h">Shooting a planet</div>
+          <p class="help-sub">
+            <strong>Drift</strong> — relative to your travel: <strong>W</strong> prograde (speed up),
+            <strong>S</strong> retrograde (slow down), <strong>A/D</strong> thrust
+            port/starboard.<br />
+            <strong>Tank</strong> — <strong>A/D</strong> rotate the ship, <strong>W</strong> thrust
+            along the nose, <strong>S</strong> brake.<br />
+            <strong>Screen</strong> — <strong>W/A/S/D</strong> push up/down/left/right on screen.<br />
+            <strong>Space</strong> is a full brake in every mode.
+          </p>
           <p>
-            Drift into a planet to <strong>dock</strong> (it must be fully observed first — see
-            below). Then <strong>drag back</strong> with the mouse and release to fire it like a cue
-            ball — the pulled-back distance sets the power. Shots cost
-            <strong>solar energy</strong>; the energy bar previews the draw and caps at what you've
-            stored. Click near the planet (the red <strong>RELEASE</strong> ring) to cancel.
+            The sun constantly pulls you, so you can <strong>slingshot</strong> around it to swing
+            between planets cheaply. Use the speed slider (or <strong>1–4</strong> / <strong>Q</strong>
+            <strong>E</strong>) to fast-forward time while you wait for orbits to line up, and
+            <strong>pause</strong> to plan. Press <strong>Z</strong> to centre the view on the sun,
+            <strong>X</strong> to follow the ship, and scroll to zoom.
           </p>
 
-          <div class="help-h">Energy</div>
+          <div class="help-h">4 · Fog of war &amp; radar</div>
           <p>
-            The left dial shows stored <strong>energy</strong> and your
-            <strong>solar</strong> charge rate — fly nearer the sun to recharge faster.
+            Space starts dark. Two systems light it up:
           </p>
-
-          <div class="help-h">Fog of war &amp; radar</div>
+          <p class="help-sub">
+            <strong>Vision</strong> — a circle around the ship that permanently clears the fog grid
+            as you fly over it. Cleared squares stay revealed forever.<br />
+            <strong>Radar</strong> — a sweeping line rotating around the ship. When it crosses a
+            body, that body is detected and tracked from then on — shown as a dot even through fog,
+            with a blip each time the sweep pings it.
+          </p>
           <p>
-            Space is dark until explored. Your <strong>vision</strong> circle permanently clears the
-            grid as you fly. The rotating <strong>radar</strong> sweep detects bodies it crosses and
-            tracks them through the fog as dots. Approaching a new body runs an
-            <strong>observation</strong> scan; only once it completes does its name and detail
-            readout (bottom-right screen) unlock — and you can dock it.
+            Detecting a body isn't the same as knowing it. The first time you come close, an
+            <strong>observation</strong> scan runs ("Observing Unknown Celestial Body"). Only when it
+            finishes does the body's <strong>name and full readout</strong> appear — and only then
+            can you dock with it. Leave range mid-scan and it restarts next time.
           </p>
 
-          <div class="help-h">Watch out</div>
+          <div class="help-h">5 · The shot (the main move)</div>
           <p>
-            <strong>Gas clouds</strong> bleed off velocity like atmospheric drag. The
-            <strong>sun</strong> destroys anything that falls in.
+            Drift gently into a fully-observed planet to <strong>dock</strong> — your ship latches on
+            and a cue appears. Now aim like pool: <strong>drag the mouse back</strong> from the
+            planet in the opposite direction to where you want it to go. The further you pull, the
+            more power; an arrow and a power ring preview the shot and its predicted path.
+            <strong>Release the mouse</strong> to fire.
+          </p>
+          <p>
+            Firing costs <strong>energy</strong> and kicks your ship back a little
+            (<strong>recoil</strong>), so each shot also repositions you. Changed your mind? Move the
+            mouse right next to the planet — the cue turns into a red <strong>RELEASE</strong> ring —
+            and click to undock without firing.
           </p>
 
-          <div class="help-h">Keys</div>
+          <div class="help-h">6 · Energy</div>
+          <p>
+            The dial on the left is your power plant. The <strong>bar</strong> is stored energy; the
+            small <strong>solar</strong> gauge below it is your current charge rate. You recharge
+            from sunlight, so charging is fastest near the sun and fades with distance (inverse
+            square). While you aim, the bar shows the shot's draw in red — and a shot can never use
+            more than you have stored, so a long pull on an empty tank just fires weaker.
+          </p>
+
+          <div class="help-h">7 · Tips</div>
+          <p class="help-sub">
+            • Aim planets at the <strong>open side</strong> of the black hole's cone, or they bounce.<br />
+            • Let gravity do the work — a gentle nudge into a good orbit beats a hard shot.<br />
+            • Keep some energy in reserve; coast near the sun to top up between shots.<br />
+            • Mind the gas clouds — they'll sap a planet's speed before it reaches the pocket.
+          </p>
+
+          <div class="help-h">Controls</div>
           <p class="help-keys">
-            <strong>W A S D</strong> thrust · <strong>Space</strong> brake ·
-            <strong>1–4</strong> / <strong>Q E</strong> time speed · <strong>Z</strong> focus sun ·
-            <strong>X</strong> focus ship · <strong>Esc</strong> release dock ·
-            <strong>R</strong> reset · <strong>Mouse wheel</strong> zoom.
+            <strong>W A S D</strong> — thrust &nbsp;·&nbsp; <strong>Space</strong> — full brake
+            &nbsp;·&nbsp; <strong>Mouse drag + release</strong> — aim &amp; fire a docked planet
+            &nbsp;·&nbsp; <strong>Esc</strong> — release dock &nbsp;·&nbsp;
+            <strong>1–4</strong> / <strong>Q</strong> <strong>E</strong> — time speed &nbsp;·&nbsp;
+            <strong>Z</strong> — focus sun &nbsp;·&nbsp; <strong>X</strong> — focus ship
+            &nbsp;·&nbsp; <strong>Mouse wheel</strong> — zoom &nbsp;·&nbsp; <strong>R</strong> —
+            reset.
           </p>
         </div>
         <button class="modal-close" @click="helpOpen = false">Close</button>
@@ -5107,12 +5165,21 @@ watch(
 .help-body p {
   margin: 0 0 12px;
 }
+.help-body .help-intro {
+  color: #c9d2dd;
+  border-left: 2px solid #2a4a5a;
+  padding-left: 10px;
+}
 .help-body .help-h {
   color: #4fc3f7;
   font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  margin: 14px 0 4px;
+  margin: 16px 0 5px;
+}
+.help-body .help-sub {
+  padding-left: 10px;
+  border-left: 1px solid #1e2e3a;
 }
 .help-body .help-keys {
   color: #99a;
