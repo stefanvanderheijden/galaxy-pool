@@ -166,6 +166,65 @@
             tooltip="Half-width of the cone. 180° = full sphere (no cone)."
           />
         </SettingsSection>
+        <SettingsSection title="Fog of war">
+          <div class="steering-field">
+            <div class="steering-header">
+              <span class="steering-label">Fog</span>
+            </div>
+            <div class="steering-options">
+              <button
+                class="steering-btn"
+                :class="{ active: settings.settings.fog.enabled }"
+                @click="settings.settings.fog.enabled = true"
+              >
+                On
+              </button>
+              <button
+                class="steering-btn"
+                :class="{ active: !settings.settings.fog.enabled }"
+                @click="settings.settings.fog.enabled = false"
+              >
+                Off
+              </button>
+            </div>
+          </div>
+          <SettingsRow
+            v-model="settings.settings.fog.revealRadius"
+            label="Sight radius (AU)"
+            :min="0.1"
+            :max="3"
+            :step="0.05"
+            :decimals="2"
+            tooltip="Vision circle around the ship. Grid cells it overlaps become permanently visible — revealing the sun, black hole, gas cloud and any object that later passes through them."
+          />
+          <SettingsRow
+            v-model="settings.settings.fog.radarRadius"
+            label="Radar radius (AU)"
+            :min="0.1"
+            :max="5"
+            :step="0.05"
+            :decimals="2"
+            tooltip="Reach of the rotating radar sweep. A planet inside this range is detected the moment the sweep line crosses it, then tracked at its true position forever."
+          />
+          <SettingsRow
+            v-model="settings.settings.fog.radarSweepSpeed"
+            label="Radar sweep (rad/s)"
+            :min="0.2"
+            :max="6"
+            :step="0.1"
+            :decimals="1"
+            tooltip="Rotation speed of the radar sweep, in rad/s at 1,000,000× time. The sweep runs on sim time, so it slows, speeds up and freezes with the simulation."
+          />
+          <SettingsRow
+            v-model="settings.settings.fog.cellSize"
+            label="Fog cell size (AU)"
+            :min="0.1"
+            :max="1"
+            :step="0.05"
+            :decimals="2"
+            tooltip="Edge length of one fog grid square. Smaller = finer reveal that hugs the sight circle; larger = chunkier, cheaper."
+          />
+        </SettingsSection>
         <SettingsSection title="Visuals">
           <SettingsRow
             v-model="settings.settings.visuals.trailLength"
@@ -194,6 +253,7 @@ import { G_SIM, SOFTENING, AU_KM, PX_PER_AU, MAX_DT, SECONDS_PER_YEAR } from './
 import { seededRandom } from './engine/rng.js'
 import { makeTrail } from './engine/trail.js'
 import { computeThrust, getThrustState as classifyThrust } from './engine/steering.js'
+import hubbleUrl from './Images/hubble.jpg'
 
 // =============================================================================
 // CONSTANTS
@@ -227,20 +287,81 @@ const PRED_BASE_DT_YR = 0.001 // max ghost timestep before adaptive tightening
 const PRED_TARGET_SEGMENT_PX = 7 // keeps fast projected curves visually smooth
 const PRED_MAX_STEPS = 3000
 const PRED_INTERVAL = 3 // recalculate every N rendered frames
+// Projection corridor geometry in SIM-space (AU), so the divergence is anchored
+// to the world and grows/shrinks with zoom instead of being a fixed screen size.
+const PRED_CORRIDOR_HALF_AU = 0.022 // corridor half-width at the far end
+const PRED_CORRIDOR_LINE_AU = 0.0015 // line thickness
 
 const CAPTURE_DURATION_S = 1.25
 const CAPTURE_DWELL_YR = 0.008 // sim-years ship must stay within ring to trigger capture
 const SLINGSHOT_ORBIT_MIN_R = 0.018
 const SLINGSHOT_ORBIT_R_MULT = 2.8
 const BLACK_HOLE = {
-  x: 1.46,
-  y: -1.34,
+  id: 'blackhole',
+  name: 'Black Hole',
+  // Upper-right, outside every planet orbit (~2.05 AU from the sun) and away from
+  // all three planets' START positions, so nothing spawns on or orbits into it.
+  x: 1.7,
+  y: 1.15,
   drawR: 0.035,
   captureR: 0.05,
+  color: '#b48cff', // radar accent (the hole itself renders dark)
+  // Radar/scan state — like a body's, but the black hole lives outside bodies[].
+  // Reset in buildScene via resetFog().
+  detected: false,
+  scanned: false,
+  scanProgress: 0,
+  info: {
+    classification: 'Singularity',
+    diameterKm: 30, // ~event-horizon scale, schematic
+    gravityG: 1e6,
+    dayHours: 0,
+    moons: 0,
+    tempC: -270,
+    desc: 'Gravitational sink. Crosses the horizon, nothing returns — including light.',
+  },
 }
 const SUN_GRAVITY_WELL_R = 0.18
 const SUN_DESTRUCTION_R = 0.028
 const DEBRIS_COUNT = 22
+
+// Gas cloud — a drag region shaped as a thick line (a capsule): the spine runs
+// between two endpoints (x1,y1)→(x2,y2) and the cloud extends radius `r` to
+// either side. Distance-to-cloud is the distance to that segment, so a body's
+// drag/density depends on how close it is to the spine, not to a single point.
+// Bodies AND the ship passing through it bleed off velocity, like atmospheric
+// drag. dragPerYr is the fraction of velocity shed per simulation year at the
+// cloud's core (soft falloff to zero at the edge). Sits in the UPPER-LEFT,
+// entirely OUTSIDE the planets' orbits (nearest point ~1.69 AU from the sun,
+// clear of Mars's 1.524 AU orbit), well clear of the black hole (~1.5 AU from its
+// influence circle) AND away from every planet's START position — so planets
+// never plow through it on their stable paths, only the ship (or a stray planet).
+const GAS_CLOUD = {
+  x1: -1.3,
+  y1: 1.7,
+  x2: -0.4,
+  y2: 1.95,
+  r: 0.3,
+  dragPerYr: 9.0,
+  color: '120,180,140', // soft green nebula
+}
+
+// Distance from a point to the gas cloud's spine segment, plus the closest
+// point on the spine (used for both physics and rendering).
+function gasCloudSpineClosest(px, py) {
+  const { x1, y1, x2, y2 } = GAS_CLOUD
+  const sx = x2 - x1
+  const sy = y2 - y1
+  const len2 = sx * sx + sy * sy
+  let t = len2 > 0 ? ((px - x1) * sx + (py - y1) * sy) / len2 : 0
+  if (t < 0) t = 0
+  else if (t > 1) t = 1
+  const cx = x1 + t * sx
+  const cy = y1 + t * sy
+  const dx = px - cx
+  const dy = py - cy
+  return { cx, cy, t, dist: Math.sqrt(dx * dx + dy * dy) }
+}
 
 // Solar system data — all in simulation units (AU, M☉)
 const SOLAR_BODIES = [
@@ -254,6 +375,15 @@ const SOLAR_BODIES = [
     physR: 0.00465,
     drawR: 0.01,
     isFixed: true,
+    info: {
+      classification: 'G-type star',
+      diameterKm: 1391000,
+      gravityG: 28,
+      dayHours: 600, // ~25 Earth days equatorial rotation
+      moons: 8,
+      tempC: 5500, // photosphere
+      desc: 'Yellow dwarf. Fusion core anchoring the system; do not approach.',
+    },
   },
   {
     id: 'venus',
@@ -265,6 +395,15 @@ const SOLAR_BODIES = [
     physR: 4.05e-5,
     drawR: 0.005,
     isFixed: false,
+    info: {
+      classification: 'Terrestrial',
+      diameterKm: 12104,
+      gravityG: 0.9,
+      dayHours: 5832, // 243 Earth days, retrograde
+      moons: 0,
+      tempC: 464,
+      desc: 'Runaway greenhouse. Crushing CO₂ atmosphere, sulphuric clouds.',
+    },
   },
   {
     id: 'earth',
@@ -276,6 +415,15 @@ const SOLAR_BODIES = [
     physR: 4.26e-5,
     drawR: 0.006,
     isFixed: false,
+    info: {
+      classification: 'Terrestrial',
+      diameterKm: 12742,
+      gravityG: 1.0,
+      dayHours: 24,
+      moons: 1,
+      tempC: 15,
+      desc: 'Cradle world. Liquid water, breathable atmosphere, abundant life.',
+    },
   },
   {
     id: 'mars',
@@ -287,6 +435,15 @@ const SOLAR_BODIES = [
     physR: 2.27e-5,
     drawR: 0.004,
     isFixed: false,
+    info: {
+      classification: 'Terrestrial',
+      diameterKm: 6779,
+      gravityG: 0.38,
+      dayHours: 24.7,
+      moons: 2,
+      tempC: -63,
+      desc: 'Cold desert. Thin CO₂ air, polar ice, ancient riverbeds.',
+    },
   },
 ]
 
@@ -314,6 +471,13 @@ const settings = useSettings(GAME_ID, {
     influenceRadius: 0.45,
     coneAngleDeg: 290,
     coneHalfAngleDeg: 55,
+  },
+  fog: {
+    enabled: true,
+    revealRadius: 0.55, // AU — vision circle; grid cells it overlaps become seen forever
+    radarRadius: 0.8, // AU — sweep range; a planet is detected when the sweep line crosses it
+    radarSweepSpeed: 1.6, // rad/s — rotation speed of the radar sweep line
+    cellSize: 0.25, // AU — edge length of one fog grid cell (coarse; tunable)
   },
   visuals: { trailLength: 1600 },
 })
@@ -343,6 +507,91 @@ let timeScaleTarget = TIME_STEPS[timeScaleStepIdx]
 let bodies = []
 let ship = null // reference into bodies[]
 let starLayers = []
+
+// Fog of war — SPARSE GRID MODEL.
+// The world is tiled by square cells of edge `cellSize` AU in ABSOLUTE sim space
+// (fixed to the world, independent of camera/zoom/ship). A cell is keyed by its
+// integer (col,row) = (floor(x/cell), floor(y/cell)); negatives are fine. Each
+// cell is 'unseen' until the ship's vision circle overlaps it, at which point it
+// is added to `fogSeen` PERMANENTLY (sticky — keys are only ever added). A seen
+// cell renders clear forever, so anything later passing through it is visible.
+// This replaces both the moving ship-sight clear circle AND the per-landmark
+// discovery flags: the sun / black hole / gas cloud are plain world geometry now,
+// visible iff their cells are seen.
+//
+// Radar is a SEPARATE, orthogonal mechanic: a planet's sticky `body.detected`
+// flag (set within radarRadius) keeps it visible even over unseen cells. The grid
+// never touches `body.detected`.
+let fogSeen = new Set() // keys "col,row" of permanently-seen cells
+// Bounding box (in cell indices) of all seen cells — lets the renderer iterate
+// only the explored region and bulk-fill the unexplored margins.
+let fogBboxColMin = Infinity
+let fogBboxColMax = -Infinity
+let fogBboxRowMin = Infinity
+let fogBboxRowMax = -Infinity
+
+// Radar sweep: a line rotating around the ship at radarSweepSpeed. A trackable
+// body inside radarRadius is detected only when the sweep line crosses its
+// bearing (not by mere proximity). `radarAngle` accumulates; `radarPrevAngle` is
+// last frame's value so we can test which bearings the line swept through.
+let radarAngle = 0
+let radarPrevAngle = 0
+// Per-body blink animation, keyed by body.id: { t, dur, pulses }. The sweep line
+// fires a blink every time it crosses an in-range body — a DOUBLE blink on first
+// acquisition (pulses 2), a single acknowledging ping (pulses 1) on every later
+// hit. t counts down from dur; the draw maps it to `pulses` flashes.
+let radarBlink = {}
+const RADAR_BLINK_DUR_DOUBLE = 0.9 // seconds for the two-pulse acquisition blink
+const RADAR_BLINK_DUR_SINGLE = 0.45 // seconds for the one-pulse per-hit ping
+
+function fogCell() {
+  return settings.settings.fog.cellSize
+}
+function cellKey(col, row) {
+  return col + ',' + row // integers only → unambiguous, no decimal/comma clash
+}
+// World-point convenience: is the cell containing (x,y) seen?
+function worldCellSeen(x, y) {
+  const cell = fogCell()
+  return fogSeen.has(cellKey(Math.floor(x / cell), Math.floor(y / cell)))
+}
+
+// Bodies radar can lock onto and then track forever: the planets and the sun.
+// (The gas cloud is static map geometry revealed by sight, not a radar contact.)
+function isRadarTrackable(body) {
+  return body.isPlanet || body.id === 'sun'
+}
+
+// All radar contacts: the trackable bodies PLUS the black hole, which is a
+// scannable landmark but lives outside bodies[] (it's a fixed constant, not a
+// physics body). Everything that sweeps/draws/scans radar iterates this so the
+// black hole behaves exactly like the sun and planets — detect, blink, name,
+// HUD — without entangling it with the physics integrator.
+function radarTargets() {
+  const out = []
+  for (const body of bodies) if (isRadarTrackable(body)) out.push(body)
+  out.push(BLACK_HOLE)
+  return out
+}
+
+// Reset clears EVERY seen cell. Called from buildScene(), which is the only
+// caller and which also re-creates bodies (so radar `detected` flags reset
+// implicitly there). Reassigning a fresh Set lets the old one GC.
+function resetFog() {
+  fogSeen = new Set()
+  fogBboxColMin = Infinity
+  fogBboxColMax = -Infinity
+  fogBboxRowMin = Infinity
+  fogBboxRowMax = -Infinity
+  radarAngle = 0
+  radarPrevAngle = 0
+  radarBlink = {}
+  // The black hole's radar flags live on a persistent constant, so clear them
+  // here (bodies-based contacts reset implicitly when buildScene rebuilds bodies).
+  BLACK_HOLE.detected = false
+  BLACK_HOLE.scanned = false
+  BLACK_HOLE.scanProgress = 0
+}
 
 // Camera
 const cam = {
@@ -454,6 +703,42 @@ function pickStarColor(rand) {
 
 // Nebula clouds — seeded random soft blobs drawn as radial gradients
 let nebulaClouds = []
+
+// Hubble backdrop — a faint, translucent photo laid over the black base so the
+// player can tell SEEN space (image shows through) from fog (solid black). Loaded
+// once; drawImage no-ops until it decodes.
+//
+// Parallax: the image drifts opposite the camera's world motion (parX/parY are
+// the camera's world position × PARALLAX_GAIN). HUBBLE_DEPTH controls how strong
+// the effect is — well above the deep starfield (0.004) so the photo visibly
+// slides as you pan, reading as a near-ish backdrop. To keep its edges off-screen
+// at the largest drift, we cover-fit with extra HUBBLE_MARGIN headroom.
+const HUBBLE_ALPHA = 0.16 // very translucent overlay
+const HUBBLE_DEPTH = 0.16 // parallax strength (strong drift; deep stars are 0.004)
+const HUBBLE_MARGIN = 0.45 // fraction of viewport reserved as drift headroom
+const hubbleImg = new Image()
+hubbleImg.src = hubbleUrl
+
+function drawHubbleBackdrop(ctx, w, h, parX, parY) {
+  if (!hubbleImg.complete || !hubbleImg.naturalWidth) return
+  const iw = hubbleImg.naturalWidth
+  const ih = hubbleImg.naturalHeight
+  // Parallax offset (opposite the camera's motion, like the star layers).
+  const ox = -parX * HUBBLE_DEPTH
+  const oy = -parY * HUBBLE_DEPTH
+  // Cover fit + margin so the image overfills the viewport by HUBBLE_MARGIN on
+  // every side, leaving room for the drift offset without exposing an edge.
+  const scale = Math.max(w / iw, h / ih) * (1 + HUBBLE_MARGIN * 2)
+  const dw = iw * scale
+  const dh = ih * scale
+  const dx = (w - dw) / 2 + ox
+  const dy = (h - dh) / 2 + oy
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.globalAlpha = HUBBLE_ALPHA
+  ctx.drawImage(hubbleImg, dx, dy, dw, dh)
+  ctx.restore()
+}
 
 function buildStarfield(w, h) {
   const rand = seededRandom(0x6a51cafe)
@@ -660,6 +945,25 @@ function applySolarGravityWell(bs, dt) {
   }
 }
 
+// Velocity drag inside the gas cloud. Soft falloff (full at the core, zero at the
+// edge). Uses exponential decay so it's stable and timescale-independent: a body
+// loses the same fraction of speed per sim-year regardless of frame rate or dt.
+function applyGasCloudDrag(bs, dt) {
+  if (GAS_CLOUD.dragPerYr <= 0) return
+  for (const body of bs) {
+    if (body.isFixed) continue
+    const dist = gasCloudSpineClosest(body.x, body.y).dist
+    if (dist >= GAS_CLOUD.r) continue
+
+    // 1 at the spine → 0 at the edge (smoothstep for a gentle boundary).
+    const e = 1 - dist / GAS_CLOUD.r
+    const density = e * e * (3 - 2 * e)
+    const decay = Math.exp(-GAS_CLOUD.dragPerYr * density * dt)
+    body.vx *= decay
+    body.vy *= decay
+  }
+}
+
 function easeInOutCubic(t) {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
 }
@@ -671,6 +975,7 @@ function getSlingshotOrbitRadius(planet) {
 function stepSystemWhileShipAutopilots(dt_yr, planetBoost) {
   if (!ship) return gravityStep(bodies, dt_yr)
   ship.isFixed = true
+  applyGasCloudDrag(bodies, dt_yr)
   applyInterPlanetGravityLocal(bodies, dt_yr, planetBoost)
   gravityStep(bodies, dt_yr)
   ship.isFixed = false
@@ -687,19 +992,25 @@ function updateSolarCharge(realDt_s) {
 }
 
 function tickSolarParticles(realDt_s, w, h) {
-  // Panel and gauge/bar positions (must match drawEnergyHUD)
-  const panelX = 12
-  const panelY = 46
-  const panelH = h - panelY - 12
-  const gaugeR = 32
-  const gaugeSectionH = gaugeR * 2 + 52
-  const barX = panelX + 22
-  const barW = 40
+  // Gauge/bar positions — MUST mirror drawEnergyHUD's minimal layout (incl. the
+  // bezel inset of 5 + 8 = 13px per side from the outer device footprint).
+  const outerX = 12
+  const outerY = 46
+  const outerH = h - outerY - 14
+  const inset = 13
+  const panelX = outerX + inset
+  const panelY = outerY + inset
+  const panelW = 78 - inset * 2
+  const panelH = outerH - inset * 2
+  const gaugeR = 15
+  const gaugeSectionH = gaugeR * 2 + 32
+  const barW = 10
+  const barX = panelX + 6
   const barCx = barX + barW / 2
-  const barY = panelY + 32
-  const barH = panelH - gaugeSectionH - 32 - 16
-  const gaugeCx = barCx
-  const gaugeCy = panelY + panelH - gaugeR - 18
+  const barY = panelY + 20
+  const barH = panelH - gaugeSectionH - 20 - 12
+  const gaugeCx = panelX + panelW / 2
+  const gaugeCy = panelY + panelH - gaugeR - 12
 
   // Spawn rate: up to 40 particles/s at 100% efficiency
   const spawnRate = solarEfficiency * 40
@@ -744,6 +1055,7 @@ function simStep(dt_yr, realDt_s) {
     applyShipInput(dt_yr, realDt_s)
     applyBlackHoleGravityLocal(bodies, dt_yr)
     applySolarGravityWell(bodies, dt_yr)
+    applyGasCloudDrag(bodies, dt_yr)
     applyInterPlanetGravityLocal(bodies, dt_yr, boost)
     gravityStep(bodies, dt_yr)
     resolveBodyDestruction()
@@ -777,6 +1089,9 @@ function checkOrbitCapture(dt_yr) {
     if (body.isFixed) continue
     if (body.id === 'sun') continue
     if (body.id === 'ship') continue
+    // Can't dock with a body you haven't fully observed yet — finish the
+    // first-contact scan first.
+    if (!body.scanned) continue
 
     const { distancePct } = getApproachMatch(body)
     if (distancePct >= 1) {
@@ -904,7 +1219,9 @@ function breakOrbit(kick = true) {
 
   orbitState = { mode: 'free', planet: null, shipOffset: null }
   orbitDrag = null
-  cam.focus = 'ship'
+  // Re-follow the ship after a slingshot, but don't override a deliberate
+  // sun-center view (e.g. the player pressed Z before taking the shot).
+  if (cam.focus !== 'sun') cam.focus = 'ship'
 }
 
 function updateOrbitAimFromMouse() {
@@ -929,6 +1246,42 @@ function updateOrbitAimFromMouse() {
 // SHOT FIRING
 // =============================================================================
 
+// Cancel zone: while connected to a planet, if the mouse sits within this many
+// screen pixels of the planet's edge (i.e. the drag is tiny → near-zero power),
+// a click CANCELS the shot instead of firing a useless dribble. The radius is the
+// planet's on-screen radius plus a fixed margin so it's always clickable even for
+// tiny planets. drawOrbitCue() shows a red ✕ when the mouse is in this zone.
+const SHOT_CANCEL_MARGIN_PX = 26
+function shotCancelRadiusPx(planet) {
+  return planet.drawR * scale() + SHOT_CANCEL_MARGIN_PX
+}
+// True when the current aim (mouse vs planet) is inside the cancel zone.
+function aimInCancelZone() {
+  if (!orbitDrag || !orbitState.planet) return false
+  const { startX, startY, curX, curY } = orbitDrag
+  const d = Math.hypot(curX - startX, curY - startY)
+  return d <= shotCancelRadiusPx(orbitState.planet)
+}
+
+// The energy the CURRENT aim would draw, as fractions of the storage bar, so the
+// energy HUD can preview the cost. Returns null when not actively aiming a shot.
+//   requested = what the drag asks for (uncapped, can exceed stored)
+//   drawn     = what's actually spent (capped at stored energy)
+// Both are 0..1 of SOLAR_MAX_ENERGY. The gap between them shows the player the
+// shot is capping out at their stored power.
+function currentShotDraw() {
+  if (orbitState.mode !== 'slingshot' && orbitState.mode !== 'capturing') return null
+  if (!orbitDrag || !orbitState.planet || aimInCancelZone()) return null
+  const { startX, startY, curX, curY } = orbitDrag
+  const dist = Math.hypot(curX - startX, curY - startY)
+  if (dist < 2) return null
+  const maxDrag = settings.settings.orbit.maxDrag
+  const dragPower = Math.min(dist, maxDrag) / maxDrag // 0..1
+  const requested = (dragPower * SOLAR_SHOT_COST) / SOLAR_MAX_ENERGY
+  const drawn = Math.min(requested, shipEnergy / SOLAR_MAX_ENERGY)
+  return { requested, drawn }
+}
+
 function fireShot() {
   if (orbitState.mode !== 'slingshot' && orbitState.mode !== 'capturing') return
   if (!orbitDrag) return
@@ -939,8 +1292,15 @@ function fireShot() {
   const ddx = curX - startX
   const ddy = curY - startY
   const dist = Math.sqrt(ddx * ddx + ddy * ddy)
-  if (dist < 2) {
-    breakOrbit(true)
+  // Click inside the cancel zone (mouse near the planet → negligible power):
+  // release the connection instead of firing. No random kick — this is a
+  // deliberate cancel, so leave the ship where it is. Arm the release lock (as
+  // firing does) so checkOrbitCapture can't instantly re-dock: the ship must
+  // leave this planet's capture range before it can hook on again.
+  if (dist <= shotCancelRadiusPx(planet)) {
+    captureReleaseLockPlanetId = planet.id
+    captureCooldown = 0.25
+    breakOrbit(false)
     return
   }
 
@@ -1173,7 +1533,7 @@ function spawnSunDebris(body) {
 
 // Full retrograde brake, clamped so it can never push the ship past a standstill.
 // Shared by the spacebar brake in all modes (and by Drift's S-alone input).
-function applyRetrogradeBrake(dt_yr, realDt_s, thrust) {
+function applyRetrogradeBrake(dt_yr, thrust) {
   const speed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy)
   const maxBrakeDv = thrust * dt_yr
   if (speed > 1e-6 && maxBrakeDv > 0) {
@@ -1182,7 +1542,7 @@ function applyRetrogradeBrake(dt_yr, realDt_s, thrust) {
     const brakePower = brakeDv / maxBrakeDv // safe: maxBrakeDv > 0 guarded above
     ship.vx -= (ship.vx / speed) * brakeDv
     ship.vy -= (ship.vy / speed) * brakeDv
-    spawnThrustParticles(brakePower, realDt_s, retroAngle, dt_yr)
+    spawnThrustParticles(brakePower, retroAngle, dt_yr)
   }
   thrustActiveLastFrame = true
 }
@@ -1206,14 +1566,14 @@ function applyShipInput(dt_yr, realDt_s) {
   shipAngle = result.shipAngle
 
   if (result.brake) {
-    applyRetrogradeBrake(dt_yr, realDt_s, settings.settings.ship.thrustAccel)
+    applyRetrogradeBrake(dt_yr, settings.settings.ship.thrustAccel)
     return
   }
 
   ship.vx += result.dvx
   ship.vy += result.dvy
   if (result.particle) {
-    spawnThrustParticles(result.particle.power, realDt_s, result.particle.angle, dt_yr)
+    spawnThrustParticles(result.particle.power, result.particle.angle, dt_yr)
   }
   thrustActiveLastFrame = result.active
 }
@@ -1228,17 +1588,17 @@ function getThrustState() {
 // All units in sim-time (AU, yr). Spawned each thrust frame, connected as a ribbon at draw time.
 let thrustBurstId = 0
 let thrustActiveLastFrame = false
-function spawnThrustParticles(power, realDt_s, forceAngle, dt_yr) {
+function spawnThrustParticles(power, forceAngle, dt_yr) {
   if (!ship || power <= 0) return
 
-  // Plume lifetime in REAL seconds, so particles always expire (aging in
-  // sim-years never reaches expiry at 1× timescale — the plume would freeze).
-  const lifeSec = 0.45 + power * 0.25
-
-  // Sim-time reference length used only to keep ribbon density constant: at high
-  // timescale a frame advances more sim-time, so we emit more particles to fill
-  // the longer plume. Floor at 1 so thrust always emits something.
+  // Plume lifetime in SIM-years. Both aging and movement use sim-time, so the
+  // plume is a fixed-length physical streak (exhaustSpeed × lifeYr AU) that looks
+  // the same at every timescale — it adheres to sim time, not wall-clock.
   const lifeYr = 0.04 + power * 0.02
+
+  // Density compensation: a frame advances dt_yr of sim-time, so emit more
+  // particles when more sim-time passes to keep the ribbon evenly filled.
+  // Floor at 1 so thrust always emits something.
   const densityTarget = 2
   const count = Math.min(4, Math.max(1, Math.ceil((dt_yr / lifeYr) * densityTarget)))
 
@@ -1255,8 +1615,9 @@ function spawnThrustParticles(power, realDt_s, forceAngle, dt_yr) {
     const spread = (Math.random() - 0.5) * (0.04 + power * 0.055)
     const ex = backX * Math.cos(spread) + sideX * Math.sin(spread)
     const ey = backY * Math.cos(spread) + sideY * Math.sin(spread)
-    // Exhaust speed in AU/yr — a physical constant, independent of timescale
-    const exhaustSpeed = 1 + power * 2.75 + (Math.random() - 0.5) * (0.25 + power * 0.5)
+    // Exhaust speed in AU/yr — a physical constant, independent of timescale.
+    // Faster exhaust = a longer, more energetic streak for the same lifetime.
+    const exhaustSpeed = 1.8 + power * 4.6 + (Math.random() - 0.5) * (0.4 + power * 0.7)
     const sideKick = (Math.random() - 0.5) * power * 0.2
     const offset = ((Math.random() - 0.5) * 2.0) / s
 
@@ -1267,8 +1628,9 @@ function spawnThrustParticles(power, realDt_s, forceAngle, dt_yr) {
       vx: ship.vx + ex * exhaustSpeed + sideX * sideKick,
       vy: ship.vy + ey * exhaustSpeed + sideY * sideKick,
       age: 0,
-      duration: lifeSec * (0.8 + Math.random() * 0.4),
-      size: 0.5 + power * 0.7 + Math.random() * 0.2,
+      duration: lifeYr * (0.8 + Math.random() * 0.4), // sim-years
+      // Thinner plume — smaller base + power scaling.
+      size: 0.3 + power * 0.4 + Math.random() * 0.15,
       spread,
       burstId: thrustBurstId,
     })
@@ -1337,6 +1699,7 @@ function computeProjectedPath({
 
     applyBlackHoleGravityLocal(ghosts, predDt)
     applySolarGravityWell(ghosts, predDt)
+    applyGasCloudDrag(ghosts, predDt)
     applyInterPlanetGravityLocal(ghosts, predDt, gravityBoost)
     gravityStep(ghosts, predDt)
     elapsed += predDt
@@ -1422,6 +1785,7 @@ function computeShotPrediction(planet, nx, ny, dv) {
 
 function buildScene(w, h) {
   bodies = []
+  resetFog()
   buildStarfield(w, h)
   shipAngle = -Math.PI / 2
   shipPredPath = []
@@ -1473,14 +1837,20 @@ function buildScene(w, h) {
       isFixed: bd.isFixed,
       isPlanet: !bd.isFixed && bd.id !== 'ship',
       captureTimeInRange: 0,
+      detected: false, // radar: sticky once the sweep line crosses this body
+      scanned: false, // sticky once first-contact observation completes (name + details unlock)
+      scanProgress: 0, // sim-years accumulated observing this body (→ scanned at SCAN_DURATION_SIMYR)
       trail: makeTrail(bd.isFixed ? 0 : settings.settings.visuals.trailLength),
     })
   }
 
-  // Ship: start just behind Mars with a slight catch-up velocity for capture testing.
+  // Ship: start behind Mars but well OUTSIDE scanner range (so the player
+  // witnesses first-contact observation when they approach), with a slight
+  // catch-up velocity. 0.45 rad of arc at Mars's radius is ~0.68 AU — comfortably
+  // beyond the scan range (~0.4 AU).
   const marsDef = SOLAR_BODIES.find((b) => b.id === 'mars')
   const shipR = marsDef.orbR
-  const shipA = marsDef.angle - 0.18
+  const shipA = marsDef.angle - 0.45
   const shipOrb = Math.sqrt((G_SIM * 1.0) / shipR) * 1.025
   ship = {
     id: 'ship',
@@ -1562,22 +1932,44 @@ function wrap(value, max) {
   return ((value % max) + max) % max
 }
 
+// Pixels of parallax drift per AU the camera center moves through the world.
+// Driving parallax from the camera's WORLD center (not cam.panX) keeps it
+// anchored to whatever the camera follows — ship, sun, or planet — and makes it
+// independent of zoom and the screen-center constant baked into cam.panX.
+const PARALLAX_GAIN = 120
+
 function drawStarfield(ctx, w, h) {
   if (!starLayers.length) buildStarfield(w, h)
 
   const t = Date.now() / 1000
 
+  // World point currently at the center of the screen (inverse of worldToScreen).
+  const s = scale()
+  const camWorldX = (w / 2 - cam.panX) / s
+  const camWorldY = (h / 2 - cam.panY) / s
+  // Parallax basis in pixels: how far the followed target has moved through space.
+  const parX = camWorldX * PARALLAX_GAIN
+  const parY = camWorldY * PARALLAX_GAIN
+
   ctx.save()
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.fillStyle = '#01020a'
   ctx.fillRect(0, 0, w, h)
+  ctx.restore()
 
+  // Hubble photo backdrop over the black base (so seen space reads differently
+  // from fog). Drawn before nebula/stars so they layer on top of it. Parallax
+  // basis (parX/parY) gives it a pronounced drift.
+  drawHubbleBackdrop(ctx, w, h, parX, parY)
+
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
   // --- Nebula clouds ---
   ctx.globalCompositeOperation = 'screen'
   for (const cloud of nebulaClouds) {
     const zoomDrift = Math.log2(Math.max(cam.zoom, 0.004) / 0.33) * 18 * cloud.depth
-    let cx = wrap(cloud.x + wrap(cam.panX * cloud.depth + zoomDrift, cloud.tw), cloud.tw)
-    let cy = wrap(cloud.y + wrap(cam.panY * cloud.depth - zoomDrift * 0.6, cloud.th), cloud.th)
+    let cx = wrap(cloud.x - wrap(parX * cloud.depth - zoomDrift, cloud.tw), cloud.tw)
+    let cy = wrap(cloud.y - wrap(parY * cloud.depth + zoomDrift * 0.6, cloud.th), cloud.th)
     if (cx > w + cloud.rx) cx -= cloud.tw
     if (cy > h + cloud.ry) cy -= cloud.th
 
@@ -1599,8 +1991,9 @@ function drawStarfield(ctx, w, h) {
   // --- Stars ---
   for (const layer of starLayers) {
     const zoomDrift = Math.log2(Math.max(cam.zoom, 0.004) / 0.33) * 18 * layer.depth
-    const ox = wrap(cam.panX * layer.depth + zoomDrift, layer.tw)
-    const oy = wrap(cam.panY * layer.depth - zoomDrift * 0.6, layer.th)
+    // Negated: as the camera moves +x through the world, the stars slide -x.
+    const ox = wrap(-parX * layer.depth + zoomDrift, layer.tw)
+    const oy = wrap(-parY * layer.depth - zoomDrift * 0.6, layer.th)
 
     for (const star of layer.stars) {
       let x = wrap(star.x + ox, layer.tw)
@@ -1884,6 +2277,138 @@ function drawSolarGravityWell(ctx) {
   ctx.restore()
 }
 
+function drawGasCloud(ctx) {
+  const s = scale()
+  const t = Date.now() / 1000
+  const { x1, y1, x2, y2, r, color } = GAS_CLOUD
+
+  // Spine geometry: unit direction along the line + its perpendicular.
+  const sx = x2 - x1
+  const sy = y2 - y1
+  const len = Math.hypot(sx, sy) || 1
+  const ux = sx / len
+  const uy = sy / len
+  const px = -uy // perpendicular (across the cloud's width)
+  const py = ux
+
+  ctx.save()
+  ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY)
+  ctx.globalCompositeOperation = 'screen'
+
+  // Soft body — many overlapping radial puffs strung ALONG the spine and jittered
+  // across its width so the cloud reads as a turbulent, billowing streak rather
+  // than a disc or a hard tube. Puff size swells toward the middle and tapers at
+  // the ends (a wispy capsule). Drift is animated so the gas churns slowly.
+  const PUFFS = 22
+  for (let i = 0; i < PUFFS; i++) {
+    const f = PUFFS === 1 ? 0.5 : i / (PUFFS - 1) // 0..1 along the spine
+    // Taper the radius toward the two ends so the streak feathers out.
+    const taper = 0.45 + 0.55 * Math.sin(Math.PI * f)
+    // Deterministic-ish pseudo-offsets per puff, animated by time.
+    const acrossPhase = t * 0.22 + i * 2.3
+    const alongPhase = t * 0.17 + i * 1.1
+    const across = Math.sin(acrossPhase) * 0.55 * r // jitter across width
+    const along = Math.cos(alongPhase) * 0.06 * len // jitter along length
+    const bx = x1 + ux * (f * len + along) + px * across
+    const by = y1 + uy * (f * len + along) + py * across
+    const br = r * (0.55 + 0.55 * taper) * (0.85 + 0.3 * Math.sin(i * 1.9))
+    const a = 0.1 * taper + 0.04
+    const grad = ctx.createRadialGradient(bx, by, 0, bx, by, br)
+    grad.addColorStop(0, `rgba(${color},${a.toFixed(3)})`)
+    grad.addColorStop(0.5, `rgba(${color},${(a * 0.45).toFixed(3)})`)
+    grad.addColorStop(1, `rgba(${color},0)`)
+    ctx.fillStyle = grad
+    ctx.beginPath()
+    ctx.arc(bx, by, br, 0, Math.PI * 2)
+    ctx.fill()
+  }
+
+  // Faint capsule boundary so the drag region is legible: two parallel edges
+  // offset by r, capped by semicircles at each end.
+  ctx.globalCompositeOperation = 'source-over'
+  ctx.strokeStyle = `rgba(${color},0.16)`
+  ctx.lineWidth = 1 / s
+  ctx.setLineDash([6 / s, 6 / s])
+  const startAng = Math.atan2(py, px)
+  ctx.beginPath()
+  ctx.moveTo(x1 + px * r, y1 + py * r)
+  ctx.lineTo(x2 + px * r, y2 + py * r)
+  ctx.arc(x2, y2, r, startAng, startAng - Math.PI, true)
+  ctx.lineTo(x1 - px * r, y1 - py * r)
+  ctx.arc(x1, y1, r, startAng - Math.PI, startAng, true)
+  ctx.closePath()
+  ctx.stroke()
+  ctx.setLineDash([])
+
+  ctx.restore()
+}
+
+// Local gas density at a world point: 1 on the cloud's spine → 0 at its edge.
+function gasCloudDensityAt(x, y) {
+  const dist = gasCloudSpineClosest(x, y).dist
+  if (dist >= GAS_CLOUD.r) return 0
+  const e = 1 - dist / GAS_CLOUD.r
+  return e * e * (3 - 2 * e) // smoothstep
+}
+
+// Re-entry-style drag flare: a hot bow-shock on the LEADING edge (relative to
+// velocity) of any body plowing through the gas cloud — like a heat shield. The
+// intensity tracks aerodynamic heating (~ speed × local density).
+function drawGasCloudFriction(ctx) {
+  const s = scale()
+  ctx.save()
+  ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY)
+  ctx.globalCompositeOperation = 'lighter'
+
+  for (const body of bodies) {
+    if (body.isFixed) continue
+    const density = gasCloudDensityAt(body.x, body.y)
+    if (density <= 0.001) continue
+
+    const speed = Math.sqrt(body.vx * body.vx + body.vy * body.vy)
+    if (speed < 0.05) continue
+
+    // Heating rises with speed and how deep into the cloud the body is.
+    const heat = Math.min(1, speed * density * 0.16)
+    if (heat < 0.02) continue
+
+    // Velocity-facing (leading) direction.
+    const vx = body.vx / speed
+    const vy = body.vy / speed
+    // The ship renders at a fixed icon size (SHIP_DRAW_R), not its tiny physical
+    // drawR — match that so its flare is visible.
+    const r = body.id === 'ship' ? SHIP_DRAW_R : body.drawR
+    // Flare sits just ahead of the body on its leading edge.
+    const lead = r * 0.9
+    const fx = body.x + vx * lead
+    const fy = body.y + vy * lead
+
+    // Bright bow-shock arc across the leading edge.
+    const headAngle = Math.atan2(vy, vx)
+    const arcR = r * (1.5 + heat * 0.8)
+    ctx.lineWidth = (0.6 + heat * 1.4) * r * 0.5
+    ctx.lineCap = 'round'
+    ctx.strokeStyle = `rgba(255,235,200,${(0.6 * heat).toFixed(3)})`
+    ctx.beginPath()
+    ctx.arc(body.x, body.y, arcR, headAngle - 1.0, headAngle + 1.0)
+    ctx.stroke()
+
+    // A short wake streak trailing back from the shoulders (optional, subtle).
+    const tailLen = r * (2 + heat * 4)
+    const tg = ctx.createLinearGradient(fx, fy, fx - vx * tailLen, fy - vy * tailLen)
+    tg.addColorStop(0, `rgba(255,160,70,${(0.22 * heat).toFixed(3)})`)
+    tg.addColorStop(1, 'rgba(255,80,30,0)')
+    ctx.strokeStyle = tg
+    ctx.lineWidth = arcR * 0.5
+    ctx.beginPath()
+    ctx.moveTo(body.x, body.y)
+    ctx.lineTo(body.x - vx * tailLen, body.y - vy * tailLen)
+    ctx.stroke()
+  }
+
+  ctx.restore()
+}
+
 // =============================================================================
 // =============================================================================
 // CAPTURE TETHER
@@ -2041,6 +2566,38 @@ function drawOrbitCue(ctx) {
   const ddx = curX - startX
   const ddy = curY - startY
   const dist = Math.sqrt(ddx * ddx + ddy * ddy)
+
+  // Mouse in the cancel zone (near the planet): clicking will RELEASE the
+  // connection, not fire. Show a red ✕ + ring so the player knows, and skip the
+  // aiming cue entirely (there's no meaningful shot to preview here).
+  if (aimInCancelZone()) {
+    const sp = worldToScreen(planet.x, planet.y)
+    const rad = shotCancelRadiusPx(planet)
+    ctx.save()
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    ctx.strokeStyle = 'rgba(255,80,80,0.9)'
+    ctx.fillStyle = 'rgba(255,80,80,0.9)'
+    ctx.lineWidth = 2
+    // Dashed cancel ring marking the zone boundary.
+    ctx.setLineDash([5, 4])
+    ctx.beginPath()
+    ctx.arc(sp.x, sp.y, rad, 0, Math.PI * 2)
+    ctx.stroke()
+    ctx.setLineDash([])
+    // ✕ glyph centred on the planet.
+    const x = 9
+    ctx.beginPath()
+    ctx.moveTo(sp.x - x, sp.y - x)
+    ctx.lineTo(sp.x + x, sp.y + x)
+    ctx.moveTo(sp.x + x, sp.y - x)
+    ctx.lineTo(sp.x - x, sp.y + x)
+    ctx.stroke()
+    ctx.font = '11px monospace'
+    ctx.textAlign = 'center'
+    ctx.fillText('RELEASE', sp.x, sp.y + rad + 14)
+    ctx.restore()
+    return
+  }
   if (dist < 2) return
 
   const maxDrag = settings.settings.orbit.maxDrag
@@ -2155,10 +2712,11 @@ function drawProjectionCorridor(ctx, path, color, maxAlpha) {
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
 
-  // lineWidth and offset are in world-space (AU). Divide by s so they stay
-  // a fixed number of pixels on screen regardless of zoom level.
-  const lineW = 1.5 / s
-  const maxOffsetPx = 5 // corridor half-width in screen pixels
+  // Width and divergence are in SIM-space (AU), so the corridor is anchored to
+  // the world: zooming in makes the divergence visibly grow, zooming out shrinks
+  // it. (It scales with the trajectory, not with the screen.)
+  const lineW = PRED_CORRIDOR_LINE_AU
+  const maxOffset = PRED_CORRIDOR_HALF_AU
 
   for (let i = 1; i < path.length; i++) {
     const t = Math.max(0, Math.min(1, path[i].t ?? i / (path.length - 1)))
@@ -2170,13 +2728,13 @@ function drawProjectionCorridor(ctx, path, color, maxAlpha) {
     const len = Math.sqrt(dx * dx + dy * dy)
     if (len <= 1e-8) continue
 
-    // Perpendicular unit vector in world-space — zoom-independent direction.
+    // Perpendicular unit vector in world-space.
     const nx = -dy / len
     const ny = dx / len
     const prevT = Math.max(0, Math.min(1, path[i - 1].t ?? (i - 1) / (path.length - 1)))
-    // Offset grows along the path (corridor widens), converted to world-space AU.
-    const prevOffset = (Math.pow(prevT, 0.9) * maxOffsetPx) / s
-    const offset = (Math.pow(t, 0.9) * maxOffsetPx) / s
+    // Divergence grows along the path (corridor widens), in world-space AU.
+    const prevOffset = Math.pow(prevT, 0.9) * maxOffset
+    const offset = Math.pow(t, 0.9) * maxOffset
 
     ctx.lineWidth = lineW
     ctx.strokeStyle = `rgba(${color},${alpha})`
@@ -2217,6 +2775,12 @@ function darken(hex, t) {
 // =============================================================================
 
 function drawBody(ctx, body, w, h) {
+  // Fog of war: bodies and their trails are ALWAYS drawn here, in the normal
+  // world pass. The fog grid (drawn afterwards) blacks out the unseen cells on
+  // top of them, so a planet and its trail are hidden exactly where space is
+  // unexplored and revealed wherever a cell is seen — no per-body gating needed.
+  // Radar-tracked bodies on unseen cells are additionally redrawn as blips over
+  // the fog by drawTrackedOverFog() so they stay locatable in the dark.
   const s = scale()
   const screenR = body.drawR * s
 
@@ -2259,11 +2823,11 @@ function drawBody(ctx, body, w, h) {
   const sp = worldToScreen(body.x, body.y)
   if (sp.x < -60 || sp.x > w + 60 || sp.y < -60 || sp.y > h + 60) return
 
-  if (screenR >= MIN_PLANET_PX) {
+  // The SUN keeps its full glow + disc — it's the system's anchor landmark.
+  if (body.id === 'sun') {
     ctx.save()
-    ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY)
-
-    if (body.id === 'sun') {
+    if (screenR >= MIN_PLANET_PX) {
+      ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY)
       const g = ctx.createRadialGradient(
         body.x,
         body.y,
@@ -2279,40 +2843,23 @@ function drawBody(ctx, body, w, h) {
       ctx.beginPath()
       ctx.arc(body.x, body.y, body.drawR * 5, 0, Math.PI * 2)
       ctx.fill()
-    }
-
-    // Sphere shading
-    const ox = body.x - body.drawR * 0.3
-    const oy = body.y - body.drawR * 0.3
-    const sg = ctx.createRadialGradient(ox, oy, 0, body.x, body.y, body.drawR)
-    sg.addColorStop(0, lighten(body.color, 0.5))
-    sg.addColorStop(0.5, body.color)
-    sg.addColorStop(1, darken(body.color, 0.55))
-    ctx.beginPath()
-    ctx.arc(body.x, body.y, body.drawR, 0, Math.PI * 2)
-    ctx.fillStyle = sg
-    ctx.fill()
-
-    // Saturn rings
-    if (body.id === 'saturn') {
-      ctx.save()
-      ctx.translate(body.x, body.y)
-      ctx.scale(1, 0.28)
-      ctx.strokeStyle = 'rgba(232,213,160,0.5)'
-      ctx.lineWidth = (body.drawR * 0.55) / 0.28
+      const sg = ctx.createRadialGradient(
+        body.x - body.drawR * 0.3,
+        body.y - body.drawR * 0.3,
+        0,
+        body.x,
+        body.y,
+        body.drawR,
+      )
+      sg.addColorStop(0, lighten(body.color, 0.5))
+      sg.addColorStop(0.5, body.color)
+      sg.addColorStop(1, darken(body.color, 0.55))
       ctx.beginPath()
-      ctx.arc(0, 0, body.drawR * 2.3, 0, Math.PI * 2)
-      ctx.stroke()
-      ctx.restore()
-    }
-
-    ctx.restore()
-  } else {
-    // Icon mode
-    ctx.save()
-    ctx.setTransform(1, 0, 0, 1, 0, 0)
-
-    if (body.id === 'sun') {
+      ctx.arc(body.x, body.y, body.drawR, 0, Math.PI * 2)
+      ctx.fillStyle = sg
+      ctx.fill()
+    } else {
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
       const g = ctx.createRadialGradient(sp.x, sp.y, 2, sp.x, sp.y, 22)
       g.addColorStop(0, 'rgba(255,240,100,1)')
       g.addColorStop(0.3, 'rgba(255,180,0,0.5)')
@@ -2325,25 +2872,23 @@ function drawBody(ctx, body, w, h) {
       ctx.arc(sp.x, sp.y, 5, 0, Math.PI * 2)
       ctx.fillStyle = '#FFE566'
       ctx.fill()
-    } else {
-      ctx.beginPath()
-      ctx.arc(sp.x, sp.y, 3, 0, Math.PI * 2)
-      ctx.fillStyle = body.color
-      ctx.fill()
-      ctx.beginPath()
-      ctx.arc(sp.x, sp.y, 7, 0, Math.PI * 2)
-      ctx.strokeStyle = body.color + '66'
-      ctx.lineWidth = 1
-      ctx.stroke()
     }
-
-    ctx.font = '10px monospace'
-    ctx.fillStyle = body.color + 'aa'
-    ctx.textAlign = 'center'
-    ctx.fillText(body.name, sp.x, sp.y + 18)
-
     ctx.restore()
+    return
   }
+
+  // VISION LAYER for a planet: just a plain dot (plus its trail, drawn above).
+  // At galaxy scale a planet reads as a point anyway; the shaded sphere belongs to
+  // the info HUD. No name here — identity lives on the RADAR layer once scanned
+  // (drawTrackedOverFog). The dot uses the planet's own colour so eyes-on contacts
+  // look natural; radar-only contacts are styled separately over the fog.
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.beginPath()
+  ctx.arc(sp.x, sp.y, 3, 0, Math.PI * 2)
+  ctx.fillStyle = body.color
+  ctx.fill()
+  ctx.restore()
 }
 
 function drawShip(ctx, body, screenLen, w, h) {
@@ -2381,6 +2926,370 @@ function drawShip(ctx, body, screenLen, w, h) {
   ctx.stroke()
 
   ctx.restore()
+}
+
+// =============================================================================
+// CAPTAIN'S HUD (bottom-right planetary scan when near a planet)
+// =============================================================================
+
+// How far out the scanner picks a planet up, relative to its capture ring.
+const SCAN_RANGE_MULT = 4
+// First-contact observation takes 4 real seconds at the 1,000,000× reference
+// timescale. Stored as a sim-time threshold (sim-years), since scanProgress
+// accumulates simDt — so it runs faster/slower/freezes with the simulation, like
+// the radar sweep. 4s × 1e6 / SECONDS_PER_YEAR.
+const SCAN_DURATION_SIMYR = (4 * 1e6) / SECONDS_PER_YEAR
+// Eased 0..1 visibility so the panel fades in/out instead of popping.
+let captainHudVis = 0
+
+// `info` source for a scan target: planets and the sun carry it on their static
+// SOLAR_BODIES def; the black hole carries it on the constant itself.
+function scanInfoDef(target) {
+  if (target.id === 'blackhole') return BLACK_HOLE
+  return SOLAR_BODIES.find((d) => d.id === target.id)
+}
+
+// Pick the closest radar target (planet, sun, or black hole) within scanner
+// range. Returns the live target plus the def that carries its `info`.
+function getScannedPlanet() {
+  if (!ship) return null
+  let nearest = null
+  let nearestDist = Infinity
+  for (const target of radarTargets()) {
+    const { dist, captureRingR } = getApproachMatch(target)
+    if (dist > captureRingR * SCAN_RANGE_MULT) continue
+    if (dist < nearestDist) {
+      nearestDist = dist
+      nearest = target
+    }
+  }
+  if (!nearest) return null
+  const def = scanInfoDef(nearest)
+  if (!def || !def.info) return null
+  return { body: nearest, def, dist: nearestDist }
+}
+
+function drawCaptainHUD(ctx, w, h, realDt, simDt = 0) {
+  const scan = getScannedPlanet()
+
+  // Observation is INTERRUPTIBLE: leaving scanner range before it finishes resets
+  // the counter, so it starts over next time. Reset every in-progress, unscanned
+  // target that isn't the one currently in range.
+  for (const t of radarTargets()) {
+    if (!t.scanned && t.scanProgress > 0 && (!scan || scan.body !== t)) {
+      t.scanProgress = 0
+    }
+  }
+
+  // First-contact OBSERVATION. The first time a body is in scanner range, we run
+  // a timed scan (sim-time, 4s @ 1Mx) before its identity unlocks. Being in range
+  // implies radar detection (you can't observe what you haven't found). Only when
+  // scanProgress completes does `scanned` flip — and from then on it's instant.
+  let scanning = false
+  if (scan) {
+    scan.body.detected = true
+    if (!scan.body.scanned) {
+      scan.body.scanProgress += simDt
+      if (scan.body.scanProgress >= SCAN_DURATION_SIMYR) {
+        scan.body.scanned = true
+      } else {
+        scanning = true // still observing — show the animation, not the readout
+      }
+    }
+  }
+  const scanFrac = scan ? Math.min(1, scan.body.scanProgress / SCAN_DURATION_SIMYR) : 0
+
+  // captainHudVis eases the SCAN section in/out (0 = dark "no contact", 1 = full
+  // readout); the screen frame and the telemetry footer are always drawn. Keep
+  // the last target while fading so leaving range dims gracefully.
+  const targetVis = scan ? 1 : 0
+  const rate = Math.min(1, (realDt || 0.016) * 6)
+  captainHudVis += (targetVis - captainHudVis) * rate
+  if (scan) drawCaptainHUD._last = scan
+  const shown = scan || drawCaptainHUD._last
+  const vis = captainHudVis
+
+  // Fixed cockpit-screen geometry, bottom-right.
+  const panelW = 240
+  const panelH = 196
+  const margin = 14
+  const panelX = w - panelW - margin
+  const panelY = h - panelH - 14
+  const accent = '0,230,140' // classic phosphor-green CRT tint
+
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+
+  // Sensor link lines to the live target are drawn UNDER the bezel so the screen
+  // sits on top of where they meet the frame. Only when there's an active scan.
+  if (shown && vis > 0.02) {
+    const [lr, lg, lb] = hexToRgb(shown.body.color)
+    const ps = worldToScreen(shown.body.x, shown.body.y)
+    ctx.save()
+    ctx.globalAlpha = vis
+    ctx.strokeStyle = `rgba(${lr},${lg},${lb},0.4)`
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.moveTo(panelX, panelY)
+    ctx.lineTo(ps.x, ps.y)
+    ctx.moveTo(panelX, panelY + panelH)
+    ctx.lineTo(ps.x, ps.y)
+    ctx.stroke()
+    ctx.beginPath()
+    ctx.arc(ps.x, ps.y, 8, 0, Math.PI * 2)
+    ctx.strokeStyle = `rgba(${lr},${lg},${lb},0.7)`
+    ctx.stroke()
+    ctx.restore()
+  }
+
+  // Physical screen frame; everything below draws inside the returned content box.
+  const c = drawScreenBezel(ctx, panelX, panelY, panelW, panelH, accent)
+
+  // The screen is split: SCAN readout (top) over a TELEMETRY footer (bottom).
+  const footerH = 58
+  const scanH = c.h - footerH
+  const scanBottom = c.y + scanH
+
+  // ---- TELEMETRY footer (always on) ----
+  ctx.font = '8px monospace'
+  ctx.textAlign = 'left'
+  ctx.fillStyle = `rgba(${accent},0.55)`
+  ctx.fillText('◈ TELEMETRY', c.x, scanBottom + 12)
+  // Divider above the footer.
+  ctx.strokeStyle = `rgba(${accent},0.18)`
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(c.x, scanBottom + 4)
+  ctx.lineTo(c.x + c.w, scanBottom + 4)
+  ctx.stroke()
+
+  const colA = c.x
+  const colB = c.x + c.w / 2 + 6
+  let speedKmS = 0
+  let distAu = 0
+  if (ship) {
+    const speed_au_yr = Math.sqrt(ship.vx ** 2 + ship.vy ** 2)
+    speedKmS = (speed_au_yr * AU_KM) / SECONDS_PER_YEAR
+    const sun = bodies.find((b) => b.id === 'sun')
+    distAu = sun ? Math.sqrt((ship.x - sun.x) ** 2 + (ship.y - sun.y) ** 2) : 0
+  }
+  const telem = [
+    [colA, 'PLANETS', `${blackHoleScore - sunPenalty}`],
+    [colB, 'CONSUMED', `${blackHoleScore}`],
+    [colA, 'SPEED', `${speedKmS.toFixed(1)} km/s`],
+    [colB, 'SUN DIST', `${distAu.toFixed(3)} AU`],
+  ]
+  ctx.font = '8px monospace'
+  for (let i = 0; i < telem.length; i++) {
+    const [tx, label, value] = telem[i]
+    const ty = scanBottom + 26 + Math.floor(i / 2) * 14
+    ctx.textAlign = 'left'
+    ctx.fillStyle = `rgba(${accent},0.5)`
+    ctx.fillText(label, tx, ty)
+    ctx.fillStyle = `rgba(${accent},0.95)`
+    ctx.fillText(value, tx + 52, ty)
+  }
+
+  // ---- SCAN readout (upper area) ----
+  // Header row — label reflects the state.
+  ctx.font = '8px monospace'
+  ctx.textAlign = 'left'
+  ctx.fillStyle = `rgba(${accent},0.6)`
+  ctx.fillText(scanning ? '◈ OBSERVING' : '◈ SENSOR SCAN', c.x, c.y + 8)
+
+  if (!shown || vis < 0.02) {
+    ctx.textAlign = 'center'
+    ctx.fillStyle = `rgba(${accent},0.45)`
+    ctx.font = '10px monospace'
+    ctx.fillText('NO CONTACT', c.x + c.w / 2, c.y + scanH / 2)
+    ctx.font = '7px monospace'
+    ctx.fillStyle = `rgba(${accent},0.25)`
+    ctx.fillText('AWAITING SENSOR LOCK', c.x + c.w / 2, c.y + scanH / 2 + 13)
+    ctx.restore()
+    return
+  }
+
+  // ---- FIRST-CONTACT OBSERVATION animation ----
+  // Only while the CURRENT in-range target is still being observed. (A stale
+  // last-target that's out of range falls through to its cached readout.)
+  if (scanning && scan) {
+    drawObservationAnim(ctx, c, scanH, accent, scanFrac)
+    ctx.restore()
+    return
+  }
+
+  const { body, def, dist } = shown
+  const info = def.info
+  const [rv, gv, bv] = hexToRgb(body.color)
+  ctx.globalAlpha = vis
+
+  ctx.textAlign = 'right'
+  ctx.fillStyle = `rgba(${rv},${gv},${bv},0.9)`
+  ctx.fillText(info.classification.toUpperCase(), c.x + c.w, c.y + 8)
+
+  // Portrait (left).
+  const portR = 26
+  const portCx = c.x + portR + 2
+  const portCy = c.y + 22 + portR
+  const glow = ctx.createRadialGradient(portCx, portCy, portR * 0.5, portCx, portCy, portR * 2)
+  glow.addColorStop(0, `rgba(${rv},${gv},${bv},0.3)`)
+  glow.addColorStop(1, `rgba(${rv},${gv},${bv},0)`)
+  ctx.fillStyle = glow
+  ctx.beginPath()
+  ctx.arc(portCx, portCy, portR * 2, 0, Math.PI * 2)
+  ctx.fill()
+  const sg = ctx.createRadialGradient(
+    portCx - portR * 0.3,
+    portCy - portR * 0.3,
+    0,
+    portCx,
+    portCy,
+    portR,
+  )
+  sg.addColorStop(0, lighten(body.color, 0.5))
+  sg.addColorStop(0.5, body.color)
+  sg.addColorStop(1, darken(body.color, 0.55))
+  ctx.fillStyle = sg
+  ctx.beginPath()
+  ctx.arc(portCx, portCy, portR, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.save()
+  ctx.beginPath()
+  ctx.arc(portCx, portCy, portR, 0, Math.PI * 2)
+  ctx.clip()
+  const term = ctx.createLinearGradient(portCx - portR, portCy, portCx + portR, portCy)
+  term.addColorStop(0, 'rgba(0,0,0,0)')
+  term.addColorStop(0.62, 'rgba(0,0,0,0)')
+  term.addColorStop(1, 'rgba(0,0,0,0.7)')
+  ctx.fillStyle = term
+  ctx.fillRect(portCx - portR, portCy - portR, portR * 2, portR * 2)
+  ctx.restore()
+  ctx.font = 'bold 10px monospace'
+  ctx.fillStyle = `rgba(${rv},${gv},${bv},0.95)`
+  ctx.textAlign = 'center'
+  ctx.fillText(body.name.toUpperCase(), portCx, portCy + portR + 14)
+
+  // Data rows (right).
+  const distKm = dist * AU_KM
+  const distLabel =
+    distKm >= 1e6 ? `${(distKm / 1e6).toFixed(2)}M km` : `${Math.round(distKm).toLocaleString()} km`
+  const rows = [
+    ['DIAMETER', `${info.diameterKm.toLocaleString()} km`],
+    ['GRAVITY', `${info.gravityG.toFixed(2)} g`],
+    ['DAY', info.dayHours >= 100 ? `${Math.round(info.dayHours / 24)} d` : `${info.dayHours} h`],
+    ['MOONS', `${info.moons}`],
+    ['SURF TEMP', `${info.tempC}°C`],
+    ['RANGE', distLabel],
+  ]
+  const dataX = c.x + 60
+  const valX = c.x + c.w
+  let ry = c.y + 22
+  ctx.font = '8px monospace'
+  for (const [label, value] of rows) {
+    ctx.textAlign = 'left'
+    ctx.fillStyle = `rgba(${accent},0.5)`
+    ctx.fillText(label, dataX, ry)
+    ctx.textAlign = 'right'
+    ctx.fillStyle = `rgba(${accent},0.92)`
+    ctx.fillText(value, valX, ry)
+    ry += 12
+  }
+  // Flavor line.
+  ctx.textAlign = 'left'
+  ctx.font = '8px monospace'
+  ctx.fillStyle = `rgba(${rv},${gv},${bv},0.6)`
+  wrapText(ctx, info.desc, dataX, ry + 2, valX - dataX, 9)
+
+  ctx.restore()
+}
+
+// First-contact observation animation, drawn inside the captain-HUD scan area
+// `c` (content rect) with `scanH` height. An anonymous dark disc with a bright
+// horizontal line sweeping up and down across it (clipped to the disc), like a
+// scanner reading an unknown body, plus a caption and a sim-time progress bar.
+function drawObservationAnim(ctx, c, scanH, accent, frac) {
+  const cx = c.x + c.w / 2
+  const r = 26
+  const cy = c.y + 8 + r
+
+  // Anonymous disc — unknown body silhouette.
+  ctx.fillStyle = 'rgba(10,16,20,0.95)'
+  ctx.beginPath()
+  ctx.arc(cx, cy, r, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.strokeStyle = `rgba(${accent},0.55)`
+  ctx.lineWidth = 1.5
+  ctx.beginPath()
+  ctx.arc(cx, cy, r, 0, Math.PI * 2)
+  ctx.stroke()
+  // A faint "?" to read as unidentified.
+  ctx.fillStyle = `rgba(${accent},0.3)`
+  ctx.font = 'bold 22px monospace'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText('?', cx, cy + 1)
+  ctx.textBaseline = 'alphabetic'
+
+  // Horizontal scan line sweeping up/down over the disc (clipped to it). The
+  // sweep oscillates in real time so it always animates visibly; the BAR below
+  // tracks the sim-time progress.
+  const osc = (Math.sin(Date.now() / 420) + 1) / 2 // 0..1 ping-pong (slow sweep)
+  const lineY = cy - r + osc * (r * 2)
+  ctx.save()
+  ctx.beginPath()
+  ctx.arc(cx, cy, r, 0, Math.PI * 2)
+  ctx.clip()
+  // Bright sweep line + a soft trailing glow band.
+  const band = ctx.createLinearGradient(0, lineY - 8, 0, lineY + 8)
+  band.addColorStop(0, `rgba(${accent},0)`)
+  band.addColorStop(0.5, `rgba(${accent},0.28)`)
+  band.addColorStop(1, `rgba(${accent},0)`)
+  ctx.fillStyle = band
+  ctx.fillRect(cx - r, lineY - 8, r * 2, 16)
+  ctx.strokeStyle = `rgba(${accent},0.95)`
+  ctx.lineWidth = 1.5
+  ctx.beginPath()
+  ctx.moveTo(cx - r, lineY)
+  ctx.lineTo(cx + r, lineY)
+  ctx.stroke()
+  ctx.restore()
+
+  // Caption.
+  ctx.textAlign = 'center'
+  ctx.font = '9px monospace'
+  ctx.fillStyle = `rgba(${accent},0.85)`
+  ctx.fillText('OBSERVING UNKNOWN', cx, c.y + scanH - 30)
+  ctx.fillText('CELESTIAL BODY', cx, c.y + scanH - 19)
+
+  // Sim-time progress bar.
+  const barW = c.w - 20
+  const barX = c.x + 10
+  const barY = c.y + scanH - 10
+  ctx.fillStyle = 'rgba(0,0,0,0.6)'
+  ctx.fillRect(barX, barY, barW, 4)
+  ctx.fillStyle = `rgba(${accent},0.9)`
+  ctx.fillRect(barX, barY, barW * frac, 4)
+  ctx.strokeStyle = `rgba(${accent},0.4)`
+  ctx.lineWidth = 1
+  ctx.strokeRect(barX + 0.5, barY + 0.5, barW - 1, 3)
+}
+
+// Simple greedy word-wrap for canvas text.
+function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+  const words = text.split(' ')
+  let line = ''
+  let yy = y
+  for (const word of words) {
+    const test = line ? `${line} ${word}` : word
+    if (ctx.measureText(test).width > maxWidth && line) {
+      ctx.fillText(line, x, yy)
+      line = word
+      yy += lineHeight
+    } else {
+      line = test
+    }
+  }
+  if (line) ctx.fillText(line, x, yy)
 }
 
 // =============================================================================
@@ -2462,42 +3371,6 @@ function getTimeParts() {
   const years = Math.floor(totalMonths / 12)
   const monthInYear = (totalMonths % 12) + 1
   return { totalMonths, years, monthInYear }
-}
-
-function drawTimeScore(ctx, w) {
-  const { totalMonths, years, monthInYear } = getTimeParts()
-
-  ctx.save()
-  ctx.setTransform(1, 0, 0, 1, 0, 0)
-  ctx.textAlign = 'center'
-
-  const x = w / 2
-  const y = 13
-  const panelW = 330
-  const panelH = 91
-  ctx.fillStyle = 'rgba(0,0,0,0.42)'
-  ctx.strokeStyle = 'rgba(255,255,255,0.16)'
-  ctx.lineWidth = 1
-  roundRect(ctx, x - panelW / 2, y, panelW, panelH, 5)
-  ctx.fill()
-  ctx.stroke()
-
-  ctx.font = 'bold 25px monospace'
-  ctx.fillStyle = 'rgba(255,232,150,0.96)'
-  ctx.fillText(`MONTH ${totalMonths.toLocaleString()}`, x, y + 28)
-
-  ctx.font = 'bold 24px monospace'
-  ctx.fillStyle = 'rgba(127,232,232,0.92)'
-  ctx.fillText(`YEAR ${years.toLocaleString()}`, x, y + 57)
-
-  ctx.font = '10px monospace'
-  ctx.fillStyle = 'rgba(255,255,255,0.48)'
-  ctx.fillText(`MONTH ${monthInYear} OF CURRENT YEAR`, x, y + 70)
-
-  ctx.font = 'bold 11px monospace'
-  ctx.fillStyle = 'rgba(255,255,255,0.7)'
-  ctx.fillText(`ENERGY SPENT ${Math.round(totalEnergySpent).toLocaleString()}`, x, y + 84)
-  ctx.restore()
 }
 
 function drawFinalScoreOverview(ctx, w, h) {
@@ -2632,85 +3505,102 @@ function drawEnergyHUD(ctx, w, h) {
   ctx.save()
   ctx.setTransform(1, 0, 0, 1, 0, 0)
 
-  const panelX = 12
-  const panelY = 46 // clear of focus buttons (12 + 22 + 12)
-  const panelW = 84
-  const panelH = h - panelY - 12
+  // Outer device footprint, then the same cockpit-screen bezel as the captain
+  // HUD. Content draws inside the returned glass rect. Minimal: a narrow column.
+  const outerX = 12
+  const outerY = 46 // clear of focus buttons (12 + 22 + 12)
+  const outerW = 78 // room for the shot-draw preview on the bar's right
+  const outerH = h - outerY - 14
+  const accent = '0,230,140' // classic phosphor-green CRT tint (matches captain HUD)
+  const c = drawScreenBezel(ctx, outerX, outerY, outerW, outerH, accent)
 
-  // Panel background
-  ctx.fillStyle = 'rgba(2,8,20,0.80)'
-  ctx.strokeStyle = 'rgba(79,195,247,0.22)'
-  ctx.lineWidth = 1
-  roundRect(ctx, panelX, panelY, panelW, panelH, 7)
-  ctx.fill()
-  ctx.stroke()
+  const panelX = c.x
+  const panelY = c.y
+  const panelW = c.w
+  const panelH = c.h
 
-  // --- Layout constants ---
-  const gaugeR = 32
-  const gaugeSectionH = gaugeR * 2 + 52 // label above + arc + % below
-  const barX = panelX + 22
-  const barW = 40
-  const barCx = barX + barW / 2
-  const barY = panelY + 32
-  const barH = panelH - gaugeSectionH - 32 - 16 // top margin + bottom gap
+  // --- Layout constants (minimal) ---
+  const gaugeR = 15
+  const gaugeSectionH = gaugeR * 2 + 32 // label above + arc + % below
+  const barW = 10 // thin bar
+  const barX = panelX + 6 // left-biased so the shot-draw preview fits on its right
+  const panelCx = panelX + panelW / 2 // labels + gauge centre on the panel, not the bar
+  const barY = panelY + 20
+  const barH = panelH - gaugeSectionH - 20 - 12
 
   const energyFrac = shipEnergy / SOLAR_MAX_ENERGY
 
   // --- Energy bar track ---
   ctx.fillStyle = 'rgba(0,0,0,0.55)'
-  roundRect(ctx, barX, barY, barW, barH, 5)
+  roundRect(ctx, barX, barY, barW, barH, 3)
   ctx.fill()
 
-  // Bar fill — green at full, yellow mid, red empty
+  // Bar fill — green at full, yellow mid, red empty.
   const fillH = barH * energyFrac
   const r = Math.round(energyFrac < 0.5 ? 255 : 255 * (1 - (energyFrac - 0.5) * 2))
   const g = Math.round(energyFrac > 0.5 ? 200 : energyFrac * 2 * 200)
   if (fillH > 0) {
-    const barGrad = ctx.createLinearGradient(0, barY + barH, 0, barY)
-    barGrad.addColorStop(0, `rgba(${r},${g},60,0.95)`)
-    barGrad.addColorStop(1, `rgba(${Math.min(255, r + 40)},${Math.min(255, g + 40)},100,0.75)`)
-    ctx.fillStyle = barGrad
-    roundRect(ctx, barX, barY + barH - fillH, barW, fillH, 5)
+    ctx.fillStyle = `rgba(${r},${g},60,0.92)`
+    roundRect(ctx, barX, barY + barH - fillH, barW, fillH, 3)
     ctx.fill()
   }
 
-  // Bar glow
-  if (energyFrac > 0.02) {
-    ctx.shadowColor = `rgb(${r},${g},60)`
-    ctx.shadowBlur = 14
-    ctx.fillStyle = `rgba(${r},${g},60,0.25)`
-    roundRect(ctx, barX, barY + barH - fillH, barW, fillH, 5)
-    ctx.fill()
-    ctx.shadowBlur = 0
-  }
-
-  // Bar border
-  ctx.strokeStyle = 'rgba(79,195,247,0.35)'
-  ctx.lineWidth = 1.5
-  roundRect(ctx, barX, barY, barW, barH, 5)
+  // Thin bar border.
+  ctx.strokeStyle = `rgba(${accent},0.45)`
+  ctx.lineWidth = 1
+  roundRect(ctx, barX, barY, barW, barH, 3)
   ctx.stroke()
 
-  // Tick marks inside bar — 10 divisions
-  ctx.strokeStyle = 'rgba(0,0,0,0.3)'
-  ctx.lineWidth = 1
-  for (let i = 1; i < 10; i++) {
-    const ty = barY + barH - (barH * i) / 10
-    ctx.beginPath()
-    ctx.moveTo(barX + 2, ty)
-    ctx.lineTo(barX + barW - 2, ty)
-    ctx.stroke()
-  }
-
-  // "ENERGY" label above bar
-  ctx.font = 'bold 10px monospace'
-  ctx.fillStyle = 'rgba(79,195,247,0.7)'
+  // "ENGY" label above bar (compact).
+  ctx.font = '8px monospace'
+  ctx.fillStyle = `rgba(${accent},0.7)`
   ctx.textAlign = 'center'
-  ctx.fillText('ENERGY', barCx, barY - 10)
+  ctx.fillText('ENGY', panelCx, barY - 7)
 
-  // Energy % label below bar
-  ctx.font = 'bold 13px monospace'
+  // Energy % label below bar.
+  ctx.font = 'bold 10px monospace'
   ctx.fillStyle = `rgba(${r},${g},60,0.95)`
-  ctx.fillText(`${Math.round(energyFrac * 100)}%`, barCx, barY + barH + 16)
+  ctx.fillText(`${Math.round(energyFrac * 100)}%`, panelCx, barY + barH + 13)
+
+  // --- Shot power-draw preview ---
+  // While aiming a shot, show how much stored energy it will consume: a pulsing
+  // segment at the TOP of the current fill (the part that will drain), plus a
+  // bracket on the right edge. If the request exceeds what's stored, the draw
+  // caps at the full bar and we flag "MAX" — the shot can't use more than stored.
+  const draw = currentShotDraw()
+  if (draw) {
+    const fillTop = barY + barH - barH * energyFrac
+    const drawH = barH * draw.drawn
+    const pulse = 0.45 + 0.35 * ((Math.sin(Date.now() / 200) + 1) / 2)
+    // Drain segment over the top of the fill.
+    ctx.fillStyle = `rgba(255,90,70,${pulse.toFixed(3)})`
+    ctx.fillRect(barX, fillTop, barW, drawH)
+    // Bracket + tick on the right edge marking the post-shot level.
+    const postLevel = fillTop + drawH
+    const bx = barX + barW + 3
+    ctx.strokeStyle = `rgba(255,120,90,${(0.7 + pulse * 0.3).toFixed(3)})`
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.moveTo(bx, fillTop)
+    ctx.lineTo(bx + 3, fillTop)
+    ctx.moveTo(bx + 3, fillTop)
+    ctx.lineTo(bx + 3, postLevel)
+    ctx.moveTo(bx + 3, postLevel)
+    ctx.lineTo(bx, postLevel)
+    ctx.stroke()
+    // Cost readout to the right of the bar.
+    ctx.save()
+    ctx.textAlign = 'left'
+    ctx.font = '8px monospace'
+    ctx.fillStyle = 'rgba(255,120,90,0.95)'
+    const costPct = Math.round(draw.drawn * 100)
+    ctx.fillText(`-${costPct}%`, bx + 6, (fillTop + postLevel) / 2 + 3)
+    if (draw.requested > draw.drawn + 0.001) {
+      ctx.fillStyle = 'rgba(255,200,60,0.95)'
+      ctx.fillText('MAX', bx + 6, (fillTop + postLevel) / 2 + 13)
+    }
+    ctx.restore()
+  }
 
   // --- Solar particles (drawn before gauge so gauge renders on top) ---
   for (const p of solarParticles) {
@@ -2729,43 +3619,40 @@ function drawEnergyHUD(ctx, w, h) {
   ctx.globalAlpha = 1
   ctx.shadowBlur = 0
 
-  // --- Solar gauge — centered below bar ---
-  const gaugeCx = barCx
-  const gaugeCy = panelY + panelH - gaugeR - 18
+  // --- Solar gauge — small dial centered below the bar ---
+  const gaugeCx = panelCx
+  const gaugeCy = panelY + panelH - gaugeR - 12
   const gaugeStart = Math.PI * 0.75
   const gaugeSpan = Math.PI * 1.5
 
-  // "SOLAR" label above gauge
-  ctx.font = 'bold 10px monospace'
-  ctx.fillStyle = 'rgba(255,200,60,0.65)'
+  // "SOLAR" label above gauge.
+  ctx.font = '8px monospace'
+  ctx.fillStyle = 'rgba(255,200,60,0.6)'
   ctx.textAlign = 'center'
-  ctx.fillText('SOLAR', gaugeCx, gaugeCy - gaugeR - 6)
+  ctx.fillText('SOLAR', gaugeCx, gaugeCy - gaugeR - 4)
 
-  // Arc track
+  // Arc track (thin).
   ctx.beginPath()
   ctx.arc(gaugeCx, gaugeCy, gaugeR, gaugeStart, gaugeStart + gaugeSpan)
   ctx.strokeStyle = 'rgba(255,255,255,0.1)'
-  ctx.lineWidth = 6
+  ctx.lineWidth = 3
   ctx.stroke()
 
-  // Colored arc fill
+  // Colored arc fill.
   if (solarEfficiency > 0.005) {
     const effAngle = gaugeStart + gaugeSpan * solarEfficiency
-    const arcGrad = ctx.createLinearGradient(gaugeCx - gaugeR, gaugeCy, gaugeCx + gaugeR, gaugeCy)
-    arcGrad.addColorStop(0, 'rgba(255,160,0,0.6)')
-    arcGrad.addColorStop(1, 'rgba(255,245,120,1)')
     ctx.beginPath()
     ctx.arc(gaugeCx, gaugeCy, gaugeR, gaugeStart, effAngle)
-    ctx.strokeStyle = arcGrad
-    ctx.lineWidth = 6
+    ctx.strokeStyle = 'rgba(255,210,90,0.95)'
+    ctx.lineWidth = 3
     ctx.stroke()
   }
 
-  // Needle
+  // Needle.
   const needleAngle = gaugeStart + gaugeSpan * solarEfficiency
-  const needleLen = gaugeR - 5
+  const needleLen = gaugeR - 3
   ctx.strokeStyle = 'rgba(255,240,120,0.95)'
-  ctx.lineWidth = 2
+  ctx.lineWidth = 1.5
   ctx.lineCap = 'round'
   ctx.beginPath()
   ctx.moveTo(gaugeCx, gaugeCy)
@@ -2775,21 +3662,21 @@ function drawEnergyHUD(ctx, w, h) {
   )
   ctx.stroke()
 
-  // Pivot dot
+  // Pivot dot.
   ctx.fillStyle = 'rgba(255,240,120,0.95)'
   ctx.beginPath()
-  ctx.arc(gaugeCx, gaugeCy, 3.5, 0, Math.PI * 2)
+  ctx.arc(gaugeCx, gaugeCy, 2, 0, Math.PI * 2)
   ctx.fill()
 
-  // Efficiency % text
-  ctx.font = 'bold 11px monospace'
+  // Efficiency % text.
+  ctx.font = '9px monospace'
   ctx.fillStyle = 'rgba(255,220,80,0.9)'
-  ctx.fillText(`${Math.round(solarEfficiency * 100)}%`, gaugeCx, gaugeCy + gaugeR + 14)
+  ctx.fillText(`${Math.round(solarEfficiency * 100)}%`, gaugeCx, gaugeCy + gaugeR + 11)
 
   ctx.restore()
 }
 
-function drawHUD(ctx, w, h) {
+function drawHUD(ctx, w, h, realDt, simDt = 0) {
   ctx.save()
   ctx.setTransform(1, 0, 0, 1, 0, 0)
 
@@ -2822,7 +3709,6 @@ function drawHUD(ctx, w, h) {
   })
 
   ctx.restore()
-  drawTimeScore(ctx, w)
   ctx.save()
   ctx.setTransform(1, 0, 0, 1, 0, 0)
 
@@ -2885,32 +3771,16 @@ function drawHUD(ctx, w, h) {
     }
   }
 
-  // Speed / distance info (top-right)
-  if (ship) {
-    const speed_au_yr = Math.sqrt(ship.vx ** 2 + ship.vy ** 2)
-    const speed_km_s = (speed_au_yr * AU_KM) / SECONDS_PER_YEAR
-    const sun = bodies.find((b) => b.id === 'sun')
-    const dist_au = sun ? Math.sqrt((ship.x - sun.x) ** 2 + (ship.y - sun.y) ** 2) : 0
-
-    ctx.font = '11px monospace'
-    ctx.fillStyle = 'rgba(255,255,255,0.4)'
-    ctx.textAlign = 'right'
-    ctx.fillText(`Planet score: ${blackHoleScore - sunPenalty}`, w - 12, h - 54)
-    ctx.fillText(`Black hole score: ${blackHoleScore}`, w - 12, h - 40)
-    ctx.fillText(`Speed: ${speed_km_s.toFixed(2)} km/s`, w - 12, h - 26)
-    ctx.fillText(`Dist from Sun: ${dist_au.toFixed(4)} AU`, w - 12, h - 12)
-  } else {
-    ctx.font = '11px monospace'
-    ctx.fillStyle = 'rgba(255,255,255,0.4)'
-    ctx.textAlign = 'right'
-    ctx.fillText(`Black hole score: ${blackHoleScore}`, w - 12, h - 26)
-  }
+  // (Ship telemetry + scores live inside the captain HUD screen now.)
 
   ctx.restore()
   drawFinalScoreOverview(ctx, w, h)
 
   // Velocity match / approach indicator
   drawApproachHUD(ctx, w, h)
+
+  // Captain's planetary scan (bottom-right)
+  drawCaptainHUD(ctx, w, h, realDt, simDt)
 }
 
 function roundRect(ctx, x, y, w, h, r) {
@@ -2925,6 +3795,82 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.lineTo(x, y + r)
   ctx.arcTo(x, y, x + r, y, r)
   ctx.closePath()
+}
+
+// Draws a physical cockpit "screen": a raised dark bezel frame with a beveled
+// highlight, four corner screws, and an inset glass panel with a top sheen, faint
+// horizontal scanlines and an edge vignette. `accent` is an "r,g,b" string that
+// tints the screen glow/border. Returns the INNER content rect (inside the glass,
+// past the inset padding) so the caller draws its readout there.
+function drawScreenBezel(ctx, x, y, w, h, accent) {
+  // Classic-game console panel: flat black screen, a bold BRIGHT double-line
+  // border (no gradients/sheen), chunky corner brackets and bold CRT scanlines.
+  // Square corners read more "80s cockpit terminal" than rounded glass.
+  const pad = 8
+  const ix = x + 5
+  const iy = y + 5
+  const iw = w - 10
+  const ih = h - 10
+
+  // Flat dark backing for the whole device.
+  ctx.fillStyle = 'rgba(0,0,0,0.85)'
+  ctx.fillRect(x, y, w, h)
+
+  // Solid black CRT screen.
+  ctx.fillStyle = 'rgba(0,2,4,0.96)'
+  ctx.fillRect(ix, iy, iw, ih)
+
+  // Bold CRT scanlines across the screen.
+  ctx.save()
+  ctx.beginPath()
+  ctx.rect(ix, iy, iw, ih)
+  ctx.clip()
+  ctx.strokeStyle = `rgba(${accent},0.07)`
+  ctx.lineWidth = 1
+  for (let yy = iy + 1; yy < iy + ih; yy += 3) {
+    ctx.beginPath()
+    ctx.moveTo(ix, yy + 0.5)
+    ctx.lineTo(ix + iw, yy + 0.5)
+    ctx.stroke()
+  }
+  ctx.restore()
+
+  // Double-line border: a bold bright inner line + a thinner outer line.
+  ctx.strokeStyle = `rgba(${accent},0.85)`
+  ctx.lineWidth = 2
+  ctx.strokeRect(ix + 1, iy + 1, iw - 2, ih - 2)
+  ctx.strokeStyle = `rgba(${accent},0.35)`
+  ctx.lineWidth = 1
+  ctx.strokeRect(x + 1, y + 1, w - 2, h - 2)
+
+  // Chunky corner brackets ⌐ ¬ for the retro console look.
+  const bl = 12 // bracket arm length
+  ctx.strokeStyle = `rgba(${accent},0.95)`
+  ctx.lineWidth = 2
+  const bx0 = ix + 1
+  const by0 = iy + 1
+  const bx1 = ix + iw - 1
+  const by1 = iy + ih - 1
+  ctx.beginPath()
+  // top-left
+  ctx.moveTo(bx0, by0 + bl)
+  ctx.lineTo(bx0, by0)
+  ctx.lineTo(bx0 + bl, by0)
+  // top-right
+  ctx.moveTo(bx1 - bl, by0)
+  ctx.lineTo(bx1, by0)
+  ctx.lineTo(bx1, by0 + bl)
+  // bottom-left
+  ctx.moveTo(bx0, by1 - bl)
+  ctx.lineTo(bx0, by1)
+  ctx.lineTo(bx0 + bl, by1)
+  // bottom-right
+  ctx.moveTo(bx1 - bl, by1)
+  ctx.lineTo(bx1, by1)
+  ctx.lineTo(bx1, by1 - bl)
+  ctx.stroke()
+
+  return { x: ix + pad, y: iy + pad, w: iw - pad * 2, h: ih - pad * 2 }
 }
 
 // =============================================================================
@@ -2990,12 +3936,12 @@ function drawDebris(ctx) {
   ctx.restore()
 }
 
-// Particles AGE in real seconds (so the plume always expires regardless of
-// timescale) but MOVE in sim-time (so its spatial length tracks the ship at any
-// speed). Aging in sim-years would never expire at 1× timescale.
-function tickThrustParticles(dt_yr, realDt_s) {
+// Particles age AND move in sim-time (dt_yr), so the plume adheres to sim time:
+// its physical length and lifetime are identical at every timescale. (Spawn-time
+// density compensation keeps the ribbon evenly filled as dt_yr varies.)
+function tickThrustParticles(dt_yr) {
   for (const particle of thrustParticles) {
-    particle.age += realDt_s
+    particle.age += dt_yr
     particle.x += particle.vx * dt_yr
     particle.y += particle.vy * dt_yr
   }
@@ -3038,8 +3984,8 @@ function drawThrustParticles(ctx) {
     const alphaB = Math.pow(1 - tB, 1.4) * 0.9
     if (alphaA < 0.005 && alphaB < 0.005) continue
 
-    const wA = a.size * 0.003 * (3 - tA * 2.7)
-    const wB = b.size * 0.003 * (3 - tB * 2.7)
+    const wA = a.size * 0.0022 * (3 - tA * 2.7)
+    const wB = b.size * 0.0022 * (3 - tB * 2.7)
 
     // Hot white-blue at birth, dimmer blue at end
     const heatA = 1 - tA
@@ -3223,7 +4169,315 @@ function drawShockwaves(ctx) {
 // MAIN RENDER
 // =============================================================================
 
-function render(ctx, w, h, realDt) {
+// =============================================================================
+// FOG OF WAR
+// =============================================================================
+
+// World-space distance from the ship to a point.
+function distFromShip(x, y) {
+  if (!ship) return Infinity
+  return Math.hypot(x - ship.x, y - ship.y)
+}
+
+// Flip every grid cell the ship's vision circle overlaps to 'seen' (permanent),
+// then advance the radar sweep and acquire any body its line crosses. Called once
+// per frame from render() with the real (wall-clock) frame dt.
+//
+// Vision marking is POSITIONAL (depends only on ship pose, not dt or frame
+// count), so it is fully framerate-/timescale-independent: the same ship position
+// flips exactly the same cells no matter how long it sits there. The radar sweep,
+// by contrast, advances in REAL seconds so it rotates at a steady visible rate
+// regardless of sim timescale (like the thrust/solar particles).
+function updateFogDiscovery(realDt = 0, simDt = 0) {
+  if (!settings.settings.fog.enabled || !ship) return
+
+  // --- Vision: paint the grid (exact circle-vs-cell-square overlap) ---
+  // Clamp the radius defensively: revealRadius is reachable via JSON import, so a
+  // pathological value (huge / NaN) must not blow up the nested loop below.
+  const cell = fogCell()
+  const r = Math.min(settings.settings.fog.revealRadius, 50) // hard AU ceiling
+  if (r > 0 && cell > 0) {
+    const cx = ship.x
+    const cy = ship.y
+    const r2 = r * r
+    const colMin = Math.floor((cx - r) / cell)
+    const colMax = Math.floor((cx + r) / cell)
+    const rowMin = Math.floor((cy - r) / cell)
+    const rowMax = Math.floor((cy + r) / cell)
+    for (let col = colMin; col <= colMax; col++) {
+      const cellMinX = col * cell
+      const cellMaxX = cellMinX + cell
+      // Closest x on this column's span to the circle centre (clamp) — constant
+      // per column, hoisted out of the inner loop.
+      const nx = cx < cellMinX ? cellMinX : cx > cellMaxX ? cellMaxX : cx
+      const dx = cx - nx
+      for (let row = rowMin; row <= rowMax; row++) {
+        const key = cellKey(col, row)
+        if (fogSeen.has(key)) continue // already permanent — skip the math
+        const cellMinY = row * cell
+        const cellMaxY = cellMinY + cell
+        const ny = cy < cellMinY ? cellMinY : cy > cellMaxY ? cellMaxY : cy
+        const dy = cy - ny
+        // Circle ∩ AABB: nearest point of the cell within r ⇒ overlap. `<=` so a
+        // grazing circle still counts the cell as seen.
+        if (dx * dx + dy * dy <= r2) {
+          fogSeen.add(key)
+          if (col < fogBboxColMin) fogBboxColMin = col
+          if (col > fogBboxColMax) fogBboxColMax = col
+          if (row < fogBboxRowMin) fogBboxRowMin = row
+          if (row > fogBboxRowMax) fogBboxRowMax = row
+        }
+      }
+    }
+  }
+
+  // --- Radar sweep: a line rotating around the ship; a body inside radarRadius
+  // is acquired only when the sweep crosses its bearing. Sticky once acquired. ---
+  const radar = settings.settings.fog.radarRadius
+  radarPrevAngle = radarAngle
+  // The sweep advances in SIM time (so it speeds up / slows down / freezes with
+  // the simulation timescale, like the engine plume). radarSweepSpeed is
+  // calibrated in rad/s at the 1,000,000× reference timescale: at simScale=1e6,
+  // dt_yr = realDt·1e6/SECONDS_PER_YEAR, so multiplying simDt by
+  // (SECONDS_PER_YEAR/1e6)·radarSweepSpeed reproduces radarSweepSpeed·realDt
+  // there, and scales proportionally at every other timescale.
+  const RADAR_REF_SCALE = 1e6
+  let step = settings.settings.fog.radarSweepSpeed * (SECONDS_PER_YEAR / RADAR_REF_SCALE) * simDt
+  // Clamp so one slow frame (or a big timescale) can't sweep multiple full turns
+  // and skip a bearing — at most ~half a turn per frame.
+  const maxStep = Math.PI
+  if (step > maxStep) step = maxStep
+  if (step < 0) step = 0
+  radarAngle = (radarPrevAngle + step) % (Math.PI * 2)
+  // The swept arc this frame is (radarPrevAngle, radarPrevAngle + step]. Test
+  // EVERY in-range radar target (planets, sun, black hole — detected or not) so
+  // each crossing pings.
+  for (const body of radarTargets()) {
+    if (distFromShip(body.x, body.y) > radar) continue
+    // Bearing of the body from the ship, normalized to [0, 2π).
+    let bearing = Math.atan2(body.y - ship.y, body.x - ship.x)
+    if (bearing < 0) bearing += Math.PI * 2
+    // Angular distance from the sweep's start to this bearing, going forward.
+    let delta = bearing - radarPrevAngle
+    if (delta < 0) delta += Math.PI * 2
+    if (delta <= step) {
+      if (!body.detected) {
+        body.detected = true
+        radarBlink[body.id] = { t: RADAR_BLINK_DUR_DOUBLE, dur: RADAR_BLINK_DUR_DOUBLE, pulses: 2 }
+      } else {
+        // Acknowledge the hit with a single ping — but don't stomp an in-flight
+        // acquisition double-blink.
+        const cur = radarBlink[body.id]
+        if (!cur || cur.pulses < 2) {
+          radarBlink[body.id] = { t: RADAR_BLINK_DUR_SINGLE, dur: RADAR_BLINK_DUR_SINGLE, pulses: 1 }
+        }
+      }
+    }
+  }
+
+  // Decay the blink timers.
+  for (const id in radarBlink) {
+    radarBlink[id].t -= realDt
+    if (radarBlink[id].t <= 0) delete radarBlink[id]
+  }
+}
+
+// Hard on/off fog: paint every UNSEEN grid cell that intersects the viewport
+// solid opaque black, directly on the main ctx with default source-over. Seen
+// cells are left untouched so the already-drawn world shows through. We only
+// PAINT (never erase), so the old 'inverted fog' bug (destination-out erasing
+// world pixels) cannot occur — no offscreen layer needed.
+//
+// Iteration is bounded to the explored region: outside the bbox of all seen
+// cells everything is unseen, so we bulk-fill those margins with up to four
+// fillRects and per-cell iterate ONLY the explored-bbox ∩ viewport. Cost is
+// O(explored cells in view), constant in zoom — even fully zoomed out the loop
+// never explodes.
+function drawFogGrid(ctx, w, h) {
+  if (!settings.settings.fog.enabled) return
+  const s = scale()
+  const cell = fogCell()
+
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0) // raster in raw screen pixels
+  ctx.globalCompositeOperation = 'source-over'
+  ctx.fillStyle = '#000'
+
+  // Nothing explored yet → the whole viewport is unseen.
+  if (fogSeen.size === 0) {
+    ctx.fillRect(0, 0, w, h)
+    ctx.restore()
+    return
+  }
+
+  // Viewport → world AABB (inverse of worldToScreen; transform is axis-aligned,
+  // s>0 always since cam.zoom floors at 0.004, so min<max with no sign flip).
+  const worldMinX = (0 - cam.panX) / s
+  const worldMaxX = (w - cam.panX) / s
+  const worldMinY = (0 - cam.panY) / s
+  const worldMaxY = (h - cam.panY) / s
+
+  // Viewport cell window.
+  const vColMin = Math.floor(worldMinX / cell)
+  const vColMax = Math.floor(worldMaxX / cell)
+  const vRowMin = Math.floor(worldMinY / cell)
+  const vRowMax = Math.floor(worldMaxY / cell)
+
+  // Per-cell iteration window = viewport ∩ explored bbox. Everything outside the
+  // explored bbox is definitionally unseen → bulk-fill it, don't iterate it.
+  const iColMin = Math.max(vColMin, fogBboxColMin)
+  const iColMax = Math.min(vColMax, fogBboxColMax)
+  const iRowMin = Math.max(vRowMin, fogBboxRowMin)
+  const iRowMax = Math.min(vRowMax, fogBboxRowMax)
+
+  // Explored bbox entirely off-screen → the whole viewport is unseen.
+  if (iColMin > iColMax || iRowMin > iRowMax) {
+    ctx.fillRect(0, 0, w, h)
+    ctx.restore()
+    return
+  }
+
+  // Screen pixel extent of the iteration window (snapped: floor near / ceil far).
+  const ix0 = Math.floor(iColMin * cell * s + cam.panX)
+  const ix1 = Math.ceil((iColMax + 1) * cell * s + cam.panX)
+  const iy0 = Math.floor(iRowMin * cell * s + cam.panY)
+  const iy1 = Math.ceil((iRowMax + 1) * cell * s + cam.panY)
+
+  // Bulk-black the four viewport margins OUTSIDE the iteration window.
+  if (iy0 > 0) ctx.fillRect(0, 0, w, iy0) // top
+  if (iy1 < h) ctx.fillRect(0, iy1, w, h - iy1) // bottom
+  if (ix0 > 0) ctx.fillRect(0, iy0, ix0, iy1 - iy0) // left
+  if (ix1 < w) ctx.fillRect(ix1, iy0, w - ix1, iy1 - iy0) // right
+
+  // Per-cell: fill UNSEEN cells black; skip seen ones. Edges snapped to a shared
+  // integer grid (floor near / ceil far) so adjacent black rects meet with no gap
+  // and at most a sub-pixel bleed into a seen neighbour — never a full opaque px.
+  for (let col = iColMin; col <= iColMax; col++) {
+    const cx0 = Math.floor(col * cell * s + cam.panX)
+    const cx1 = Math.ceil((col + 1) * cell * s + cam.panX)
+    for (let row = iRowMin; row <= iRowMax; row++) {
+      if (fogSeen.has(cellKey(col, row))) continue // seen → leave world visible
+      const cy0 = Math.floor(row * cell * s + cam.panY)
+      const cy1 = Math.ceil((row + 1) * cell * s + cam.panY)
+      ctx.fillRect(cx0, cy0, cx1 - cx0, cy1 - cy0)
+    }
+  }
+
+  ctx.restore()
+}
+
+// RADAR LAYER: draws on top of the fog for every radar-detected target (planets,
+// the sun, the black hole). Two cases by cell visibility:
+//   • on an UNSEEN cell — the vision layer can't show it, so draw the full sensor
+//     blip (a dot + containment ring) so it stays locatable over black space.
+//   • on a SEEN cell — the vision-layer visual is already there, so we don't
+//     redraw the blip; we only add the NAME (below).
+// Identity ("scanned", set when the detail HUD has been shown for it) appends the
+// target's NAME to the radar layer EVERYWHERE — seen or unseen — and tints the
+// over-fog dot with the target's own colour. An un-scanned contact is a neutral
+// radar-green blip with no name. We draw markers (NOT drawBody) so a planet's
+// world-space trail never leaks on top of the fog.
+function drawTrackedOverFog(ctx, w, h) {
+  if (!settings.settings.fog.enabled) return
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  for (const body of radarTargets()) {
+    if (!body.detected) continue
+    const sp = worldToScreen(body.x, body.y)
+    if (sp.x < -60 || sp.x > w + 60 || sp.y < -60 || sp.y > h + 60) continue
+
+    const big = body.id === 'sun' || body.id === 'blackhole'
+    const identified = body.scanned
+    const onFog = !worldCellSeen(body.x, body.y)
+    const ring = big ? 11 : 7
+
+    // Sensor blip (dot + ring) only where the vision layer can't show the body.
+    if (onFog) {
+      const core = big ? 5 : 3
+      ctx.beginPath()
+      ctx.arc(sp.x, sp.y, core, 0, Math.PI * 2)
+      ctx.fillStyle = identified ? body.color : 'rgba(150,235,190,0.95)'
+      ctx.fill()
+      ctx.beginPath()
+      ctx.arc(sp.x, sp.y, ring, 0, Math.PI * 2)
+      ctx.strokeStyle = 'rgba(90,230,160,0.7)'
+      ctx.lineWidth = 1
+      ctx.stroke()
+    }
+
+    // Name appears once identified (scanned), wherever the target is.
+    if (identified) {
+      ctx.font = '10px monospace'
+      ctx.fillStyle = body.color + 'cc'
+      ctx.textAlign = 'center'
+      ctx.fillText(body.name, sp.x, sp.y + ring + 11)
+    }
+  }
+  ctx.restore()
+}
+
+// Radar blink: a bright ring that pulses at a body's position when the sweep line
+// crosses it — twice on first acquisition (pulses 2), once as an acknowledging
+// ping on every later crossing (pulses 1). Drawn above the fog so it shows whether
+// the body sits on a seen or unseen cell.
+function drawRadarBlinks(ctx, w, h) {
+  if (!settings.settings.fog.enabled) return
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  for (const body of radarTargets()) {
+    const blink = radarBlink[body.id]
+    if (!blink) continue
+    const sp = worldToScreen(body.x, body.y)
+    if (sp.x < -60 || sp.x > w + 60 || sp.y < -60 || sp.y > h + 60) continue
+    // elapsed 0→1 across the window; `pulses` half-sine flashes (on/off[/on/off]).
+    const elapsed = 1 - blink.t / blink.dur
+    const wave = Math.sin(elapsed * Math.PI * blink.pulses)
+    const intensity = Math.max(0, wave) // bright on the up-pulses, dark between
+    if (intensity <= 0.01) continue
+    const big = body.id === 'sun' || body.id === 'blackhole'
+    const baseR = (big ? 14 : 10) + (1 - intensity) * 8
+    ctx.beginPath()
+    ctx.arc(sp.x, sp.y, baseR, 0, Math.PI * 2)
+    ctx.strokeStyle = `rgba(150,255,200,${(0.9 * intensity).toFixed(3)})`
+    ctx.lineWidth = 2
+    ctx.stroke()
+  }
+  ctx.restore()
+}
+
+// Radar around the ship: the range ring plus a plain rotating scan line. No
+// line-of-sight circle — the grid cells appearing/disappearing already
+// communicate vision. Detection happens in updateFogDiscovery when this sweep
+// crosses a body's bearing.
+function drawRadarRings(ctx) {
+  if (!settings.settings.fog.enabled || !ship) return
+  const s = scale()
+  const sp = worldToScreen(ship.x, ship.y)
+  const radR = settings.settings.fog.radarRadius * s
+
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+
+  // Radar range ring (dashed).
+  ctx.strokeStyle = 'rgba(90,230,160,0.28)'
+  ctx.setLineDash([6, 8])
+  ctx.beginPath()
+  ctx.arc(sp.x, sp.y, radR, 0, Math.PI * 2)
+  ctx.stroke()
+  ctx.setLineDash([])
+
+  // The scan line.
+  ctx.strokeStyle = 'rgba(120,255,190,0.75)'
+  ctx.lineWidth = 1.5
+  ctx.beginPath()
+  ctx.moveTo(sp.x, sp.y)
+  ctx.lineTo(sp.x + Math.cos(radarAngle) * radR, sp.y + Math.sin(radarAngle) * radR)
+  ctx.stroke()
+
+  ctx.restore()
+}
+
+function render(ctx, w, h, realDt, simDt = 0) {
   ctx.clearRect(0, 0, w, h)
 
   // Shockwaves and solar particles are simulation, not just decoration — freeze
@@ -3235,12 +4489,13 @@ function render(ctx, w, h, realDt) {
   }
   applyFocusMode(w, h)
   updateOrbitAimFromMouse()
+  updateFogDiscovery(realDt, simDt)
 
   drawStarfield(ctx, w, h)
+  drawGasCloud(ctx)
   drawOrbits(ctx)
   drawSolarGravityWell(ctx)
   drawBlackHole(ctx)
-  drawPredictionPath(ctx)
   drawCaptureTether(ctx)
 
   drawThrustParticles(ctx)
@@ -3250,14 +4505,30 @@ function render(ctx, w, h, realDt) {
   }
   if (ship) drawShip(ctx, ship, 0, w, h)
 
+  // Re-entry drag flare on bodies/ship plowing through the gas cloud.
+  drawGasCloudFriction(ctx)
+
   drawShockwaves(ctx)
   drawDebris(ctx)
   drawSlingshotRing(ctx)
+
+  // Fog of war sits above the world but below the HUD/score so chrome stays
+  // legible. Black out unseen grid cells, then draw the RADAR LAYER on top of the
+  // fog — all onboard-computer projections (digital data, not eyes-on, so they
+  // pierce the fog): the ship's projected path, the targeted planet's projected
+  // shot path + aiming cue, radar-tracked contacts, just-acquired blinks, then the
+  // radar sweep + range ring.
+  drawFogGrid(ctx, w, h)
+  drawPredictionPath(ctx)
   drawOrbitCue(ctx)
+  drawTrackedOverFog(ctx, w, h)
+  drawRadarBlinks(ctx, w, h)
+  drawRadarRings(ctx)
+
   drawConsumedPlanets(ctx, h)
   drawThrustIndicator(ctx, w)
   drawEnergyHUD(ctx, w, h)
-  drawHUD(ctx, w, h)
+  drawHUD(ctx, w, h, realDt, simDt)
 }
 
 // =============================================================================
@@ -3494,6 +4765,7 @@ function initCanvas(canvas) {
   // --- Animation loop ---
   function loop(ts) {
     let realDt = 0
+    let simDt = 0 // sim-years advanced THIS frame (0 while paused) — drives the radar sweep
     if (lastTime !== null) {
       realDt = Math.min((ts - lastTime) / 1000, MAX_DT) // seconds
 
@@ -3513,9 +4785,10 @@ function initCanvas(canvas) {
       const dt_yr = (realDt * simScale) / SECONDS_PER_YEAR // yr per frame
 
       if (isPlaying.value) {
+        simDt = dt_yr
         simStep(dt_yr, realDt)
         tickDebris(dt_yr, realDt)
-        tickThrustParticles(dt_yr, realDt)
+        tickThrustParticles(dt_yr)
         if (!ship && shipLoss) deathTextAge += realDt
         simYears += dt_yr
 
@@ -3536,9 +4809,9 @@ function initCanvas(canvas) {
       }
     }
     lastTime = ts
-    if (ctx) render(ctx, _w, _h, realDt)
-    // While paused, let the existing plume age out (fade) but not move.
-    if (!isPlaying.value && realDt > 0) tickThrustParticles(0, realDt)
+    if (ctx) render(ctx, _w, _h, realDt, simDt)
+    // Plume is sim-time-driven, so it freezes with the sim while paused — no
+    // separate paused tick needed.
     rafId = requestAnimationFrame(loop)
   }
 
