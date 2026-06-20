@@ -8,7 +8,7 @@
 </template>
 
 <script setup>
-defineProps({ title: String })
+defineProps({ title: { type: String, default: '' } })
 </script>
 
 <style scoped>

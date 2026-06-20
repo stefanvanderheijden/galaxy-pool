@@ -1,9 +1,8 @@
 <template>
-  <SketchWrapper
+  <GameShell
     :is-playing="isPlaying"
     :time-scale="timeScale"
     :body-count="bodyCount"
-    :elapsed="0"
     :elapsed-label="elapsedLabel"
     @canvas-ready="initCanvas"
     @toggle-play="togglePlay"
@@ -16,7 +15,7 @@
             <div class="steering-header">
               <span class="steering-label">
                 Steering
-                <button class="info-btn" @click.stop="steeringModalOpen = true" title="More info">i</button>
+                <button class="info-btn" title="More info" @click.stop="steeringModalOpen = true">i</button>
               </span>
             </div>
             <div class="steering-options">
@@ -32,8 +31,8 @@
             </div>
           </div>
           <SettingsRow
-            label="Thrust"
             v-model="settings.settings.ship.thrustAccel"
+            label="Thrust"
             :min="1"
             :max="1500"
             :step="10"
@@ -42,8 +41,8 @@
           />
           <SettingsRow
             v-if="settings.settings.ship.steering === 'tank'"
-            label="Turn speed"
             v-model="settings.settings.ship.turnSpeed"
+            label="Turn speed"
             :min="0.5"
             :max="10"
             :step="0.5"
@@ -69,8 +68,8 @@
         </div>
         <SettingsSection title="Orbit Shot">
           <SettingsRow
-            label="Ring radius (AU)"
             v-model="settings.settings.orbit.ringRadiusMult"
+            label="Ring radius (AU)"
             :min="0.05"
             :max="2"
             :step="0.05"
@@ -78,8 +77,8 @@
             tooltip="Capture ring radius in AU. Same for all planets."
           />
           <SettingsRow
-            label="Shot power"
             v-model="settings.settings.orbit.shotPower"
+            label="Shot power"
             :min="100"
             :max="80000"
             :step="100"
@@ -87,8 +86,8 @@
             tooltip="Impulse power for planet shots. Higher = more kick."
           />
           <SettingsRow
-            label="Max drag (px)"
             v-model="settings.settings.orbit.maxDrag"
+            label="Max drag (px)"
             :min="50"
             :max="400"
             :step="10"
@@ -96,8 +95,8 @@
             tooltip="Maximum drag distance for shot aiming."
           />
           <SettingsRow
-            label="Recoil"
             v-model="settings.settings.orbit.recoilMult"
+            label="Recoil"
             :min="0"
             :max="1"
             :step="0.01"
@@ -105,8 +104,8 @@
             tooltip="Fraction of planet impulse applied back to ship as recoil."
           />
           <SettingsRow
-            label="Planet grav boost"
             v-model="settings.settings.orbit.planetGravBoost"
+            label="Planet grav boost"
             :min="1"
             :max="80000"
             :step="50"
@@ -114,8 +113,8 @@
             tooltip="Local gravity boost between planets within their influence radius."
           />
           <SettingsRow
-            label="Planet influence (AU)"
             v-model="settings.settings.orbit.planetInfluenceRadius"
+            label="Planet influence (AU)"
             :min="0.01"
             :max="0.5"
             :step="0.01"
@@ -125,8 +124,8 @@
         </SettingsSection>
         <SettingsSection title="Black hole">
           <SettingsRow
-            label="Mass"
             v-model="settings.settings.blackhole.mass"
+            label="Mass"
             :min="0"
             :max="5"
             :step="0.05"
@@ -134,8 +133,8 @@
             tooltip="Local ship-only gravity. Planets are not affected."
           />
           <SettingsRow
-            label="Influence radius"
             v-model="settings.settings.blackhole.influenceRadius"
+            label="Influence radius"
             :min="0.1"
             :max="4"
             :step="0.1"
@@ -143,8 +142,8 @@
             tooltip="AU radius where the black hole can pull the ship."
           />
           <SettingsRow
-            label="Cone direction (°)"
             v-model="settings.settings.blackhole.coneAngleDeg"
+            label="Cone direction (°)"
             :min="0"
             :max="360"
             :step="5"
@@ -152,8 +151,8 @@
             tooltip="Direction the gravitational cone points, in degrees."
           />
           <SettingsRow
-            label="Cone half-angle (°)"
             v-model="settings.settings.blackhole.coneHalfAngleDeg"
+            label="Cone half-angle (°)"
             :min="5"
             :max="180"
             :step="5"
@@ -163,8 +162,8 @@
         </SettingsSection>
         <SettingsSection title="Visuals">
           <SettingsRow
-            label="Trail length"
             v-model="settings.settings.visuals.trailLength"
+            label="Trail length"
             :min="50"
             :max="5000"
             :step="50"
@@ -174,16 +173,17 @@
         </SettingsSection>
       </SettingsPanel>
     </template>
-  </SketchWrapper>
+  </GameShell>
 </template>
 
 <script setup>
 import { ref, watch, onUnmounted } from "vue";
-import SketchWrapper from "./components/SketchWrapper.vue";
+import GameShell from "./components/GameShell.vue";
 import SettingsPanel from "./components/SettingsPanel.vue";
 import SettingsSection from "./components/SettingsSection.vue";
 import SettingsRow from "./components/SettingsRow.vue";
 import { useSettings } from "./composables/useSettings.js";
+import { TIME_STEP_VALUES } from "./timeSteps.js";
 
 // =============================================================================
 // CONSTANTS
@@ -209,13 +209,11 @@ const MAX_DT = 0.05; // real-time seconds cap per frame
 
 // Spaceship physical dimensions
 const SHIP_LENGTH_AU = 1000 / AU_KM; // 1000 km in AU ≈ 6.684e-6 AU
-const SHIP_WIDTH_AU = 26 / AU_KM; // 26 km in AU  ≈ 1.738e-7 AU
 const SHIP_DRAW_R = 0.022; // display radius in AU — ~8px at default zoom
 const SHIP_MASS = 5.03e-18; // M☉ — 10,000 Gt
 
 // Minimum pixel size below which we switch to icon rendering
 const MIN_PLANET_PX = 3; // px
-const MIN_SHIP_PX = 30; // px (length in screen pixels)
 
 // Prediction config
 const PRED_HORIZON_YR = 0.5; // simulated years to preview
@@ -328,7 +326,7 @@ const timeScale = ref(1000000);
 const bodyCount = ref(0);
 const elapsedLabel = ref("");
 
-const TIME_STEPS = [1, 100000, 1000000, 5000000];
+const TIME_STEPS = TIME_STEP_VALUES; // shared with GameShell via timeSteps.js
 let timeScaleStepIdx = 2; // start at 1,000,000
 let timeScaleTarget = TIME_STEPS[timeScaleStepIdx];
 
@@ -731,7 +729,6 @@ function tickSolarParticles(realDt_s, w, h) {
   // Panel and gauge/bar positions (must match drawEnergyHUD)
   const panelX = 12;
   const panelY = 46;
-  const panelW = 84;
   const panelH = h - panelY - 12;
   const gaugeR        = 32;
   const gaugeSectionH = gaugeR * 2 + 52;
@@ -1366,7 +1363,7 @@ function applyDriftInput(dt_yr, realDt_s, thrust) {
 }
 
 // Drives the THRUST/BRAKE/COAST HUD indicator; per-mode so it reads correctly.
-function getWASDThrustState() {
+function getThrustState() {
   if (!ship) return { mode: "coast", power: 0 };
   if (keys.space) return { mode: "brake", power: 1 };
 
@@ -1559,7 +1556,7 @@ function getPredictionCrashRadius(body) {
 
 function shouldHidePredictionWhileBraking() {
   if (!ship) return false;
-  const state = getWASDThrustState();
+  const state = getThrustState();
   if (state.mode !== "brake") return false;
 
   const speed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
@@ -1682,11 +1679,6 @@ function scale() {
 function worldToScreen(wx, wy) {
   const s = scale();
   return { x: wx * s + cam.panX, y: wy * s + cam.panY };
-}
-
-function screenToWorld(sx, sy) {
-  const s = scale();
-  return { x: (sx - cam.panX) / s, y: (sy - cam.panY) / s };
 }
 
 function zoomAt(factor, mx, my) {
@@ -3254,8 +3246,6 @@ function drawThrustParticles(ctx) {
     // Tapered quad: width wA at point a, width wB at point b
     const nx = dx / dist;
     const ny = dy / dist;
-    const px = -ny;
-    const py = nx;
 
     // Use gradient along the segment for color/alpha transition
     const grad = ctx.createLinearGradient(a.x, a.y, b.x, b.y);
@@ -3277,61 +3267,10 @@ function drawThrustParticles(ctx) {
   ctx.restore();
 }
 
-function drawIonPlumeCore(ctx) {
-  if (!ship || orbitState.mode !== "free") return;
-
-  const state = getWASDThrustState();
-  let forceAngle = shipAngle;
-  let power = 0;
-
-  if (state.mode === "forward") {
-    power = state.power;
-  } else if (state.mode === "brake") {
-    const speed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
-    if (speed > 1e-6) {
-      forceAngle = Math.atan2(-ship.vy, -ship.vx);
-      power = Math.min(1, speed / 2.5);
-    }
-  }
-  if (power <= 0) return;
-
-  const sp = worldToScreen(ship.x, ship.y);
-  const backX = -Math.cos(forceAngle);
-  const backY = -Math.sin(forceAngle);
-  const start = 11;
-  const len = 34 + power * 44;
-  const width = 1.5 + power * 2.2;
-
-  ctx.save();
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.globalCompositeOperation = "lighter";
-  ctx.lineCap = "round";
-
-  const grad = ctx.createLinearGradient(
-    sp.x + backX * start,
-    sp.y + backY * start,
-    sp.x + backX * (start + len),
-    sp.y + backY * (start + len),
-  );
-  grad.addColorStop(0, `rgba(210,245,255,${0.42 * power})`);
-  grad.addColorStop(0.45, `rgba(99,202,255,${0.24 * power})`);
-  grad.addColorStop(1, "rgba(52,130,255,0)");
-
-  ctx.strokeStyle = grad;
-  ctx.lineWidth = width;
-  ctx.beginPath();
-  ctx.moveTo(sp.x + backX * start, sp.y + backY * start);
-  ctx.lineTo(sp.x + backX * (start + len), sp.y + backY * (start + len));
-  ctx.stroke();
-
-  ctx.restore();
-}
-
-
-function drawWASDIndicator(ctx, w) {
+function drawThrustIndicator(ctx, w) {
   if (orbitState.mode !== "free" || !ship) return;
 
-  const state = getWASDThrustState();
+  const state = getThrustState();
   let label, color;
   if (state.mode === "forward") {
     label = "THRUST";
@@ -3503,7 +3442,7 @@ function render(ctx, w, h, realDt) {
   drawSlingshotRing(ctx);
   drawOrbitCue(ctx);
   drawConsumedPlanets(ctx, h);
-  drawWASDIndicator(ctx, w);
+  drawThrustIndicator(ctx, w);
   drawEnergyHUD(ctx, w, h);
   drawHUD(ctx, w, h);
 }
@@ -3593,7 +3532,7 @@ function initCanvas(canvas) {
     mouse.hasPosition = true;
   }
 
-  function onMouseLeave(e) {
+  function onMouseLeave() {
     mouse.hasPosition = false;
     if (orbitState.mode === "slingshot") orbitDrag = null;
   }
@@ -3744,7 +3683,7 @@ function initCanvas(canvas) {
 
   rafId = requestAnimationFrame(loop);
 
-  // initCanvas runs from SketchWrapper's @canvas-ready emit, i.e. inside the
+  // initCanvas runs from GameShell's @canvas-ready emit, i.e. inside the
   // child's onMounted where Game is NOT the active instance — so we can't call
   // onUnmounted() here. Instead we hand teardown back to the component's own
   // onUnmounted hook (registered at setup top-level) via this cleanup fn.
@@ -3785,7 +3724,7 @@ function reset() {
 }
 
 // Registered here at setup top-level (not inside initCanvas, which runs under
-// SketchWrapper's instance) so teardown reliably binds to THIS component.
+// GameShell's instance) so teardown reliably binds to THIS component.
 onUnmounted(() => teardown?.());
 
 watch(

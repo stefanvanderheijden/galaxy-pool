@@ -3,7 +3,7 @@
     <div class="row-header">
       <span class="row-label">
         {{ label }}
-        <button v-if="tooltip" class="info-btn" @click.stop="modalOpen = true" title="More info">i</button>
+        <button v-if="tooltip" class="info-btn" title="More info" @click.stop="modalOpen = true">i</button>
       </span>
       <span class="row-value">{{ displayValue }}</span>
     </div>

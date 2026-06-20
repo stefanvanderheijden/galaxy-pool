@@ -1,7 +1,7 @@
 <template>
   <div class="settings-panel">
     <!-- Toggle button -->
-    <button class="settings-toggle" @click="open = !open" :class="{ active: open }">
+    <button class="settings-toggle" :class="{ active: open }" @click="open = !open">
       ⚙ Settings
     </button>
 

@@ -1,8 +1,8 @@
 <template>
-  <div class="sketch-wrapper">
-    <canvas ref="canvasRef" class="sketch-canvas"></canvas>
+  <div class="game-shell">
+    <canvas ref="canvasRef" class="game-canvas"></canvas>
 
-    <!-- Settings panel lives here so it's available to every sketch -->
+    <!-- Settings panel slot -->
     <slot name="settings" />
 
     <div class="controls">
@@ -51,8 +51,7 @@
 
         <div class="controls-right">
           <span class="info">bodies: {{ bodyCount }}</span>
-          <span class="info" v-if="elapsedLabel">{{ elapsedLabel }}</span>
-          <span class="info" v-else>t: {{ elapsed.toFixed(1) }}s</span>
+          <span v-if="elapsedLabel" class="info">{{ elapsedLabel }}</span>
           <slot name="controls" />
         </div>
       </div>
@@ -62,32 +61,21 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { TIME_STEPS as STEPS } from '../timeSteps.js'
 
 const props = defineProps({
-  isPlaying:     { type: Boolean, default: true },
-  timeScale:     { type: Number,  default: 1 },
-  timeScaleMin:  { type: Number,  default: 0 },
-  timeScaleMax:  { type: Number,  default: 5000000 },
-  timeScaleStep: { type: Number,  default: 1 },
-  bodyCount:     { type: Number,  default: 0 },
-  elapsed:       { type: Number,  default: 0 },
-  elapsedLabel:  { type: String,  default: '' },
+  isPlaying:    { type: Boolean, default: true },
+  timeScale:    { type: Number,  default: 1 },
+  bodyCount:    { type: Number,  default: 0 },
+  elapsedLabel: { type: String,  default: '' },
 })
 
-const emit = defineEmits(['toggle-play', 'set-timescale', 'reset', 'canvas-ready'])
+const emit = defineEmits(['toggle-play', 'reset', 'canvas-ready'])
 
 const canvasRef = ref(null)
 defineExpose({ canvasRef })
 
 onMounted(() => emit('canvas-ready', canvasRef.value))
-
-// The four fixed steps — mirrors TIME_STEPS in the sketch
-const STEPS = [
-  { value: 1,       label: '1×'    },
-  { value: 100000,  label: '100K×' },
-  { value: 1000000, label: '1M×'   },
-  { value: 5000000, label: '5M×'   },
-]
 
 // All four steps use log scale across the full track width
 function stepPct(i) {
@@ -119,7 +107,7 @@ function formatSpeed(ts) {
 </script>
 
 <style scoped>
-.sketch-wrapper {
+.game-shell {
   position: relative;
   width: 100%;
   height: 100%;
@@ -127,7 +115,7 @@ function formatSpeed(ts) {
   overflow: hidden;
 }
 
-.sketch-canvas {
+.game-canvas {
   display: block;
   width: 100%;
   height: 100%;
