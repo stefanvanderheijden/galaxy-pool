@@ -131,6 +131,156 @@
       </div>
     </div>
 
+    <!-- Editor toggle in the bottom control bar -->
+    <template #controls>
+      <button class="ctrl-btn" @click="editorActive ? exitEditor() : enterEditor()">
+        {{ editorActive ? '✕ Exit Editor' : '✎ Editor' }}
+      </button>
+    </template>
+
+    <!-- Level editor panel (EDIT phase) -->
+    <div v-if="editorActive && editorPhase === 'edit'" class="editor-panel">
+      <div class="editor-title">Level Editor</div>
+
+      <div class="editor-tools">
+        <button
+          v-for="t in EDITOR_TOOLS"
+          :key="t.value"
+          class="steering-btn"
+          :class="{ active: editorTool === t.value }"
+          :title="t.title"
+          @click="editorTool = t.value"
+        >
+          {{ t.label }}
+        </button>
+      </div>
+
+      <label class="editor-check">
+        <input v-model="editorAdvanced" type="checkbox" />
+        Advanced (free velocity)
+      </label>
+
+      <!-- Advanced: choose whether Select-dragging a free body moves it or sets velocity -->
+      <div v-if="editorAdvanced" class="editor-tools editor-dragmode">
+        <button
+          v-for="m in ['move', 'velocity']"
+          :key="m"
+          class="steering-btn"
+          :class="{ active: editorDragMode === m }"
+          @click="editorDragMode = m"
+        >
+          {{ m === 'move' ? 'Drag: Move' : 'Drag: Velocity' }}
+        </button>
+      </div>
+
+      <div class="editor-hint">{{ toolHint }}</div>
+
+      <!-- Context properties -->
+      <template v-if="selectedPlanet">
+        <SettingsRow
+          v-model="selectedPlanet.mass"
+          label="Planet mass (M☉)"
+          :min="1e-7"
+          :max="1e-3"
+          :step="1e-7"
+          :decimals="7"
+          @update:model-value="levelChanged()"
+        />
+        <SettingsRow
+          v-model="selectedPlanet.drawR"
+          label="Draw radius (AU)"
+          :min="0.005"
+          :max="0.08"
+          :step="0.001"
+          :decimals="3"
+          @update:model-value="levelChanged()"
+        />
+      </template>
+
+      <template v-if="selectedId === 'blackhole'">
+        <SettingsRow
+          v-model="levelData.blackhole.coneAngleDeg"
+          label="BH direction (°)"
+          :min="0"
+          :max="360"
+          :step="1"
+          :decimals="0"
+          @update:model-value="levelChanged()"
+        />
+        <SettingsRow
+          v-model="levelData.blackhole.coneHalfAngleDeg"
+          label="BH half-angle (°)"
+          :min="5"
+          :max="180"
+          :step="1"
+          :decimals="0"
+          @update:model-value="levelChanged()"
+        />
+        <SettingsRow
+          v-model="levelData.blackhole.mass"
+          label="BH mass (M☉)"
+          :min="0"
+          :max="5"
+          :step="0.05"
+          :decimals="2"
+          @update:model-value="levelChanged()"
+        />
+        <SettingsRow
+          v-model="levelData.blackhole.influenceRadius"
+          label="BH influence (AU)"
+          :min="0.1"
+          :max="2"
+          :step="0.05"
+          :decimals="2"
+          @update:model-value="levelChanged()"
+        />
+      </template>
+
+      <SettingsRow
+        v-if="selectedId === 'gascloud'"
+        v-model="levelData.gascloud.r"
+        label="Gas radius (AU)"
+        :min="0.05"
+        :max="1"
+        :step="0.05"
+        :decimals="2"
+        @update:model-value="levelChanged()"
+      />
+
+      <SettingsRow
+        v-model="levelData.sun.mass"
+        label="Sun mass (M☉)"
+        :min="0.1"
+        :max="5"
+        :step="0.1"
+        :decimals="2"
+        @update:model-value="levelChanged()"
+      />
+
+      <div class="editor-actions">
+        <button class="ctrl-btn" @click="editorNewLevel">New</button>
+        <button class="ctrl-btn" @click="editorResetSolar">Solar</button>
+        <button class="ctrl-btn" @click="saveLevelToFile(levelData)">↓ Save</button>
+        <label class="ctrl-btn file-btn">
+          ↑ Load
+          <input type="file" accept=".json" class="file-input" @change="onLevelFileChange" />
+        </label>
+        <button class="ctrl-btn" :disabled="!canDeleteSelected" @click="deleteSelected">
+          Delete
+        </button>
+        <button class="ctrl-btn play-btn" @click="startTestPlay">▶ Test Play</button>
+      </div>
+    </div>
+
+    <!-- Stop button (TEST phase) -->
+    <button
+      v-if="editorActive && editorPhase === 'test'"
+      class="editor-stop ctrl-btn"
+      @click="stopTestPlay"
+    >
+      ■ Stop — back to editing
+    </button>
+
     <template #settings>
       <SettingsPanel @export="settings.exportJSON()" @import="onImport">
         <SettingsSection title="Spaceship">
@@ -365,7 +515,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onUnmounted } from 'vue'
+import { ref, reactive, computed, watch, onUnmounted } from 'vue'
 import GameShell from './components/GameShell.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import SettingsSection from './components/SettingsSection.vue'
@@ -485,6 +635,264 @@ function gasCloudSpineClosest(px, py) {
   const dx = px - cx
   const dy = py - cy
   return { cx, cy, t, dist: Math.sqrt(dx * dx + dy * dy) }
+}
+
+// =============================================================================
+// LEVEL MODEL (level editor + the runtime scene both build from `levelData`)
+// =============================================================================
+// A level is plain data in SIM UNITS (AU, M☉, radians). The sun is implicit and
+// fixed at the origin. Planets and the ship are stored as orbit params (orbR +
+// angle); their stable circular velocity is DERIVED on build, so orbits stay
+// stable and survive mass edits. Planets may opt into "free" placement: an
+// explicit x/y/vx/vy for elliptical or unstable orbits (advanced mode).
+const LEVEL_SCHEMA_VERSION = 1
+const MIN_ORB_R = 0.05 // AU — clamp so v = sqrt(GM/r) can't blow up near the sun
+
+// Stable circular orbit (CCW, matches the existing planet loop exactly):
+//   v = sqrt(G_SIM * M_sun / r);  pos = (cos a, sin a)·r;  vel = (-sin a, cos a)·v
+// The orbit speed depends on the SUN's mass, not the body's. `over` is an
+// optional speed multiplier (the ship uses 1.025 for a slight catch-up).
+function stableOrbitVelocity(orbR, angle, sunMass, over = 1) {
+  const r = Math.max(MIN_ORB_R, orbR)
+  const v = Math.sqrt((G_SIM * sunMass) / r) * over
+  return {
+    x: Math.cos(angle) * r,
+    y: Math.sin(angle) * r,
+    vx: -Math.sin(angle) * v,
+    vy: Math.cos(angle) * v,
+  }
+}
+
+// Resolve a planet/ship record to its spawn { x, y, vx, vy }. Free bodies carry
+// their own x/y/vx/vy; circular bodies derive velocity from orbR/angle/sunMass.
+function spawnFromRecord(rec, sunMass, over = 1) {
+  if (rec.free) {
+    return { x: rec.x, y: rec.y, vx: rec.vx, vy: rec.vy }
+  }
+  return stableOrbitVelocity(rec.orbR, rec.angle, sunMass, over)
+}
+
+function buildPlanetBody(p, sunMass, trailLen) {
+  const o = spawnFromRecord(p, sunMass)
+  return {
+    id: p.id,
+    name: p.name,
+    x: o.x,
+    y: o.y,
+    vx: o.vx,
+    vy: o.vy,
+    mass: p.mass,
+    drawR: p.drawR,
+    color: p.color,
+    isFixed: false,
+    isPlanet: true,
+    captureTimeInRange: 0,
+    detected: false,
+    scanned: false,
+    scanProgress: 0,
+    trail: makeTrail(trailLen),
+  }
+}
+
+// Sun-only trajectory prediction for the editor preview. Integrates a body under
+// ONLY the sun's gravity (cheap, deterministic) so the player sees where a placed
+// planet/ship will travel — a circle for stable orbits, an ellipse/escape for
+// free ones. Returns an array of world points.
+function predictSunOrbit(x0, y0, vx0, vy0, sunMass, steps = 240, dt = 0.01) {
+  const pts = [{ x: x0, y: y0 }]
+  let x = x0
+  let y = y0
+  let vx = vx0
+  let vy = vy0
+  for (let i = 0; i < steps; i++) {
+    const r2 = x * x + y * y + SOFTENING
+    const r = Math.sqrt(r2)
+    const a = (G_SIM * sunMass) / r2 // accel magnitude toward the sun
+    vx -= (x / r) * a * dt
+    vy -= (y / r) * a * dt
+    x += vx * dt
+    y += vy * dt
+    pts.push({ x, y })
+    // Stop early if it escapes far off-field (keeps the preview bounded).
+    if (r > 12) break
+  }
+  return pts
+}
+
+// A blank level: sun + a ship in a default orbit, no planets, default hazards.
+function makeDefaultLevel() {
+  return {
+    version: LEVEL_SCHEMA_VERSION,
+    name: 'Untitled Level',
+    sun: { mass: 1.0, color: '#FFD700', drawR: 0.01 },
+    planets: [], // { id, name, mass, color, drawR, orbR, angle, [free,x,y,vx,vy] }
+    ship: { orbR: 1.524, angle: 4.565, overSpeed: 1.025, color: '#4fc3f7' },
+    blackhole: {
+      x: 1.7,
+      y: 1.15,
+      drawR: 0.035,
+      captureR: 0.05,
+      mass: 0.8,
+      influenceRadius: 0.45,
+      coneAngleDeg: 290,
+      coneHalfAngleDeg: 55,
+    },
+    gascloud: {
+      x1: -1.3,
+      y1: 1.7,
+      x2: -0.4,
+      y2: 1.95,
+      r: 0.3,
+      dragPerYr: 9.0,
+      color: '120,180,140',
+    },
+  }
+}
+
+// Apply a level's hazard geometry onto the live const objects IN PLACE, so every
+// existing read site (BLACK_HOLE.x/.y, GAS_CLOUD.x1.., settings.blackhole.*) keeps
+// working unchanged. Called from buildScene on every build (edit + test).
+function applyLevelHazards(level) {
+  const b = level.blackhole
+  BLACK_HOLE.x = b.x
+  BLACK_HOLE.y = b.y
+  BLACK_HOLE.drawR = b.drawR
+  BLACK_HOLE.captureR = b.captureR
+  settings.settings.blackhole.mass = b.mass
+  settings.settings.blackhole.influenceRadius = b.influenceRadius
+  settings.settings.blackhole.coneAngleDeg = b.coneAngleDeg
+  settings.settings.blackhole.coneHalfAngleDeg = b.coneHalfAngleDeg
+
+  const g = level.gascloud
+  GAS_CLOUD.x1 = g.x1
+  GAS_CLOUD.y1 = g.y1
+  GAS_CLOUD.x2 = g.x2
+  GAS_CLOUD.y2 = g.y2
+  GAS_CLOUD.r = g.r
+  GAS_CLOUD.dragPerYr = g.dragPerYr
+  GAS_CLOUD.color = g.color
+}
+
+// Seed levelData from the hardcoded solar system (the "default level"), so the
+// game boots byte-for-byte as before.
+function levelFromSolarBodies() {
+  const lvl = makeDefaultLevel()
+  const sun = SOLAR_BODIES.find((b) => b.id === 'sun')
+  lvl.sun.mass = sun.mass
+  lvl.sun.color = sun.color
+  lvl.sun.drawR = sun.drawR
+  lvl.planets = SOLAR_BODIES.filter((b) => !b.isFixed).map((b) => ({
+    id: b.id,
+    name: b.name,
+    mass: b.mass,
+    color: b.color,
+    drawR: b.drawR,
+    orbR: b.orbR,
+    angle: b.angle,
+  }))
+  const mars = SOLAR_BODIES.find((b) => b.id === 'mars')
+  lvl.ship.orbR = mars.orbR
+  lvl.ship.angle = mars.angle - 0.45
+  return lvl
+}
+
+// ── Serialize / validate / file I/O ──────────────────────────────────────────
+function serializeLevel(level) {
+  return JSON.stringify({ ...level, version: LEVEL_SCHEMA_VERSION }, null, 2)
+}
+
+const lvlNum = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? v : d)
+const lvlStr = (v, d) => (typeof v === 'string' && v.length ? v : d)
+
+// Returns a fully-normalized level (never throws on field junk); throws ONLY when
+// the top-level shape/version is unusable.
+function validateLevel(raw) {
+  if (!raw || typeof raw !== 'object') throw new Error('Not a level object')
+  if (raw.version !== LEVEL_SCHEMA_VERSION) {
+    throw new Error(`Unsupported level version ${raw.version} (expected ${LEVEL_SCHEMA_VERSION})`)
+  }
+  const d = makeDefaultLevel()
+  const lvl = makeDefaultLevel()
+  lvl.name = lvlStr(raw.name, d.name)
+
+  const rs = raw.sun || {}
+  lvl.sun = {
+    mass: Math.max(1e-6, lvlNum(rs.mass, d.sun.mass)),
+    color: lvlStr(rs.color, d.sun.color),
+    drawR: Math.max(1e-4, lvlNum(rs.drawR, d.sun.drawR)),
+  }
+
+  const seenIds = new Set(['sun', 'ship', 'blackhole'])
+  lvl.planets = Array.isArray(raw.planets)
+    ? raw.planets.map((p, i) => {
+        p = p || {}
+        let id = lvlStr(p.id, `planet${i}`)
+        while (seenIds.has(id)) id = `${id}_${i}`
+        seenIds.add(id)
+        const free = p.free === true
+        return {
+          id,
+          name: lvlStr(p.name, id),
+          mass: Math.max(1e-12, lvlNum(p.mass, 3e-6)),
+          color: lvlStr(p.color, '#cccccc'),
+          drawR: Math.max(1e-4, lvlNum(p.drawR, 0.02)),
+          orbR: Math.max(MIN_ORB_R, lvlNum(p.orbR, 1.0)),
+          angle: lvlNum(p.angle, 0),
+          free,
+          x: lvlNum(p.x, 0),
+          y: lvlNum(p.y, 0),
+          vx: lvlNum(p.vx, 0),
+          vy: lvlNum(p.vy, 0),
+        }
+      })
+    : []
+
+  const rsh = raw.ship || {}
+  lvl.ship = {
+    orbR: Math.max(MIN_ORB_R, lvlNum(rsh.orbR, d.ship.orbR)),
+    angle: lvlNum(rsh.angle, d.ship.angle),
+    overSpeed: lvlNum(rsh.overSpeed, d.ship.overSpeed),
+    color: lvlStr(rsh.color, d.ship.color),
+  }
+
+  const rb = raw.blackhole || {}
+  lvl.blackhole = {
+    x: lvlNum(rb.x, d.blackhole.x),
+    y: lvlNum(rb.y, d.blackhole.y),
+    drawR: Math.max(1e-3, lvlNum(rb.drawR, d.blackhole.drawR)),
+    captureR: Math.max(1e-3, lvlNum(rb.captureR, d.blackhole.captureR)),
+    mass: Math.max(0, lvlNum(rb.mass, d.blackhole.mass)),
+    influenceRadius: Math.max(0, lvlNum(rb.influenceRadius, d.blackhole.influenceRadius)),
+    coneAngleDeg: lvlNum(rb.coneAngleDeg, d.blackhole.coneAngleDeg),
+    coneHalfAngleDeg: lvlNum(rb.coneHalfAngleDeg, d.blackhole.coneHalfAngleDeg),
+  }
+
+  const rg = raw.gascloud || {}
+  lvl.gascloud = {
+    x1: lvlNum(rg.x1, d.gascloud.x1),
+    y1: lvlNum(rg.y1, d.gascloud.y1),
+    x2: lvlNum(rg.x2, d.gascloud.x2),
+    y2: lvlNum(rg.y2, d.gascloud.y2),
+    r: Math.max(0, lvlNum(rg.r, d.gascloud.r)),
+    dragPerYr: Math.max(0, lvlNum(rg.dragPerYr, d.gascloud.dragPerYr)),
+    color: lvlStr(rg.color, d.gascloud.color),
+  }
+  return lvl
+}
+
+function saveLevelToFile(level) {
+  const blob = new Blob([serializeLevel(level)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  const safe = (level.name || 'level').replace(/[^a-z0-9-_]+/gi, '-').toLowerCase()
+  a.download = `${safe || 'level'}.json`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function loadLevelFromText(text) {
+  return validateLevel(JSON.parse(text))
 }
 
 // Solar system data — all in simulation units (AU, M☉)
@@ -631,6 +1039,52 @@ let timeScaleTarget = TIME_STEPS[timeScaleStepIdx]
 let bodies = []
 let ship = null // reference into bodies[]
 let starLayers = []
+
+// The level the scene is built from. Seeded from the hardcoded solar system so
+// the game boots exactly as before; the level editor mutates this in place. It's
+// REACTIVE so the editor's property sliders re-render live as values change.
+// Reassignments go through setLevel() (replace contents in place) to keep the
+// same reactive proxy — `let` would drop reactivity on reassignment.
+const levelData = reactive(levelFromSolarBodies())
+function setLevel(next) {
+  for (const k of Object.keys(levelData)) delete levelData[k]
+  Object.assign(levelData, next)
+}
+
+// ── Level editor state ───────────────────────────────────────────────────────
+const editorActive = ref(false) // are we in the editor at all?
+const editorPhase = ref('edit') // 'edit' | 'test'
+const editorTool = ref('select') // 'select'|'planet'|'ship'|'blackhole'|'gascloud'
+const editorAdvanced = ref(false) // advanced (free-velocity) planet placement
+const editorDragMode = ref('move') // advanced only: Select-drag a free body's 'move' | 'velocity'
+const selectedId = ref(null) // selected: planet id | 'ship' | 'blackhole' | 'gascloud'
+const editorRev = ref(0) // bump to nudge Vue computeds when levelData mutates
+let levelSnapshot = null // deep clone taken on Test Play, restored on Stop
+let editorDrag = null // in-progress drag { kind, ... }
+
+const EDITOR_TOOLS = [
+  { value: 'select', label: 'Select', title: 'Select / move / edit (V)' },
+  { value: 'planet', label: 'Planet', title: 'Click to place a planet in orbit (P)' },
+  { value: 'ship', label: 'Ship', title: 'Click to place the ship' },
+  { value: 'blackhole', label: 'Black hole', title: 'Click to place, drag to aim its cone (B)' },
+  { value: 'gascloud', label: 'Gas cloud', title: 'Click + drag to draw the cloud line (C)' },
+]
+const EDITOR_TOOL_HINTS = {
+  select: 'Drag handles to move. Click a planet to edit its mass. Right-drag to pan, wheel to zoom.',
+  planet: 'Click to drop a planet — it auto-enters a stable orbit. Advanced: drag to set velocity.',
+  ship: 'Click to set the ship’s start. Advanced: drag to set its launch velocity.',
+  blackhole: 'Click to place the black hole, then drag to aim its gravity cone.',
+  gascloud: 'Click and drag to draw the gas cloud between two points.',
+}
+const toolHint = computed(() => {
+  editorRev.value
+  if (editorTool.value === 'select' && editorAdvanced.value) {
+    return editorDragMode.value === 'velocity'
+      ? 'Drag a FREE planet/ship to set its launch velocity. Right-drag to pan.'
+      : 'Drag handles to move. Switch to “Drag: Velocity” to aim a free body’s launch.'
+  }
+  return EDITOR_TOOL_HINTS[editorTool.value] || ''
+})
 
 // Fog of war — SPARSE GRID MODEL.
 // The world is tiled by square cells of edge `cellSize` AU in ABSOLUTE sim space
@@ -1932,70 +2386,65 @@ function buildScene(w, h) {
   captureReleaseLockPlanetId = null
   camTargetZoom = cam.zoom
 
-  for (const bd of SOLAR_BODIES) {
-    const r = bd.orbR
-    let x = 0,
-      y = 0,
-      vx = 0,
-      vy = 0
+  // The whole scene is driven by levelData. Hazard geometry is mirrored onto the
+  // live BLACK_HOLE/GAS_CLOUD consts (and the reactive blackhole settings) so all
+  // existing read sites keep working untouched.
+  applyLevelHazards(levelData)
+  const sunMass = levelData.sun.mass
+  const trailLen = settings.settings.visuals.trailLength
 
-    if (!bd.isFixed && r > 0) {
-      const a = bd.angle
-      const v = Math.sqrt((G_SIM * 1.0) / r)
-      x = Math.cos(a) * r
-      y = Math.sin(a) * r
-      vx = -Math.sin(a) * v
-      vy = Math.cos(a) * v
-    }
+  // Sun — fixed at origin.
+  bodies.push({
+    id: 'sun',
+    name: 'Sun',
+    x: 0,
+    y: 0,
+    vx: 0,
+    vy: 0,
+    mass: sunMass,
+    drawR: levelData.sun.drawR,
+    color: levelData.sun.color,
+    isFixed: true,
+    isPlanet: false,
+    captureTimeInRange: 0,
+    detected: false,
+    scanned: false,
+    scanProgress: 0,
+    trail: makeTrail(0),
+  })
 
-    bodies.push({
-      id: bd.id,
-      name: bd.name,
-      x,
-      y,
-      vx,
-      vy,
-      mass: bd.mass,
-      drawR: bd.drawR,
-      color: bd.color,
-      isFixed: bd.isFixed,
-      isPlanet: !bd.isFixed && bd.id !== 'ship',
-      captureTimeInRange: 0,
-      detected: false, // radar: sticky once the sweep line crosses this body
-      scanned: false, // sticky once first-contact observation completes (name + details unlock)
-      scanProgress: 0, // sim-years accumulated observing this body (→ scanned at SCAN_DURATION_SIMYR)
-      trail: makeTrail(bd.isFixed ? 0 : settings.settings.visuals.trailLength),
-    })
+  // Planets — circular bodies derive their stable velocity; free bodies carry it.
+  for (const p of levelData.planets) {
+    bodies.push(buildPlanetBody(p, sunMass, trailLen))
   }
 
-  // Ship: start behind Mars but well OUTSIDE scanner range (so the player
-  // witnesses first-contact observation when they approach), with a slight
-  // catch-up velocity. 0.45 rad of arc at Mars's radius is ~0.68 AU — comfortably
-  // beyond the scan range (~0.4 AU).
-  const marsDef = SOLAR_BODIES.find((b) => b.id === 'mars')
-  const shipR = marsDef.orbR
-  const shipA = marsDef.angle - 0.45
-  const shipOrb = Math.sqrt((G_SIM * 1.0) / shipR) * 1.025
+  // Ship — placed by the level (default: behind Mars, outside scanner range, with
+  // a slight catch-up over-speed so the player witnesses first-contact observation).
+  const shipSpawn = spawnFromRecord(levelData.ship, sunMass, levelData.ship.overSpeed)
   ship = {
     id: 'ship',
     name: 'Ship',
-    x: Math.cos(shipA) * shipR,
-    y: Math.sin(shipA) * shipR,
-    vx: -Math.sin(shipA) * shipOrb,
-    vy: Math.cos(shipA) * shipOrb,
+    x: shipSpawn.x,
+    y: shipSpawn.y,
+    vx: shipSpawn.vx,
+    vy: shipSpawn.vy,
     mass: SHIP_MASS,
     drawR: SHIP_LENGTH_AU / 2,
-    color: '#4fc3f7',
+    color: levelData.ship.color,
     isFixed: false,
-    trail: makeTrail(settings.settings.visuals.trailLength),
+    trail: makeTrail(trailLen),
   }
   bodies.push(ship)
 
-  cam.panX = w / 2
-  cam.panY = h / 2
-  cam.focus = 'ship'
-  cam.zoom = 4
-  camTargetZoom = 4
+  // Frame on the ship — EXCEPT while editing, where the editor owns the camera
+  // (so per-edit rebuilds don't snap the view back).
+  if (!(editorActive.value && editorPhase.value === 'edit')) {
+    cam.panX = w / 2
+    cam.panY = h / 2
+    cam.focus = 'ship'
+    cam.zoom = 4
+    camTargetZoom = 4
+  }
 }
 
 // =============================================================================
@@ -2009,6 +2458,11 @@ function scale() {
 function worldToScreen(wx, wy) {
   const s = scale()
   return { x: wx * s + cam.panX, y: wy * s + cam.panY }
+}
+
+function screenToWorld(mx, my) {
+  const s = scale()
+  return { x: (mx - cam.panX) / s, y: (my - cam.panY) / s }
 }
 
 function zoomAt(factor, mx, my) {
@@ -2046,6 +2500,8 @@ function applyFocusMode(w, h) {
     cam.panX = w / 2 - p.x * s
     cam.panY = h / 2 - p.y * s
   }
+  // cam.focus === 'editor': leave panX/panY untouched so the editor's free pan
+  // (right-drag) persists; zoom easing above still applies.
 }
 
 // =============================================================================
@@ -4642,17 +5098,24 @@ function render(ctx, w, h, realDt, simDt = 0) {
   // pierce the fog): the ship's projected path, the targeted planet's projected
   // shot path + aiming cue, radar-tracked contacts, just-acquired blinks, then the
   // radar sweep + range ring.
-  drawFogGrid(ctx, w, h)
-  drawPredictionPath(ctx)
-  drawOrbitCue(ctx)
-  drawTrackedOverFog(ctx, w, h)
-  drawRadarBlinks(ctx, w, h)
-  drawRadarRings(ctx)
+  // In EDIT mode the world is built but frozen; we skip fog/radar/gameplay HUD
+  // (they'd just clutter or hide the layout) and draw the editor overlay instead.
+  const editing = editorActive.value && editorPhase.value === 'edit'
+  if (!editing) {
+    drawFogGrid(ctx, w, h)
+    drawPredictionPath(ctx)
+    drawOrbitCue(ctx)
+    drawTrackedOverFog(ctx, w, h)
+    drawRadarBlinks(ctx, w, h)
+    drawRadarRings(ctx)
 
-  drawConsumedPlanets(ctx, h)
-  drawThrustIndicator(ctx, w)
-  drawEnergyHUD(ctx, w, h)
-  drawHUD(ctx, w, h, realDt, simDt)
+    drawConsumedPlanets(ctx, h)
+    drawThrustIndicator(ctx, w)
+    drawEnergyHUD(ctx, w, h)
+    drawHUD(ctx, w, h, realDt, simDt)
+  } else {
+    drawEditor(ctx)
+  }
 }
 
 // =============================================================================
@@ -4682,6 +5145,13 @@ function initCanvas(canvas) {
     // Don't hijack keys while the user is typing in a settings field — otherwise
     // 'r' resets the game, '1-4' change timescale, WASD get preventDefault, etc.
     if (isTypingTarget(e.target)) return
+
+    // In the editor's EDIT phase, route keys to the editor and swallow gameplay
+    // keys entirely. (TEST phase plays like the real game — no branch.)
+    if (editorActive.value && editorPhase.value === 'edit') {
+      handleEditorKey(e)
+      return
+    }
 
     // Escape: break orbit/capture
     if (
@@ -4799,6 +5269,11 @@ function initCanvas(canvas) {
   }
 
   function onMouseDown(e) {
+    if (editorActive.value && editorPhase.value === 'edit') {
+      updateMouseFromEvent(e)
+      editorMouseDown(e)
+      return
+    }
     if (e.button !== 0) return
     updateMouseFromEvent(e)
 
@@ -4814,6 +5289,11 @@ function initCanvas(canvas) {
   function onMouseMove(e) {
     updateMouseFromEvent(e)
 
+    if (editorActive.value && editorPhase.value === 'edit') {
+      editorMouseMove(e)
+      return
+    }
+
     if (orbitState.mode === 'slingshot' || orbitState.mode === 'capturing') {
       updateOrbitAimFromMouse()
       return
@@ -4823,7 +5303,17 @@ function initCanvas(canvas) {
   function onMouseUp(e) {
     updateMouseFromEvent(e)
 
+    if (editorActive.value && editorPhase.value === 'edit') {
+      editorMouseUp(e)
+      return
+    }
+
     if (orbitState.mode === 'slingshot') return
+  }
+
+  function onContextMenu(e) {
+    // Editor uses right-drag to pan; suppress the browser menu there.
+    if (editorActive.value && editorPhase.value === 'edit') e.preventDefault()
   }
 
   function onWheel(e) {
@@ -4834,6 +5324,7 @@ function initCanvas(canvas) {
 
   // --- HUD button click ---
   function onCanvasClick(e) {
+    if (editorActive.value) return // editor handles its own clicks; no HUD buttons
     const rect = canvas.getBoundingClientRect()
     const cx = e.clientX - rect.left
     const cy = e.clientY - rect.top
@@ -4857,6 +5348,7 @@ function initCanvas(canvas) {
   canvas.addEventListener('mouseleave', onMouseLeave)
   canvas.addEventListener('wheel', onWheel, { passive: false })
   canvas.addEventListener('click', onCanvasClick)
+  canvas.addEventListener('contextmenu', onContextMenu)
 
   // --- Resize ---
   // Resizing only updates canvas dimensions and the background starfield (which
@@ -4959,6 +5451,7 @@ function initCanvas(canvas) {
     canvas.removeEventListener('mouseleave', onMouseLeave)
     canvas.removeEventListener('wheel', onWheel)
     canvas.removeEventListener('click', onCanvasClick)
+    canvas.removeEventListener('contextmenu', onContextMenu)
   }
 }
 
@@ -4979,6 +5472,461 @@ function reset() {
   timeScaleTarget = TIME_STEPS[2]
   timeScale.value = TIME_STEPS[2]
   buildScene(_w, _h)
+}
+
+// =============================================================================
+// LEVEL EDITOR — state machine, input, overlay
+// =============================================================================
+
+// Rebuild the editable scene: bodies built from levelData, sim frozen, framed so
+// the whole field is in view. Selection (an id) survives because it's resolved by
+// id, not by reference.
+function rebuildEditorScene() {
+  buildScene(_w, _h)
+  isPlaying.value = false
+  timeScaleStepIdx = 2
+  timeScaleTarget = TIME_STEPS[2]
+  timeScale.value = TIME_STEPS[2]
+  cam.focus = 'editor'
+  editorRev.value++
+}
+
+function enterEditor() {
+  editorActive.value = true
+  editorPhase.value = 'edit'
+  selectedId.value = null
+  editorDrag = null
+  // Frame the system: pull back so the playfield fits.
+  cam.zoom = 1.4
+  camTargetZoom = 1.4
+  cam.panX = _w / 2
+  cam.panY = _h / 2
+  rebuildEditorScene()
+}
+
+function exitEditor() {
+  if (editorPhase.value === 'test' && levelSnapshot) {
+    setLevel(levelSnapshot)
+    levelSnapshot = null
+  }
+  editorActive.value = false
+  editorPhase.value = 'edit'
+  reset()
+}
+
+function startTestPlay() {
+  // Snapshot the design so Stop always restores it, no matter what.
+  levelSnapshot = JSON.parse(JSON.stringify(levelData))
+  editorPhase.value = 'test'
+  reset() // full gameplay build from levelData (sim runs)
+  cam.focus = 'ship'
+  cam.zoom = 4
+  camTargetZoom = 4
+}
+
+function stopTestPlay() {
+  if (levelSnapshot) {
+    setLevel(levelSnapshot)
+    levelSnapshot = null
+  }
+  editorPhase.value = 'edit'
+  enterEditor() // re-frame + rebuild a fresh editable scene
+}
+
+// Touch levelData → keep the live scene + Vue computeds in sync during edit.
+function levelChanged() {
+  editorRev.value++
+  if (editorActive.value && editorPhase.value === 'edit') rebuildEditorScene()
+}
+
+// ── Picking ──────────────────────────────────────────────────────────────────
+// Return { kind, id } for the editor element under a world point (with a screen-
+// pixel grab tolerance), or null. Tries small handles first.
+function editorPickAt(wx, wy) {
+  const s = scale()
+  const tol = 12 / s
+  // gas endpoints (small, pick first)
+  const g = levelData.gascloud
+  if (Math.hypot(wx - g.x1, wy - g.y1) < tol) return { kind: 'gas1', id: 'gascloud' }
+  if (Math.hypot(wx - g.x2, wy - g.y2) < tol) return { kind: 'gas2', id: 'gascloud' }
+  // black hole core
+  if (Math.hypot(wx - BLACK_HOLE.x, wy - BLACK_HOLE.y) < Math.max(BLACK_HOLE.drawR, tol))
+    return { kind: 'blackhole', id: 'blackhole' }
+  // ship
+  const sp = spawnFromRecord(levelData.ship, levelData.sun.mass, levelData.ship.overSpeed)
+  if (Math.hypot(wx - sp.x, wy - sp.y) < tol * 1.4) return { kind: 'ship', id: 'ship' }
+  // planets
+  for (const p of levelData.planets) {
+    const o = spawnFromRecord(p, levelData.sun.mass)
+    if (Math.hypot(wx - o.x, wy - o.y) < Math.max(p.drawR, tol)) return { kind: 'planet', id: p.id }
+  }
+  return null
+}
+
+let planetSeq = 0
+function nextPlanetId() {
+  let id
+  do {
+    id = `planet${++planetSeq}`
+  } while (levelData.planets.some((p) => p.id === id))
+  return id
+}
+const PLANET_COLORS = ['#e8714a', '#4fc3f7', '#e8cda0', '#9ad29a', '#c79af0', '#f0c14a', '#7fd6c2']
+const EDITOR_VEL_DRAG_K = 0.18 // world-units-per-(AU/yr): scales the velocity drag arrow
+
+// ── Editor mouse handlers (only called in EDIT phase) ────────────────────────
+function editorMouseDown(e) {
+  // Right button → pan.
+  if (e.button === 2) {
+    editorDrag = { kind: 'pan', startX: mouse.x, startY: mouse.y, panX: cam.panX, panY: cam.panY }
+    return
+  }
+  if (e.button !== 0) return
+  const w = screenToWorld(mouse.x, mouse.y)
+  const tool = editorTool.value
+
+  if (tool === 'select') {
+    const hit = editorPickAt(w.x, w.y)
+    selectedId.value = hit ? hit.id : null
+    editorDrag = null
+    if (hit) {
+      // In advanced mode with the Velocity sub-tool, dragging a FREE body adjusts
+      // its launch velocity instead of its position.
+      const velMode = editorAdvanced.value && editorDragMode.value === 'velocity'
+      if (hit.kind === 'planet') {
+        const p = levelData.planets.find((q) => q.id === hit.id)
+        editorDrag = velMode && p && p.free ? { kind: 'planetVel', id: hit.id } : { ...hit }
+      } else if (hit.kind === 'ship') {
+        editorDrag = velMode && levelData.ship.free ? { kind: 'shipVel' } : { ...hit }
+      } else {
+        editorDrag = { ...hit }
+      }
+    }
+    editorRev.value++
+    return
+  }
+  if (tool === 'planet') {
+    const orbR = Math.max(MIN_ORB_R, Math.hypot(w.x, w.y))
+    const angle = Math.atan2(w.y, w.x)
+    const id = nextPlanetId()
+    const planet = {
+      id,
+      name: id,
+      mass: 3e-6,
+      color: PLANET_COLORS[levelData.planets.length % PLANET_COLORS.length],
+      drawR: 0.02,
+      orbR,
+      angle,
+      free: editorAdvanced.value,
+      x: w.x,
+      y: w.y,
+      vx: 0,
+      vy: 0,
+    }
+    if (planet.free) {
+      // Seed a sensible stable velocity, then let the drag set a custom one.
+      const o = stableOrbitVelocity(orbR, angle, levelData.sun.mass)
+      planet.vx = o.vx
+      planet.vy = o.vy
+      editorDrag = { kind: 'planetVel', id }
+    }
+    levelData.planets.push(planet)
+    selectedId.value = id
+    levelChanged()
+    return
+  }
+  if (tool === 'ship') {
+    if (editorAdvanced.value) {
+      levelData.ship.free = true
+      levelData.ship.x = w.x
+      levelData.ship.y = w.y
+      const o = stableOrbitVelocity(Math.hypot(w.x, w.y), Math.atan2(w.y, w.x), levelData.sun.mass)
+      levelData.ship.vx = o.vx
+      levelData.ship.vy = o.vy
+      editorDrag = { kind: 'shipVel' }
+    } else {
+      levelData.ship.free = false
+      levelData.ship.orbR = Math.max(MIN_ORB_R, Math.hypot(w.x, w.y))
+      levelData.ship.angle = Math.atan2(w.y, w.x)
+    }
+    selectedId.value = 'ship'
+    levelChanged()
+    return
+  }
+  if (tool === 'blackhole') {
+    // Click sets position; subsequent drag aims its gravity cone.
+    levelData.blackhole.x = w.x
+    levelData.blackhole.y = w.y
+    BLACK_HOLE.x = w.x
+    BLACK_HOLE.y = w.y
+    selectedId.value = 'blackhole'
+    editorDrag = { kind: 'bhDir' }
+    levelChanged()
+    return
+  }
+  if (tool === 'gascloud') {
+    // First click sets endpoint A; drag/second click sets endpoint B.
+    levelData.gascloud.x1 = w.x
+    levelData.gascloud.y1 = w.y
+    levelData.gascloud.x2 = w.x
+    levelData.gascloud.y2 = w.y
+    selectedId.value = 'gascloud'
+    editorDrag = { kind: 'gasPlace' }
+    levelChanged()
+    return
+  }
+}
+
+function editorMouseMove() {
+  if (!editorDrag) return
+  if (editorDrag.kind === 'pan') {
+    cam.panX = editorDrag.panX + (mouse.x - editorDrag.startX)
+    cam.panY = editorDrag.panY + (mouse.y - editorDrag.startY)
+    return
+  }
+  const w = screenToWorld(mouse.x, mouse.y)
+  const k = editorDrag.kind
+
+  if (k === 'planet' || k === 'ship' || k === 'blackhole' || k === 'gas1' || k === 'gas2') {
+    editorDrag.moved = true
+  }
+
+  if (k === 'planet') {
+    const p = levelData.planets.find((q) => q.id === editorDrag.id)
+    if (p) {
+      if (p.free) {
+        p.x = w.x
+        p.y = w.y
+      } else {
+        p.orbR = Math.max(MIN_ORB_R, Math.hypot(w.x, w.y))
+        p.angle = Math.atan2(w.y, w.x)
+      }
+    }
+  } else if (k === 'planetVel') {
+    // Free planet: drag sets the initial velocity vector (from the body outward).
+    const p = levelData.planets.find((q) => q.id === editorDrag.id)
+    if (p) {
+      p.vx = (w.x - p.x) / EDITOR_VEL_DRAG_K
+      p.vy = (w.y - p.y) / EDITOR_VEL_DRAG_K
+    }
+  } else if (k === 'ship') {
+    if (levelData.ship.free) {
+      levelData.ship.x = w.x
+      levelData.ship.y = w.y
+    } else {
+      levelData.ship.orbR = Math.max(MIN_ORB_R, Math.hypot(w.x, w.y))
+      levelData.ship.angle = Math.atan2(w.y, w.x)
+    }
+  } else if (k === 'shipVel') {
+    levelData.ship.vx = (w.x - levelData.ship.x) / EDITOR_VEL_DRAG_K
+    levelData.ship.vy = (w.y - levelData.ship.y) / EDITOR_VEL_DRAG_K
+  } else if (k === 'blackhole') {
+    levelData.blackhole.x = w.x
+    levelData.blackhole.y = w.y
+    BLACK_HOLE.x = w.x
+    BLACK_HOLE.y = w.y
+  } else if (k === 'bhDir') {
+    const ang = (Math.atan2(w.y - BLACK_HOLE.y, w.x - BLACK_HOLE.x) * 180) / Math.PI
+    levelData.blackhole.coneAngleDeg = (ang + 360) % 360
+  } else if (k === 'gas1' || k === 'gasPlace') {
+    // gasPlace drags endpoint B; gas1 moves endpoint A.
+    if (k === 'gas1') {
+      levelData.gascloud.x1 = w.x
+      levelData.gascloud.y1 = w.y
+    } else {
+      levelData.gascloud.x2 = w.x
+      levelData.gascloud.y2 = w.y
+    }
+  } else if (k === 'gas2') {
+    levelData.gascloud.x2 = w.x
+    levelData.gascloud.y2 = w.y
+  } else {
+    return
+  }
+  levelChanged()
+}
+
+function editorMouseUp() {
+  editorDrag = null
+}
+
+// ── Editor keys (EDIT phase) ─────────────────────────────────────────────────
+function handleEditorKey(e) {
+  const k = e.key.toLowerCase()
+  if (k === 'escape') {
+    selectedId.value = null
+    editorRev.value++
+  } else if (k === 'delete' || k === 'backspace') {
+    deleteSelected()
+  } else if (k === 'v') {
+    editorTool.value = 'select'
+  } else if (k === 'p') {
+    editorTool.value = 'planet'
+  } else if (k === 'b') {
+    editorTool.value = 'blackhole'
+  } else if (k === 'c') {
+    editorTool.value = 'gascloud'
+  }
+}
+
+// ── Editor overlay rendering ─────────────────────────────────────────────────
+function drawEditorArrowHead(ctx, x, y, ang, color) {
+  const h = 7
+  ctx.fillStyle = color
+  ctx.beginPath()
+  ctx.moveTo(x, y)
+  ctx.lineTo(x - Math.cos(ang - 0.4) * h, y - Math.sin(ang - 0.4) * h)
+  ctx.lineTo(x - Math.cos(ang + 0.4) * h, y - Math.sin(ang + 0.4) * h)
+  ctx.closePath()
+  ctx.fill()
+}
+
+function drawEditorHandle(ctx, wx, wy, selected, color) {
+  const p = worldToScreen(wx, wy)
+  ctx.beginPath()
+  ctx.arc(p.x, p.y, selected ? 8 : 5, 0, Math.PI * 2)
+  ctx.fillStyle = selected ? '#fff' : color
+  ctx.fill()
+  ctx.lineWidth = 2
+  ctx.strokeStyle = color
+  ctx.stroke()
+}
+
+// Sun-only projected path for a spawn { x, y, vx, vy }.
+function drawEditorPath(ctx, spawn, color) {
+  const path = predictSunOrbit(spawn.x, spawn.y, spawn.vx, spawn.vy, levelData.sun.mass)
+  if (path.length < 2) return
+  ctx.strokeStyle = color
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  const p0 = worldToScreen(path[0].x, path[0].y)
+  ctx.moveTo(p0.x, p0.y)
+  for (let i = 1; i < path.length; i++) {
+    const p = worldToScreen(path[i].x, path[i].y)
+    ctx.lineTo(p.x, p.y)
+  }
+  ctx.stroke()
+}
+
+function drawEditorVelArrow(ctx, spawn, color) {
+  const sp = worldToScreen(spawn.x, spawn.y)
+  const ep = worldToScreen(spawn.x + spawn.vx * EDITOR_VEL_DRAG_K, spawn.y + spawn.vy * EDITOR_VEL_DRAG_K)
+  ctx.strokeStyle = color
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  ctx.moveTo(sp.x, sp.y)
+  ctx.lineTo(ep.x, ep.y)
+  ctx.stroke()
+  drawEditorArrowHead(ctx, ep.x, ep.y, Math.atan2(ep.y - sp.y, ep.x - sp.x), color)
+}
+
+function drawEditor(ctx) {
+  const s = scale()
+  ctx.save()
+
+  // Planets: orbit ring (circular only), projected path, velocity arrow, handle.
+  for (const p of levelData.planets) {
+    const o = spawnFromRecord(p, levelData.sun.mass)
+    if (!p.free) {
+      const sun = worldToScreen(0, 0)
+      ctx.strokeStyle = 'rgba(120,160,255,0.18)'
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.arc(sun.x, sun.y, p.orbR * s, 0, Math.PI * 2)
+      ctx.stroke()
+    }
+    drawEditorPath(ctx, o, `rgba(160,190,255,0.5)`)
+    drawEditorVelArrow(ctx, o, p.color)
+    drawEditorHandle(ctx, o.x, o.y, selectedId.value === p.id, p.color)
+  }
+
+  // Ship: ring (if circular), path, arrow, handle.
+  const sh = spawnFromRecord(levelData.ship, levelData.sun.mass, levelData.ship.overSpeed)
+  if (!levelData.ship.free) {
+    const sun = worldToScreen(0, 0)
+    ctx.strokeStyle = 'rgba(79,195,247,0.25)'
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.arc(sun.x, sun.y, levelData.ship.orbR * s, 0, Math.PI * 2)
+    ctx.stroke()
+  }
+  drawEditorPath(ctx, sh, 'rgba(120,210,255,0.55)')
+  drawEditorVelArrow(ctx, sh, '#4fc3f7')
+  drawEditorHandle(ctx, sh.x, sh.y, selectedId.value === 'ship', '#4fc3f7')
+
+  // Black hole: a direction arrow along the cone axis + a position handle. (The
+  // cone wedge itself is drawn by the normal drawBlackHole since bodies exist.)
+  const bh = worldToScreen(BLACK_HOLE.x, BLACK_HOLE.y)
+  const ca = (levelData.blackhole.coneAngleDeg * Math.PI) / 180
+  const aLen = Math.max(40, levelData.blackhole.influenceRadius * s)
+  ctx.strokeStyle = '#b48cff'
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  ctx.moveTo(bh.x, bh.y)
+  ctx.lineTo(bh.x + Math.cos(ca) * aLen, bh.y + Math.sin(ca) * aLen)
+  ctx.stroke()
+  drawEditorArrowHead(ctx, bh.x + Math.cos(ca) * aLen, bh.y + Math.sin(ca) * aLen, ca, '#b48cff')
+  drawEditorHandle(ctx, BLACK_HOLE.x, BLACK_HOLE.y, selectedId.value === 'blackhole', '#b48cff')
+
+  // Gas cloud: spine + two endpoint handles.
+  const g = levelData.gascloud
+  const a = worldToScreen(g.x1, g.y1)
+  const b = worldToScreen(g.x2, g.y2)
+  ctx.strokeStyle = `rgba(${g.color},0.8)`
+  ctx.lineWidth = 2
+  ctx.setLineDash([6, 4])
+  ctx.beginPath()
+  ctx.moveTo(a.x, a.y)
+  ctx.lineTo(b.x, b.y)
+  ctx.stroke()
+  ctx.setLineDash([])
+  drawEditorHandle(ctx, g.x1, g.y1, selectedId.value === 'gascloud', `rgb(${g.color})`)
+  drawEditorHandle(ctx, g.x2, g.y2, selectedId.value === 'gascloud', `rgb(${g.color})`)
+
+  ctx.restore()
+}
+
+// ── Editor UI handlers ───────────────────────────────────────────────────────
+const selectedPlanet = computed(() => {
+  editorRev.value // dependency
+  return levelData.planets.find((p) => p.id === selectedId.value) || null
+})
+const canDeleteSelected = computed(() => {
+  editorRev.value
+  return !!selectedPlanet.value
+})
+
+function deleteSelected() {
+  if (!selectedPlanet.value) return
+  levelData.planets = levelData.planets.filter((p) => p.id !== selectedId.value)
+  selectedId.value = null
+  levelChanged()
+}
+function editorNewLevel() {
+  setLevel(makeDefaultLevel())
+  selectedId.value = null
+  levelChanged()
+}
+function editorResetSolar() {
+  setLevel(levelFromSolarBodies())
+  selectedId.value = null
+  levelChanged()
+}
+function onLevelFileChange(e) {
+  const file = e.target.files && e.target.files[0]
+  if (!file) return
+  const r = new FileReader()
+  r.onload = () => {
+    try {
+      setLevel(loadLevelFromText(r.result))
+      selectedId.value = null
+      levelChanged()
+    } catch (err) {
+      window.alert('Could not load level: ' + err.message)
+    }
+    e.target.value = ''
+  }
+  r.readAsText(file)
 }
 
 // Registered here at setup top-level (not inside initCanvas, which runs under
@@ -5184,5 +6132,109 @@ watch(
 .help-body .help-keys {
   color: #99a;
   font-size: 11px;
+}
+
+/* ── Level editor ── */
+.editor-panel {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  width: 248px;
+  max-height: calc(100% - 120px);
+  overflow-y: auto;
+  background: rgba(12, 14, 26, 0.94);
+  border: 1px solid #2a2a4a;
+  border-radius: 7px;
+  padding: 12px;
+  z-index: 60;
+  font-family: monospace;
+  color: #e0e0e0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.editor-title {
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  color: #7fd6c2;
+  text-transform: uppercase;
+}
+.editor-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.editor-check {
+  font-size: 11px;
+  color: #aab;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.editor-hint {
+  font-size: 10px;
+  line-height: 1.4;
+  color: #889;
+  border-left: 2px solid #2a4a5a;
+  padding-left: 8px;
+}
+.editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.editor-panel .ctrl-btn,
+.editor-stop {
+  background: #1a1a2e;
+  color: #e0e0e0;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 4px 9px;
+  cursor: pointer;
+  font-family: monospace;
+  font-size: 12px;
+}
+.editor-panel .ctrl-btn:hover,
+.editor-stop:hover {
+  background: #2a2a4e;
+}
+.editor-panel .ctrl-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.editor-panel .play-btn {
+  background: #1d3a2a;
+  border-color: #2e6e4a;
+  color: #9ad29a;
+}
+.editor-panel .play-btn:hover {
+  background: #245035;
+}
+.editor-panel .file-btn {
+  position: relative;
+  overflow: hidden;
+}
+.editor-panel .file-btn .file-input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.editor-stop {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  background: #3a1d1d;
+  border-color: #6e2e2e;
+  color: #f0b0b0;
+  padding: 6px 14px;
+  font-size: 13px;
+}
+.editor-stop:hover {
+  background: #502424;
 }
 </style>

@@ -38,6 +38,17 @@ npm run dev      # http://localhost:5173
 | Mouse drag | Aim and fire a slingshot shot while docked to a planet |
 | Scroll | Zoom |
 
+## Level editor
+
+The **✎ Editor** button (bottom control bar) opens a level editor: place planets
+(auto-set into stable orbits), the ship, the black hole (drag to aim its gravity
+cone), and a gas cloud (drag a line between two points). Edit masses and the
+black-hole direction, then **Test Play** the level and **Stop** to keep editing.
+**Save / Load** levels as `.json`. An *Advanced* mode allows free initial
+velocities (elliptical / unstable orbits) with a live projected-path preview.
+
+See [DEVLOG.md](DEVLOG.md) for the full design notes and status.
+
 ### Steering modes
 
 Set in **⚙ Settings → Spaceship → Steering**:
