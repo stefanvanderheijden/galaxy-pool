@@ -370,6 +370,10 @@ const keys = {
   space: false,
 };
 
+function clearKeys() {
+  keys.w = keys.a = keys.s = keys.d = keys.space = false;
+}
+
 // Prediction path
 let shipPredPath = [];
 let predCountdown = 0;
@@ -415,6 +419,11 @@ let solarEfficiency = 0;             // 0..1, recomputed each frame
 // =============================================================================
 
 function makeTrail(cap) {
+  // cap <= 0 → inert trail (fixed bodies like the sun keep none). Guards against
+  // `% 0 = NaN` in push() and avoids allocating a buffer that's never read.
+  if (!(cap > 0)) {
+    return { push() {}, points: () => [], clear() {}, get length() { return 0; } };
+  }
   const buf = new Array(cap);
   let head = 0,
     size = 0;
@@ -1211,11 +1220,11 @@ const SPEED_FRAME_MIN = 1e-3; // AU/yr below which velocity gives no usable head
 // Shared by the spacebar brake in all modes (and by Drift's S-alone input).
 function applyRetrogradeBrake(dt_yr, realDt_s, thrust) {
   const speed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
-  if (speed > 1e-6) {
+  const maxBrakeDv = thrust * dt_yr;
+  if (speed > 1e-6 && maxBrakeDv > 0) {
     const retroAngle = Math.atan2(-ship.vy, -ship.vx);
-    const maxBrakeDv = thrust * dt_yr;
     const brakeDv = Math.min(speed, maxBrakeDv);
-    const brakePower = brakeDv / maxBrakeDv;
+    const brakePower = brakeDv / maxBrakeDv; // safe: maxBrakeDv > 0 guarded above
     ship.vx -= (ship.vx / speed) * brakeDv;
     ship.vy -= (ship.vy / speed) * brakeDv;
     spawnThrustParticles(brakePower, realDt_s, retroAngle, dt_yr);
@@ -1267,20 +1276,8 @@ function applyTankInput(dt_yr, realDt_s, thrust) {
     spawnThrustParticles(1.0, realDt_s, shipAngle, dt_yr);
   }
 
-  // S = retrograde brake
-  if (keys.s) {
-    const speed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
-    if (speed > 1e-6) {
-      const maxBrakeDv = thrust * dt_yr;
-      const brakeDv = Math.min(speed, maxBrakeDv);
-      const brakePower = brakeDv / maxBrakeDv;
-      const fx = -ship.vx / speed;
-      const fy = -ship.vy / speed;
-      ship.vx += fx * brakeDv;
-      ship.vy += fy * brakeDv;
-      spawnThrustParticles(brakePower, realDt_s, Math.atan2(fy, fx), dt_yr);
-    }
-  }
+  // S = retrograde brake (shared, NaN-guarded helper)
+  if (keys.s) applyRetrogradeBrake(dt_yr, realDt_s, thrust);
 }
 
 // Screen: W=up, S=down, A=left, D=right thrust in absolute screen space.
@@ -1397,14 +1394,14 @@ let thrustActiveLastFrame = false;
 function spawnThrustParticles(power, realDt_s, forceAngle, dt_yr) {
   if (!ship || power <= 0) return;
 
-  // Fixed physical lifetime in sim-years — independent of timescale.
-  // At exhaust speed ~10 AU/yr this gives a ~0.4 AU plume.
-  const lifeYr = 0.04 + power * 0.02;
+  // Plume lifetime in REAL seconds, so particles always expire (aging in
+  // sim-years never reaches expiry at 1× timescale — the plume would freeze).
+  const lifeSec = 0.45 + power * 0.25;
 
-  // Spawn enough particles to maintain ribbon density regardless of timescale.
-  // Target ~12 particles per plume-length. Each frame we advance dt_yr in sim-time,
-  // so we need dt_yr/lifeYr * 12 new particles to keep density constant.
-  // Floor at 1 so we always emit at least one particle per thrust frame.
+  // Sim-time reference length used only to keep ribbon density constant: at high
+  // timescale a frame advances more sim-time, so we emit more particles to fill
+  // the longer plume. Floor at 1 so thrust always emits something.
+  const lifeYr = 0.04 + power * 0.02;
   const densityTarget = 2;
   const count = Math.min(4, Math.max(1, Math.ceil((dt_yr / lifeYr) * densityTarget)));
 
@@ -1433,7 +1430,7 @@ function spawnThrustParticles(power, realDt_s, forceAngle, dt_yr) {
       vx: ship.vx + ex * exhaustSpeed + sideX * sideKick,
       vy: ship.vy + ey * exhaustSpeed + sideY * sideKick,
       age: 0,
-      duration: lifeYr * (0.8 + Math.random() * 0.4),
+      duration: lifeSec * (0.8 + Math.random() * 0.4),
       size: 0.5 + power * 0.7 + Math.random() * 0.2,
       spread,
       burstId: thrustBurstId,
@@ -3187,9 +3184,12 @@ function drawDebris(ctx) {
   ctx.restore();
 }
 
-function tickThrustParticles(dt_yr) {
+// Particles AGE in real seconds (so the plume always expires regardless of
+// timescale) but MOVE in sim-time (so its spatial length tracks the ship at any
+// speed). Aging in sim-years would never expire at 1× timescale.
+function tickThrustParticles(dt_yr, realDt_s) {
   for (const particle of thrustParticles) {
-    particle.age += dt_yr;
+    particle.age += realDt_s;
     particle.x += particle.vx * dt_yr;
     particle.y += particle.vy * dt_yr;
   }
@@ -3474,8 +3474,13 @@ function drawShockwaves(ctx) {
 function render(ctx, w, h, realDt) {
   ctx.clearRect(0, 0, w, h);
 
-  tickShockwaves(realDt);
-  tickSolarParticles(realDt, w, h);
+  // Shockwaves and solar particles are simulation, not just decoration — freeze
+  // them while paused so the whole sim stops consistently (debris/thrust/physics
+  // are already gated in the loop).
+  if (isPlaying.value) {
+    tickShockwaves(realDt);
+    tickSolarParticles(realDt, w, h);
+  }
   applyFocusMode(w, h);
   updateOrbitAimFromMouse();
 
@@ -3512,13 +3517,25 @@ let lastTime = null;
 let _w = 0,
   _h = 0;
 let simYears = 0;
+let sceneBuilt = false; // gate so ResizeObserver only builds the scene once
+let teardown = null; // assigned by initCanvas; called from onUnmounted
 
 function initCanvas(canvas) {
   if (!canvas) return;
   let ctx = null;
 
   // --- Keyboard ---
+  function isTypingTarget(el) {
+    if (!el) return false;
+    const tag = el.tagName;
+    return tag === "INPUT" || tag === "TEXTAREA" || el.isContentEditable;
+  }
+
   function onKeyDown(e) {
+    // Don't hijack keys while the user is typing in a settings field — otherwise
+    // 'r' resets the game, '1-4' change timescale, WASD get preventDefault, etc.
+    if (isTypingTarget(e.target)) return;
+
     // Escape: break orbit/capture
     if (
       e.key === "Escape" &&
@@ -3563,6 +3580,10 @@ function initCanvas(canvas) {
 
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("keyup", onKeyUp);
+  // Releasing focus (alt-tab, clicking a settings input) can swallow the keyup
+  // for a held key, leaving it stuck "down" and the ship thrusting forever.
+  // Clear all keys whenever the window loses focus.
+  window.addEventListener("blur", clearKeys);
 
   // --- Mouse ---
   function updateMouseFromEvent(e) {
@@ -3643,6 +3664,11 @@ function initCanvas(canvas) {
   canvas.addEventListener("click", onCanvasClick);
 
   // --- Resize ---
+  // Resizing only updates canvas dimensions and the background starfield (which
+  // is tiled to the viewport). It must NOT rebuild the scene — the camera
+  // recenters itself every frame in applyFocusMode(), so a window resize leaves
+  // the running game untouched. The scene is built once on the first resize and
+  // thereafter only on explicit reset().
   function resizeCanvas() {
     const rect = canvas.parentElement.getBoundingClientRect();
     _w = rect.width;
@@ -3652,7 +3678,13 @@ function initCanvas(canvas) {
     canvas.style.width = _w + "px";
     canvas.style.height = _h + "px";
     ctx = canvas.getContext("2d");
-    buildScene(_w, _h);
+
+    if (!sceneBuilt) {
+      buildScene(_w, _h);
+      sceneBuilt = true;
+    } else {
+      buildStarfield(_w, _h);
+    }
   }
 
   const observer = new ResizeObserver(resizeCanvas);
@@ -3683,7 +3715,7 @@ function initCanvas(canvas) {
       if (isPlaying.value) {
         simStep(dt_yr, realDt);
         tickDebris(dt_yr, realDt);
-        tickThrustParticles(dt_yr);
+        tickThrustParticles(dt_yr, realDt);
         if (!ship && shipLoss) deathTextAge += realDt;
         simYears += dt_yr;
 
@@ -3705,25 +3737,32 @@ function initCanvas(canvas) {
     }
     lastTime = ts;
     if (ctx) render(ctx, _w, _h, realDt);
-    if (!isPlaying.value && realDt > 0) tickThrustParticles(0);
+    // While paused, let the existing plume age out (fade) but not move.
+    if (!isPlaying.value && realDt > 0) tickThrustParticles(0, realDt);
     rafId = requestAnimationFrame(loop);
   }
 
   rafId = requestAnimationFrame(loop);
 
-  onUnmounted(() => {
+  // initCanvas runs from SketchWrapper's @canvas-ready emit, i.e. inside the
+  // child's onMounted where Game is NOT the active instance — so we can't call
+  // onUnmounted() here. Instead we hand teardown back to the component's own
+  // onUnmounted hook (registered at setup top-level) via this cleanup fn.
+  teardown = () => {
     cancelAnimationFrame(rafId);
+    rafId = null;
     observer.disconnect();
     window.removeEventListener("keydown", onKeyDown);
     window.removeEventListener("keyup", onKeyUp);
-    keys.w = keys.a = keys.s = keys.d = keys.space = false;
+    window.removeEventListener("blur", clearKeys);
+    clearKeys();
     canvas.removeEventListener("mousedown", onMouseDown);
     canvas.removeEventListener("mousemove", onMouseMove);
     canvas.removeEventListener("mouseup", onMouseUp);
     canvas.removeEventListener("mouseleave", onMouseLeave);
     canvas.removeEventListener("wheel", onWheel);
     canvas.removeEventListener("click", onCanvasClick);
-  });
+  };
 }
 
 // =============================================================================
@@ -3745,11 +3784,22 @@ function reset() {
   buildScene(_w, _h);
 }
 
+// Registered here at setup top-level (not inside initCanvas, which runs under
+// SketchWrapper's instance) so teardown reliably binds to THIS component.
+onUnmounted(() => teardown?.());
+
 watch(
   () => settings.settings.visuals.trailLength,
   (v) => {
+    // Preserve existing trail history across resizes — re-seed the new buffer
+    // with the most recent points so dragging the slider doesn't wipe trails.
     for (const b of bodies) {
-      if (b.trail) b.trail = makeTrail(v);
+      if (!b.trail) continue;
+      if (b.isFixed) continue; // fixed bodies keep their inert (cap 0) trail
+      const prev = b.trail.points();
+      const next = makeTrail(v);
+      for (const p of prev.slice(-v)) next.push(p.x, p.y);
+      b.trail = next;
     }
   },
 );
