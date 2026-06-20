@@ -162,10 +162,14 @@ function computeDrift(s) {
   ty /= tlen
 
   const forceAngle = Math.atan2(ty, tx)
+  // The nose tracks the DIRECTION OF TRAVEL, not the thrust vector: lateral
+  // (port/starboard) thrust comes from side thrusters, so steering left/right
+  // must not swing the ship to point sideways. The plume still vents along the
+  // actual thrust direction (forceAngle).
   return {
     dvx: tx * thrust * dt_yr,
     dvy: ty * thrust * dt_yr,
-    shipAngle: forceAngle,
+    shipAngle: fwdAngle,
     brake: false,
     particle: { power: 1, angle: forceAngle },
     active: true,

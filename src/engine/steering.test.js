@@ -111,6 +111,26 @@ describe('computeThrust — drift', () => {
     expect(starboard.dvy).toBeGreaterThan(0)
   })
 
+  it('lateral thrust keeps the nose along travel (side thrusters), not pointing sideways', () => {
+    // Travelling +x → nose should stay at angle 0, even while thrusting sideways.
+    const port = computeThrust(base({ steering: 'drift', vx: 10, vy: 0, keys: keys({ a: true }) }))
+    expect(port.shipAngle).toBeCloseTo(0)
+    // The plume still vents along the actual (sideways) thrust direction.
+    expect(port.particle.angle).toBeCloseTo(Math.atan2(port.dvy, port.dvx))
+
+    const starboard = computeThrust(
+      base({ steering: 'drift', vx: 10, vy: 0, keys: keys({ d: true }) }),
+    )
+    expect(starboard.shipAngle).toBeCloseTo(0)
+  })
+
+  it('a prograde+lateral diagonal still keeps the nose along travel', () => {
+    const r = computeThrust(
+      base({ steering: 'drift', vx: 10, vy: 0, keys: keys({ w: true, a: true }) }),
+    )
+    expect(r.shipAngle).toBeCloseTo(0) // travel is +x, nose stays at 0
+  })
+
   it('falls back to ship facing when nearly stationary', () => {
     const r = computeThrust(
       base({ steering: 'drift', vx: 0, vy: 0, shipAngle: Math.PI / 2, keys: keys({ w: true }) }),
