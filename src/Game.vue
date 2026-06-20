@@ -3522,11 +3522,33 @@ const SCAN_DURATION_SIMYR = (4 * 1e6) / SECONDS_PER_YEAR
 // Eased 0..1 visibility so the panel fades in/out instead of popping.
 let captainHudVis = 0
 
-// `info` source for a scan target: planets and the sun carry it on their static
-// SOLAR_BODIES def; the black hole carries it on the constant itself.
+// Synthesize a readout for a body that has no static def (editor-created or
+// loaded-from-file planets). Stats are derived from the body's own data so every
+// custom world is still observable/scannable, not just the hardcoded ones.
+function genericBodyInfo(body) {
+  const diameterKm = Math.max(1, Math.round(body.drawR * 2 * AU_KM))
+  // Rough surface gravity proxy from mass relative to Earth (3.003e-6 M☉ ≈ 1 g).
+  const gravityG = Math.max(0.01, body.mass / 3.003e-6)
+  return {
+    classification: 'Unknown world',
+    diameterKm,
+    gravityG,
+    dayHours: 24,
+    moons: 0,
+    tempC: 0,
+    desc: 'Uncharted body. Composition and conditions unconfirmed.',
+  }
+}
+
+// `info` source for a scan target. The sun/planets of the built-in system carry it
+// on their static SOLAR_BODIES def; the black hole carries it on the constant;
+// any other body (custom level) gets a synthesized readout so it's still
+// scannable. Always returns an object with an `info` field.
 function scanInfoDef(target) {
   if (target.id === 'blackhole') return BLACK_HOLE
-  return SOLAR_BODIES.find((d) => d.id === target.id)
+  const def = SOLAR_BODIES.find((d) => d.id === target.id)
+  if (def && def.info) return def
+  return { id: target.id, name: target.name, info: genericBodyInfo(target) }
 }
 
 // Pick the closest radar target (planet, sun, or black hole) within scanner

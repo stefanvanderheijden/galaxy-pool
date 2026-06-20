@@ -141,6 +141,13 @@ orbits. `validateLevel()` normalizes + clamps everything and migrates by version
 - Advanced mode: added the Move-vs-Velocity drag toggle (drag used to always move
   position).
 - Slider value labels now update live (`levelData` made reactive).
+- **Editor/loaded planets are now observable.** Bug: `scanInfoDef()` only looked
+  up `info` from the hardcoded `SOLAR_BODIES`, so a custom-id planet (e.g.
+  `planet1`) returned no def → `getScannedPlanet()` returned null → it could never
+  be observed, named, or docked. Fix: `scanInfoDef()` falls back to a synthesized
+  `genericBodyInfo(body)` (classification "Unknown world", diameter/gravity derived
+  from the body's own `drawR`/`mass`) for any body without a static def, so every
+  custom world is scannable. Built-in planets still use their rich static info.
 
 ---
 
