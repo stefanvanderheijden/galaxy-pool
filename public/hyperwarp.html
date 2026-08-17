@@ -257,7 +257,7 @@ function fireShot() {
   let hitAny = false;
   const targets = [];
   for (const b of bodies) {
-    if (!b.alive || frozen(b)) continue;   // a frozen world is outside time; the wave passes it
+    if (!b.alive) continue;
     const dx = b.x - ship.x, dy = b.y - ship.y;
     const d = Math.hypot(dx, dy);
     if (d > S.coneRangeAU || d < 1e-9) continue;
@@ -270,7 +270,14 @@ function fireShot() {
     // 100% point blank, still 30% at the cone's lip: a long shot is weaker, never feeble
     const falloff = 1 - 0.7 * (t.d / S.coneRangeAU);
     const dv = power * falloff;
-    t.b.vx += (t.dx / t.d) * dv; t.b.vy += (t.dy / t.d) * dv;
+    const ivx = (t.dx / t.d) * dv, ivy = (t.dy / t.d) * dv;
+    if (frozen(t.b)) {
+      // A world in stasis takes the hit but cannot move with it: the momentum BANKS,
+      // and lands the instant its time resumes. This is the trick the bubble exists
+      // for - freeze a world, load it up, release.
+      t.b.pendVx = (t.b.pendVx || 0) + ivx;
+      t.b.pendVy = (t.b.pendVy || 0) + ivy;
+    } else { t.b.vx += ivx; t.b.vy += ivy; }
     t.b.struck = true; hitAny = true;
   }
   // A shove back, unassisted: the brief keeps the recoil and drops the stabiliser.
@@ -544,6 +551,15 @@ function draw(realDt) {
     if (frozen(b)) {   // a frozen world is ringed in the bubble's cyan
       cx.strokeStyle = "rgba(140,240,255,0.8)"; cx.lineWidth = 1.5;
       cx.beginPath(); cx.arc(sx, sy, r + 4, 0, 6.284); cx.stroke();
+      if (b.pendVx || b.pendVy) {
+        // banked momentum shows as a loaded amber ring and an arrow of what is coming
+        const pd = Math.hypot(b.pendVx, b.pendVy);
+        cx.strokeStyle = "rgba(255,180,80,0.9)"; cx.lineWidth = 2;
+        cx.beginPath(); cx.arc(sx, sy, r + 8, 0, 6.284); cx.stroke();
+        const ax = b.pendVx / pd, ay = b.pendVy / pd, len = 18 + Math.min(40, pd * 8);
+        cx.beginPath(); cx.moveTo(sx + ax * (r + 8), sy + ay * (r + 8));
+        cx.lineTo(sx + ax * (r + 8 + len), sy + ay * (r + 8 + len)); cx.stroke();
+      }
     }
   }
 
@@ -781,6 +797,27 @@ function drawHud(W, H) {
   cx.fillText(`POTTED ${score.potted}   BURNED ${score.burned}   DEATHS ${score.deaths}`, 16 * px, 24 * px);
   cx.fillText(`YEAR ${simYears.toFixed(1)}   ENERGY ${energy.toFixed(0)}/${(MAX_ENERGY - reserve).toFixed(0)}`, 16 * px, 42 * px);
   if (paused) { cx.fillStyle = "#e8b463"; cx.fillText("PAUSED", 16 * px, 60 * px); }
+
+  // the controls, always on screen: a feel rig is handed to people cold
+  const controls = [
+    ["W A S D", S.trueRotation ? "fly (A/D rotate)" : "fly (A/D strafe)"],
+    ["Q / E", "time slower / faster"],
+    ["SPACE", "time-stop bubble, again to resume"],
+    ["SHIFT", "antigravity"],
+    ["LMB hold", "charge shockwave, ESC cancels"],
+    ["RMB", "teleport"],
+    ["SCROLL", "zoom"],
+    ["R / P", "reset / pause"],
+  ];
+  cx.font = `${11 * px}px "Share Tech Mono", monospace`;
+  for (let i = 0; i < controls.length; i++) {
+    const y = (76 + i * 16) * px;
+    cx.fillStyle = "rgba(200,215,235,0.75)";
+    cx.fillText(controls[i][0], 16 * px, y);
+    cx.fillStyle = "rgba(140,160,190,0.6)";
+    cx.fillText(controls[i][1], 96 * px, y);
+  }
+  cx.font = `${12 * px}px "Share Tech Mono", monospace`;
   // the ship log, four rows above the band, newest at the bottom
   cx.textAlign = "center";
   const n = notices.length;
@@ -804,7 +841,16 @@ addEventListener("keydown", e => {
     if (k === "space" && !keys.space) {
       // Space is a toggle-and-hold: no bubble -> start growing one at the ship;
       // a standing bubble -> unpause it and hand the reserved capacity back.
-      if (bubble && !bubble.growing) { bubble = null; reserve = 0; note("TIME RESUMED", "#8cf0ff"); }
+      if (bubble && !bubble.growing) {
+        bubble = null; reserve = 0; note("TIME RESUMED", "#8cf0ff");
+        // banked blasts land now: every impulse taken in stasis arrives at once
+        for (const b of bodies) {
+          if (!b.pendVx && !b.pendVy) continue;
+          b.vx += b.pendVx || 0; b.vy += b.pendVy || 0;
+          b.pendVx = 0; b.pendVy = 0;
+          flash(b.x, b.y, 0.1, "#8fc3e8"); burst(b.x, b.y, 0.05, "#8fc3e8");
+        }
+      }
       else if (!bubble) { bubble = { x: ship.x, y: ship.y, r: 0.05, growing: true }; note("TIME STOP GROWING", "#8cf0ff"); }
     }
     keys[k] = true;
@@ -909,7 +955,8 @@ window.RIG = {
   state: () => ({ simYears, energy, reserve, sliderT, warp: warpNow(),
                   ship: { x: ship.x, y: ship.y, vx: ship.vx, vy: ship.vy, nose: ship.nose },
                   bodies: bodies.map(b => ({ name: b.name, x: b.x, y: b.y, vx: b.vx, vy: b.vy,
-                                             alive: b.alive, struck: b.struck })),
+                                             alive: b.alive, struck: b.struck,
+                                             pendVx: b.pendVx || 0, pendVy: b.pendVy || 0 })),
                   bubble: bubble ? { x: bubble.x, y: bubble.y, r: bubble.r, growing: bubble.growing } : null,
                   score: { ...score }, notices: notices.map(n => n.text),
                   ghostPoints: ghostPath ? ghostPath.length : 0,
@@ -917,6 +964,9 @@ window.RIG = {
   settings: () => S,
   set: (k, v) => { S[k] = v; },
   reset: resetWorld,
+  // test rigging only: place a standing bubble, point the nose
+  makeBubble: (x, y, r) => { bubble = { x, y, r, growing: false }; },
+  setNose: a => { ship.nose = a; },
 };
 
 resetWorld();
