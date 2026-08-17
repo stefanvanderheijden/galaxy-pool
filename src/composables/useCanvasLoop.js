@@ -14,13 +14,17 @@ import { MAX_DT } from '../engine/units.js'
 /**
  * @param {HTMLCanvasElement} canvas
  * @param {object} opts
- * @param {number} [opts.bottomInset]  px of the container reserved for the control bar
+ * @param {number|(() => number)} [opts.bottomInset]  px of the container reserved
+ *        for an overlaid control bar. Pass a function to measure it on every
+ *        resize, for a bar whose height depends on what it is showing.
  * @param {number} [opts.maxDt]        cap on the per-frame real delta, in seconds
  * @param {(w: number, h: number, isFirst: boolean) => void} [opts.onResize]
  * @param {(realDt: number, ctx: CanvasRenderingContext2D, w: number, h: number) => void} opts.onFrame
  * @returns {{stop: Function, width: Function, height: Function, context: Function, resetClock: Function}}
  */
 export function useCanvasLoop(canvas, { bottomInset = 0, maxDt = MAX_DT, onResize, onFrame }) {
+  const insetPx = () => (typeof bottomInset === 'function' ? bottomInset() : bottomInset) || 0
+
   let ctx = null
   let w = 0
   let h = 0
@@ -31,7 +35,9 @@ export function useCanvasLoop(canvas, { bottomInset = 0, maxDt = MAX_DT, onResiz
   function resize() {
     const rect = canvas.parentElement.getBoundingClientRect()
     w = rect.width
-    h = Math.max(0, rect.height - bottomInset)
+    // The control bar is an overlay, not a sibling in flow, so the canvas has to
+    // reserve its height explicitly or the bottom of the scene hides behind it.
+    h = Math.max(0, rect.height - insetPx())
     canvas.width = w
     canvas.height = h
     canvas.style.width = w + 'px'

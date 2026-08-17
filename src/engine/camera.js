@@ -37,6 +37,9 @@ export function createCamera({
     focus,
     // Zoom easing target — zoomAt() snaps both, animated moves set only this.
     targetZoom: zoom,
+    // While an eased zoom is in flight, the world point that must stay under a
+    // fixed screen point (the cursor). See zoomToward/tickZoom.
+    zoomAnchor: null,
     minZoom,
     maxZoom,
     pxPerAU,
@@ -68,9 +71,35 @@ export function createCamera({
       this.panY = my - wy * s1
     },
 
+    /**
+     * Cursor-anchored zoom that ANIMATES instead of snapping.
+     *
+     * A wheel sends discrete notches; applying each one straight to `zoom` makes
+     * the view jump in steps. This only moves the target, and remembers the
+     * world point under the cursor so tickZoom can keep it pinned as the zoom
+     * eases — the same anchoring, spread over a few frames.
+     */
+    zoomToward(factor, mx, my) {
+      const world = this.screenToWorld(mx, my)
+      this.targetZoom = Math.max(this.minZoom, Math.min(this.maxZoom, this.targetZoom * factor))
+      this.zoomAnchor = { wx: world.x, wy: world.y, sx: mx, sy: my }
+    },
+
     /** Ease `zoom` toward `targetZoom`; call once per frame. */
     tickZoom(rate = 0.08) {
+      if (Math.abs(this.targetZoom - this.zoom) < this.zoom * 1e-4) {
+        this.zoom = this.targetZoom
+        this.zoomAnchor = null
+        return
+      }
       this.zoom += (this.targetZoom - this.zoom) * rate
+      // Re-pan so the anchored world point is still under the same pixel. Without
+      // this the eased zoom would drift away from wherever the cursor was.
+      if (this.zoomAnchor) {
+        const s = this.scale()
+        this.panX = this.zoomAnchor.sx - this.zoomAnchor.wx * s
+        this.panY = this.zoomAnchor.sy - this.zoomAnchor.wy * s
+      }
     },
 
     /** Put world point (wx, wy) at the centre of a w×h viewport. */
@@ -84,6 +113,14 @@ export function createCamera({
     panBy(dx, dy) {
       this.panX += dx
       this.panY += dy
+      // An eased zoom re-pans every frame to hold its anchor pinned, which would
+      // undo this drag. Carry the anchor along with the drag instead, so panning
+      // and zooming can happen at the same time — which is exactly when you want
+      // both, lining a shot up while the view is still settling.
+      if (this.zoomAnchor) {
+        this.zoomAnchor.sx += dx
+        this.zoomAnchor.sy += dy
+      }
     },
 
     /**

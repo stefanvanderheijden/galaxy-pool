@@ -1,7 +1,7 @@
 <template>
   <GameShell
     :is-playing="isPlaying"
-    :time-scale="timeScale"
+    :show-speed="false"
     :body-count="bodyCount"
     :elapsed-label="elapsedLabel"
     @canvas-ready="initCanvas"
@@ -83,12 +83,38 @@
             and the run is stranded — reset and try a different order.
           </p>
 
-          <div class="help-h">6 · Looking around</div>
+          <div class="help-h">6 · The band</div>
+          <p>
+            The crackling line strung between two anchors is an
+            <strong>elastic band</strong>, and it guards the approach to the pocket. It is not a
+            wall: a planet pushes <em>into</em> it, the band bends to follow, and the further it is
+            carried the harder the two stretched halves pull back — so it takes the planet's speed
+            away and hands it back the other way.
+          </p>
+          <p>
+            The dashed rails either side show how far it will stretch before it
+            <strong>lets go</strong>: hit it hard enough and the planet punches straight through. A
+            hit near the middle comes back the way it went in; a glancing hit near an anchor
+            <strong>skids along</strong> the band instead. Both ends are open, so you can also just
+            go round it.
+          </p>
+
+          <div class="help-h">7 · Looking around</div>
           <p>
             The level is revealed at the start by a scan expanding out from the sun. After that:
             <strong>right-drag</strong> to pan, <strong>scroll</strong> to zoom,
             <strong>click empty space</strong> (or press <strong>Z</strong>) to re-centre on the
             sun, and <strong>F</strong> to fit the whole system on screen.
+          </p>
+
+          <div class="help-h">8 · The clock</div>
+          <p>
+            The curved band at the bottom is time. <strong>Hold Q</strong> to wind it down toward
+            real time and <strong>hold E</strong> to wind it up to 20M× — the bead slides
+            continuously, so there is no jump between "too slow to bother" and "too fast to follow".
+            The notch in the middle is <strong>1M×</strong>, the speed the game is played at: about
+            half a minute to the orbit. Let go and the slider springs back to it.
+            <strong>1</strong>–<strong>4</strong> jump straight to 1×, 100K×, 1M× and 20M×.
           </p>
 
           <div class="help-h">Controls</div>
@@ -97,8 +123,8 @@
             <strong>Esc</strong> — cancel the shot &nbsp;·&nbsp; <strong>Right-drag</strong> — pan
             &nbsp;·&nbsp; <strong>Wheel</strong> — zoom &nbsp;·&nbsp; <strong>Z</strong> — centre on
             the sun &nbsp;·&nbsp; <strong>F</strong> — fit the system &nbsp;·&nbsp;
-            <strong>1–4</strong> / <strong>Q</strong> <strong>E</strong> — time speed &nbsp;·&nbsp;
-            <strong>R</strong> — reset.
+            <strong>Q</strong> / <strong>E</strong> hold — time slower / faster &nbsp;·&nbsp;
+            <strong>1–4</strong> — time presets &nbsp;·&nbsp; <strong>R</strong> — reset.
           </p>
         </div>
         <button class="modal-close" @click="helpOpen = false">Close</button>
@@ -202,6 +228,27 @@
           />
         </SettingsSection>
 
+        <SettingsSection title="Elastic band">
+          <SettingsRow
+            v-model="settings.settings.band.stiffness"
+            label="Band stiffness"
+            :min="0"
+            :max="20000"
+            :step="250"
+            :decimals="0"
+            tooltip="How hard the band pulls back per unit of stretch. 0 switches it off entirely. Too soft and every shot punches straight through it."
+          />
+          <SettingsRow
+            v-model="settings.settings.band.reach"
+            label="Band depth (AU)"
+            :min="0.05"
+            :max="1.5"
+            :step="0.05"
+            :decimals="2"
+            tooltip="How far a planet can carry the band past its rest line before it lets go. Deeper means more room to absorb a fast planet — and a bigger window to punch through."
+          />
+        </SettingsSection>
+
         <SettingsSection title="Table">
           <SettingsRow
             v-model="settings.settings.table.pocketRadius"
@@ -241,6 +288,30 @@
           />
         </SettingsSection>
 
+        <SettingsSection title="Time">
+          <div class="steering-field">
+            <div class="steering-header">
+              <span class="steering-label">Slider springs home</span>
+            </div>
+            <div class="steering-options">
+              <button
+                class="steering-btn"
+                :class="{ active: settings.settings.time.spring }"
+                @click="settings.settings.time.spring = true"
+              >
+                On
+              </button>
+              <button
+                class="steering-btn"
+                :class="{ active: !settings.settings.time.spring }"
+                @click="settings.settings.time.spring = false"
+              >
+                Off
+              </button>
+            </div>
+          </div>
+        </SettingsSection>
+
         <SettingsSection title="Reveal &amp; visuals">
           <SettingsRow
             v-model="settings.settings.reveal.duration"
@@ -274,13 +345,15 @@ import SettingsSection from '../components/SettingsSection.vue'
 import SettingsRow from '../components/SettingsRow.vue'
 import { useSettings } from '../composables/useSettings.js'
 import { useCanvasLoop } from '../composables/useCanvasLoop.js'
-import { TIME_STEP_VALUES } from '../timeSteps.js'
-import { G_SIM, SOFTENING, SECONDS_PER_YEAR } from '../engine/units.js'
+import { createTimeWarp, planSubsteps, formatWarp } from '../engine/timeWarp.js'
+import { G_SIM, SECONDS_PER_YEAR } from '../engine/units.js'
 import { makeTrail, batchTrail } from '../engine/trail.js'
 import { createCamera } from '../engine/camera.js'
 import { createStarfield } from '../engine/starfield.js'
 import { radiusFromMass, deltaVFromShot } from '../engine/planets.js'
 import { applyRogueGravity, wakeRadius } from '../engine/gravity.js'
+import { corridorBands } from '../engine/corridor.js'
+import { bandResponse, bandShape } from '../engine/elasticBand.js'
 import hubbleUrl from '../Images/hubble.jpg'
 
 // =============================================================================
@@ -308,26 +381,48 @@ const helpOpen = ref(false)
 // CONSTANTS
 // =============================================================================
 
-// Height of GameShell's control bar — the canvas gets the rest of the container.
-const CONTROL_BAR_H = 96
+// GameShell's control bar is an absolute overlay, and this sketch hides its
+// stepped speed widget (it draws its own time band instead), so the bar is
+// shorter here than in 001. Measure it rather than hardcoding a height that
+// would leave a dead strip along the bottom.
+const CONTROL_BAR_FALLBACK_H = 48
+function controlBarHeight(canvas) {
+  return canvas?.parentElement?.querySelector('.controls')?.offsetHeight ?? CONTROL_BAR_FALLBACK_H
+}
 
 const SUN = {
   mass: 1.0,
-  // Drawn larger than the heaviest planet on the table (Ferrum lands at ~0.097
-  // AU with the default size settings) so the star still reads as the star.
-  drawR: 0.13,
+  // Drawn larger than the heaviest planet on the table (Ferrum lands at ~0.062
+  // AU with the default size settings) so the star still reads as the star,
+  // without either of them ballooning into caricature.
+  drawR: 0.085,
   color: '#FFD700',
   // A planet that touches this is destroyed and pays nothing.
-  killR: 0.15,
+  killR: 0.105,
 }
 
 // The pocket. Parked well outside every orbit so nothing drifts in on its own —
 // planets only reach it because the player put them there.
 const POCKET = {
-  x: 2.95,
-  y: 1.55,
+  x: 4.8,
+  y: 2.5,
   drawR: 0.09,
   color: '#b48cff',
+}
+
+// An elastic band, strung between two anchors — the cushion of this table. It
+// is angled across the lower right so a planet fired out that way is thrown back
+// UP toward the pocket: the bank shot. See engine/elasticBand.js for how it
+// catches and returns a planet.
+// Set square across the sun → pocket line, about two thirds of the way out, so
+// it is a barrier rather than a glancing rail: the direct shot at the hole is
+// blocked, and you either round an anchor or bank off it.
+const BAND = {
+  x1: 3.6,
+  y1: 0.1,
+  x2: 2.15,
+  y2: 2.9,
+  color: '#7fe4ff',
 }
 
 // Mass a planet's drawn radius and shot response are both measured against
@@ -356,6 +451,10 @@ const GRAB_MARGIN_PX = 14
 const CLICK_SLOP_PX = 4
 
 // Shot prediction.
+// How wide the forecast corridor has spread by the end of its horizon, and how
+// many single-alpha polylines each edge is drawn with.
+const PRED_SPREAD_AU = 0.05
+const PRED_BANDS = 14
 const PRED_HORIZON_YR = 0.75
 const PRED_STEPS = 900
 const PRED_DT_YR = PRED_HORIZON_YR / PRED_STEPS
@@ -443,7 +542,13 @@ const settings = useSettings(SKETCH_ID, {
   },
   planets: {
     sizeExponent: 1 / 3, // constant density
-    sizeScale: 0.07, // drawn radius (AU) of a reference-mass planet
+    sizeScale: 0.045, // drawn radius (AU) of a reference-mass planet
+  },
+  band: {
+    // Enough to turn a planet around inside the band's depth at ordinary shot
+    // speeds; a hard enough hit still punches straight through it.
+    stiffness: 2500,
+    reach: 0.35, // AU it stretches past its rest line before letting go
   },
   table: {
     pocketRadius: 0.12,
@@ -458,7 +563,12 @@ const settings = useSettings(SKETCH_ID, {
     influence: 0.35, // AU — where a rogue's pull reaches zero
     wakeAccel: 8, // AU/yr² of net pull needed to knock a stable planet loose
   },
-  reveal: { duration: 4 },
+  time: {
+    // With the spring on, the clock is a throttle you hold rather than a mode
+    // you leave switched on: release Q/E and it returns to the cruising speed.
+    spring: true,
+  },
+  reveal: { duration: 6 },
   visuals: { trailLength: 900 },
 })
 
@@ -472,13 +582,24 @@ function onImport(parsed) {
 // =============================================================================
 
 const isPlaying = ref(true)
-const timeScale = ref(1000000)
 const bodyCount = ref(0)
 const elapsedLabel = ref('')
 
-const TIME_STEPS = TIME_STEP_VALUES
-let timeScaleStepIdx = 2
-let timeScaleTarget = TIME_STEPS[timeScaleStepIdx]
+// Continuous time warp, ported from the hyperwarp rig (engine/timeWarp.js).
+// 1,000,000× is pinned at the centre because that is the speed this mode is
+// actually played at: an orbit takes about half a minute, which is long enough
+// to line a shot up and short enough to watch one land. Q winds down to a crawl
+// for a close pass, E winds up to 20M× to skip ahead, and letting go springs the
+// control back home.
+const TIME_PRESETS = [1, 100000, 1000000, 20000000]
+const warp = createTimeWarp({ min: 1, mid: 1e6, max: 2e7, spring: true })
+
+// Integration ceiling. At 20M× a whole frame is ~0.01 sim-years, which a single
+// Euler step turns into precessing orbits and planets tunnelling through each
+// other's fields; substepping keeps the physics honest at any warp. The step
+// COUNT is capped too, so a slow frame loses accuracy instead of hanging.
+const MAX_SUBSTEP_YR = 1e-4
+const MAX_SUBSTEPS = 64
 
 // =============================================================================
 // SIMULATION STATE
@@ -489,6 +610,11 @@ let simYears = 0
 
 // Energy — the whole economy of this mode.
 let energy = 0
+// What the BAR is showing. Energy arrives in motes from the pocket and is spent
+// in one lump on a shot, and either way a bar that jumped would lose the moment.
+// `energyShown` chases `energy` so the fill grows and drains visibly; every
+// gameplay decision still reads the true value.
+let energyShown = 0
 let energyBanked = 0 // lifetime income, for the score readout
 let energySpent = 0
 
@@ -498,23 +624,73 @@ let burned = [] // planets lost to the sun
 let lost = [] // planets flung out of the system
 
 // Opening reveal: a circle centred on the sun whose radius grows until it covers
-// the level. Purely a presentation layer — it hides nothing from the physics,
-// and once `revealR` passes REVEAL_FULL_R the overlay stops being drawn at all.
-const REVEAL_FULL_R = 4.6 // AU — comfortably past the pocket and every orbit
-let revealR = 0
+// the whole view. Purely a presentation layer — it hides nothing from the
+// physics, and once it completes the overlay stops being drawn at all.
+//
+// Tracked as PROGRESS (0..1 over the configured seconds) rather than as a radius
+// in AU. A fixed AU target was wrong twice over: it finished before reaching the
+// corners of a wide window, so the last of the fog vanished in one frame instead
+// of being swept away, and how long the sweep appeared to take depended on the
+// zoom. Progress against a target measured from the viewport fixes both — the
+// scan always ends exactly as it covers the last corner.
+let revealProgress = 0
+
+// World radius the scan has to reach: the furthest canvas corner from the sun,
+// plus a little margin so the edge never clips inside the frame.
+function revealTargetR(w, h) {
+  const sun = cam.worldToScreen(0, 0)
+  const dx = Math.max(sun.x, w - sun.x)
+  const dy = Math.max(sun.y, h - sun.y)
+  return (Math.hypot(dx, dy) / cam.scale()) * 1.02
+}
+
+// Current scan radius in AU.
+function revealR(w = _w, h = _h) {
+  return revealProgress * revealTargetR(w, h)
+}
 
 // Shockwave rings, spawned by shots and by pocketing.
 let shockwaves = []
 // Sparks that fly out of the pocket when a planet is sunk.
 let sparks = []
+// Energy in transit from the pocket to the band. A sunk planet's yield is not
+// credited on impact — it is carried up in motes and banked as each one lands,
+// so the bar visibly grows FROM the black hole rather than jumping.
+let energyFlights = []
 
 // Camera (shared: engine/camera.js).
 const cam = createCamera({ zoom: 2, focus: 'sun' })
 
-// Parallax sky (shared: engine/starfield.js).
-const starfield = createStarfield({ backdropUrl: hubbleUrl })
+// Parallax sky (shared: engine/starfield.js). Lighter than the module default:
+// this mode has no fog of war to hide, so the field can sit on a visible nebula
+// rather than on near-black, and the Hubble backdrop is turned up to carry it.
+// (001 keeps the darker default, where the contrast between explored space and
+// fog is doing real work.)
+// Two skies kept to hand. `black` is the one in use: plain black with no photo
+// backdrop and no nebula, so the star layers carry the depth on their own.
+// `photo` lays the tiled Hubble image behind them instead.
+const SKY_PRESETS = {
+  photo: {
+    backdropUrl: hubbleUrl,
+    baseColor: '#0b1020',
+    backdropAlpha: 0.3,
+    // Tiled and mirrored rather than one cover-fitted copy: at roughly a third
+    // of the viewport per tile you see far more of the galaxy's structure at
+    // once, and the mirroring means the repeats read as nebula, not wallpaper.
+    backdropTile: true,
+    backdropTileScale: 0.34,
+  },
+  black: { backdropUrl: null, baseColor: '#000005', nebula: false },
+}
+
+// Add `debugLayers: true` to tint stars behind the world blue and stars in
+// front of it red — the quickest way to see which side of the scene a layer is
+// on and how differently the two move.
+const starfield = createStarfield(SKY_PRESETS.black)
 
 // --- Input state ---
+// Held time-warp keys. Q/E slide the clock for as long as they are down.
+const keys = { slower: false, faster: false }
 // The in-progress shot: which planet is grabbed and where the pull is now.
 // { planet, curX, curY } — the anchor is the planet itself, which keeps moving,
 // so the cue stays attached while the sim runs.
@@ -564,6 +740,11 @@ function buildScene(w, h) {
       y: o.y,
       vx: o.vx,
       vy: o.vy,
+      // Previous-step position, for the swept capture test.
+      px: o.x,
+      py: o.y,
+      // Which side of the elastic band this planet was last outside on.
+      bandSide: 0,
       status: 'live', // 'live' | 'pocketed' | 'burned' | 'lost'
       // Gravity state. Stable planets are on rails (sun only); a planet goes
       // rogue when it is shot, or when a rogue pulls it hard enough. See
@@ -575,6 +756,7 @@ function buildScene(w, h) {
 
   simYears = 0
   energy = settings.settings.table.startEnergy
+  energyShown = energy
   energyBanked = 0
   energySpent = 0
   shotsFired = 0
@@ -583,13 +765,14 @@ function buildScene(w, h) {
   lost = []
   shockwaves = []
   sparks = []
+  energyFlights = []
   shot = null
   pan = null
   hoverPlanet = null
-  revealR = 0
+  revealProgress = 0
   invalidatePrediction()
 
-  starfield.build(w, h)
+  starfield.build()
   fitSystem(w, h)
   bodyCount.value = livePlanets().length + 1
 }
@@ -614,6 +797,18 @@ function simRunning() {
 // =============================================================================
 
 // The current rogue-gravity field, read straight from the settings panel.
+// The band as the physics wants it, with the live settings folded in.
+function bandField() {
+  return {
+    x1: BAND.x1,
+    y1: BAND.y1,
+    x2: BAND.x2,
+    y2: BAND.y2,
+    reach: settings.settings.band.reach,
+    stiffness: settings.settings.band.stiffness,
+  }
+}
+
 function rogueField(wake = true) {
   return {
     influenceR: settings.settings.rogue.influence,
@@ -637,24 +832,48 @@ function stepWorld(bodies, dt, { wake = true } = {}) {
   const pocketMass = settings.settings.table.pocketPull
   const pocketInfluence = settings.settings.table.pocketInfluence
 
+  const pocketR = settings.settings.table.pocketRadius
+  // Read once per step rather than per body — this runs up to 64 times a frame.
+  const bandFieldCache = bandField()
+
   for (const p of bodies) {
-    // Sun.
-    const r2 = p.x * p.x + p.y * p.y + SOFTENING
-    const r = Math.sqrt(r2)
-    const a = (G_SIM * SUN.mass) / r2
-    p.vx -= (p.x / r) * a * dt
-    p.vy -= (p.y / r) * a * dt
+    // Where this body starts the step, so capture can test the whole path it
+    // travels rather than just where it happens to land.
+    p.px = p.x
+    p.py = p.y
+
+    // Sun. The effective distance is floored at the kill radius: inside that the
+    // planet is destroyed anyway, and an unclamped 1/r² there is a singularity
+    // that flings bodies across the system.
+    const r = Math.hypot(p.x, p.y)
+    const rEff = Math.max(r, SUN.killR)
+    const a = (G_SIM * SUN.mass) / (rEff * rEff)
+    if (r > 0) {
+      p.vx -= (p.x / r) * a * dt
+      p.vy -= (p.y / r) * a * dt
+    }
+
+    // The elastic band. It needs to know which side the planet came from, so it
+    // carries one number per body; see engine/elasticBand.js.
+    const band = bandResponse(bandFieldCache, p.x, p.y, p.bandSide ?? 0)
+    p.bandSide = band.side
+    if (band.engaged) {
+      p.vx += band.ax * dt
+      p.vy += band.ay * dt
+    }
 
     // Black hole — local, omnidirectional, and only inside its influence radius,
-    // so it reads as a pocket with a lip rather than a second sun.
+    // so it reads as a pocket with a lip rather than a second sun. Floored at
+    // the capture radius for the same reason as the sun: a planet that deep is
+    // being pocketed, and the force there should never be able to launch it.
     if (pocketMass > 0 && pocketInfluence > 0) {
       const dx = POCKET.x - p.x
       const dy = POCKET.y - p.y
-      const d2 = dx * dx + dy * dy + SOFTENING
-      const d = Math.sqrt(d2)
-      if (d < pocketInfluence) {
+      const d = Math.hypot(dx, dy)
+      if (d > 0 && d < pocketInfluence) {
+        const dEff = Math.max(d, pocketR)
         const falloff = 1 - d / pocketInfluence
-        const pa = (G_SIM * pocketMass * falloff) / d2
+        const pa = (G_SIM * pocketMass * falloff) / (dEff * dEff)
         p.vx += (dx / d) * pa * dt
         p.vy += (dy / d) * pa * dt
       }
@@ -679,20 +898,40 @@ function gravityStep(dt) {
   }
 }
 
+// Closest approach of the segment a→b to the point c. Capture has to be tested
+// against the whole step, not its endpoint: a fast planet can cross the pocket
+// entirely between two samples, and testing only where it landed would let it
+// pass straight through.
+function segmentDistance(ax, ay, bx, by, cx, cy) {
+  const dx = bx - ax
+  const dy = by - ay
+  const len2 = dx * dx + dy * dy
+  if (len2 === 0) return Math.hypot(cx - ax, cy - ay)
+  let t = ((cx - ax) * dx + (cy - ay) * dy) / len2
+  t = Math.max(0, Math.min(1, t))
+  return Math.hypot(cx - (ax + t * dx), cy - (ay + t * dy))
+}
+
+// Called after EVERY substep, not once per frame. A frame can be 64 substeps at
+// high warp, which was long enough for a planet to dive into the pocket, get
+// whipped around it and leave again before anything looked — the planet "shot
+// off" instead of being sunk.
 function resolveOutcomes() {
   const pocketR = settings.settings.table.pocketRadius
 
   for (const p of planets) {
     if (p.status !== 'live') continue
 
-    const dPocket = Math.hypot(p.x - POCKET.x, p.y - POCKET.y)
-    if (dPocket <= pocketR) {
+    const fromX = p.px ?? p.x
+    const fromY = p.py ?? p.y
+
+    if (segmentDistance(fromX, fromY, p.x, p.y, POCKET.x, POCKET.y) <= pocketR) {
       sinkPlanet(p)
       continue
     }
 
-    const dSun = Math.hypot(p.x, p.y)
-    if (dSun <= SUN.killR + planetRadius(p.mass) * 0.5) {
+    const killR = SUN.killR + planetRadius(p.mass) * 0.5
+    if (segmentDistance(fromX, fromY, p.x, p.y, 0, 0) <= killR) {
       p.status = 'burned'
       burned.push(p)
       releaseIfHeld(p)
@@ -700,7 +939,7 @@ function resolveOutcomes() {
       continue
     }
 
-    if (dSun > ESCAPE_R) {
+    if (Math.hypot(p.x, p.y) > ESCAPE_R) {
       p.status = 'lost'
       lost.push(p)
       releaseIfHeld(p)
@@ -715,8 +954,23 @@ function sinkPlanet(p) {
   pocketed.push(p)
   releaseIfHeld(p)
 
-  energy += p.energyYield
-  energyBanked += p.energyYield
+  // The payout flies to the bar instead of appearing in it — see tickEnergyFlights.
+  const motes = Math.max(4, Math.min(10, Math.round(p.energyYield / 11)))
+  for (let i = 0; i < motes; i++) {
+    energyFlights.push({
+      amount: p.energyYield / motes,
+      color: p.color,
+      age: 0,
+      // Staggered, so the payout arrives as a stream rather than a volley.
+      delay: i * 0.09,
+      life: 0.85 + Math.random() * 0.35,
+      // Alternate sides: the bar fills symmetrically, so feed both tips.
+      side: i % 2 === 0 ? -1 : 1,
+      // Sideways bow on the flight path, so the motes fan out instead of
+      // stacking on one line.
+      bow: (Math.random() - 0.5) * 0.5,
+    })
+  }
 
   spawnShockwave(POCKET.x, POCKET.y, 0.55, p.color)
   const count = 14 + Math.round(p.energyYield / 6)
@@ -741,6 +995,91 @@ function releaseIfHeld(p) {
 
 function spawnShockwave(x, y, maxR, color) {
   shockwaves.push({ x, y, r: 0, maxR, age: 0, life: 1.1, color })
+}
+
+// Chase the true balance. Exponential, plus a floor rate so the last fraction of
+// a unit does not crawl for ever.
+function tickEnergyDisplay(realDt) {
+  const gap = energy - energyShown
+  if (Math.abs(gap) < 0.05) {
+    energyShown = energy
+    return
+  }
+  const step = gap * Math.min(1, realDt * 6) + Math.sign(gap) * 8 * realDt
+  energyShown = Math.abs(step) >= Math.abs(gap) ? energy : energyShown + step
+}
+
+// Advance the motes and bank each one as it lands.
+function tickEnergyFlights(realDt) {
+  for (let i = energyFlights.length - 1; i >= 0; i--) {
+    const f = energyFlights[i]
+    if (f.delay > 0) {
+      f.delay -= realDt
+      continue
+    }
+    f.age += realDt
+    if (f.age >= f.life) {
+      energy += f.amount
+      energyBanked += f.amount
+      energyFlights.splice(i, 1)
+    }
+  }
+}
+
+// Where a mote is right now, in SCREEN space: a quadratic bezier from the pocket
+// to the tip of the bar's fill. Both ends are recomputed every frame, so the
+// flight tracks the camera and the growing fill instead of drifting off them.
+function energyFlightPoint(f, w, h) {
+  const from = cam.worldToScreen(POCKET.x, POCKET.y)
+  const g = bandGeometry(w, h, 'top')
+  const frac = Math.max(0, Math.min(1, energyShown / energyScaleMax()))
+  const to = bandPoint(g, 0.5 + (f.side * frac) / 2)
+
+  const u = Math.max(0, Math.min(1, f.age / f.life))
+  // Ease out, so a mote decelerates into the bar.
+  const e = 1 - Math.pow(1 - u, 2.2)
+  // Control point lifted toward the top of the screen and pushed sideways, for
+  // a lobbed arc rather than a straight line.
+  const cxp = (from.x + to.x) / 2 + (to.y - from.y) * 0.22 * f.bow
+  const cyp = (from.y + to.y) / 2 - Math.abs(to.x - from.x) * 0.28
+  const inv = 1 - e
+  return {
+    x: inv * inv * from.x + 2 * inv * e * cxp + e * e * to.x,
+    y: inv * inv * from.y + 2 * inv * e * cyp + e * e * to.y,
+    u,
+  }
+}
+
+function drawEnergyFlights(ctx, w, h) {
+  if (!energyFlights.length) return
+  ctx.save()
+  for (const f of energyFlights) {
+    if (f.delay > 0) continue
+    const p = energyFlightPoint(f, w, h)
+    // A short tail, sampled slightly behind the head.
+    const trail = energyFlightPoint({ ...f, age: Math.max(0, f.age - 0.06) }, w, h)
+    const fade = 1 - Math.pow(p.u, 3)
+
+    ctx.strokeStyle = rgba(f.color, 0.35 * fade)
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.moveTo(trail.x, trail.y)
+    ctx.lineTo(p.x, p.y)
+    ctx.stroke()
+
+    const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 9)
+    glow.addColorStop(0, `rgba(190,255,220,${0.85 * fade})`)
+    glow.addColorStop(1, 'rgba(140,240,190,0)')
+    ctx.fillStyle = glow
+    ctx.beginPath()
+    ctx.arc(p.x, p.y, 9, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.fillStyle = `rgba(225,255,240,${0.95 * fade})`
+    ctx.beginPath()
+    ctx.arc(p.x, p.y, 2.2, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  ctx.restore()
 }
 
 function tickEffects(realDt) {
@@ -864,10 +1203,13 @@ function predictShot() {
   const ghosts = livePlanets().map((p) => ({
     x: p.x,
     y: p.y,
+    px: p.x,
+    py: p.y,
     vx: p.vx,
     vy: p.vy,
     mass: p.mass,
     rogue: p.rogue,
+    bandSide: p.bandSide,
   }))
   const aimed = ghosts[livePlanets().indexOf(shot.planet)]
   if (!aimed) return none
@@ -889,12 +1231,12 @@ function predictShot() {
     stepWorld(ghosts, PRED_DT_YR, { wake: false })
     points.push({ x: aimed.x, y: aimed.y })
 
-    // Stop the preview where the shot would end.
-    if (Math.hypot(aimed.x - POCKET.x, aimed.y - POCKET.y) <= pocketR) {
+    // Stop the preview where the shot would end — swept, exactly like the sim.
+    if (segmentDistance(aimed.px, aimed.py, aimed.x, aimed.y, POCKET.x, POCKET.y) <= pocketR) {
       hitPocket = true
       break
     }
-    if (Math.hypot(aimed.x, aimed.y) <= SUN.killR) {
+    if (segmentDistance(aimed.px, aimed.py, aimed.x, aimed.y, 0, 0) <= SUN.killR) {
       hitSun = true
       break
     }
@@ -932,7 +1274,7 @@ function focusSun(w = _w, h = _h) {
 
 // Frame the sun, the pocket and every orbit the level uses.
 function fitSystem(w = _w, h = _h) {
-  const pts = [{ x: 0, y: 0 }, POCKET]
+  const pts = [{ x: 0, y: 0 }, POCKET, { x: BAND.x1, y: BAND.y1 }, { x: BAND.x2, y: BAND.y2 }]
   for (const p of PLANET_SET) {
     pts.push({ x: p.orbR, y: p.orbR }, { x: -p.orbR, y: -p.orbR })
   }
@@ -943,8 +1285,10 @@ function fitSystem(w = _w, h = _h) {
 // The sun stays put, so 'sun' focus just means "keep the origin centred" — it
 // survives resizes without fighting the player's right-drag panning.
 function applyFocus(w, h) {
-  cam.tickZoom(0.12)
-  if (cam.focus === 'sun') cam.centerOn(0, 0, w, h)
+  cam.tickZoom(0.18)
+  // An eased zoom is repositioning the view to keep the cursor anchored; letting
+  // the focus mode also drive the pan in the same frame would fight it.
+  if (cam.focus === 'sun' && !cam.zoomAnchor) cam.centerOn(0, 0, w, h)
 }
 
 // =============================================================================
@@ -955,21 +1299,21 @@ function applyFocus(w, h) {
 // same however fast the clock is running, and it is finished — permanently —
 // once it covers the level.
 function tickReveal(realDt) {
+  if (revealProgress >= 1) return
   const duration = settings.settings.reveal.duration
-  if (revealR >= REVEAL_FULL_R) return
   if (duration <= 0) {
-    revealR = REVEAL_FULL_R
+    revealProgress = 1
     return
   }
-  revealR = Math.min(REVEAL_FULL_R, revealR + (REVEAL_FULL_R / duration) * realDt)
+  revealProgress = Math.min(1, revealProgress + realDt / duration)
 }
 
-const revealDone = () => revealR >= REVEAL_FULL_R
+const revealDone = () => revealProgress >= 1
 
 // True once the scan has reached a world point — used to gate grabbing a planet
 // the player cannot see yet.
 function revealed(x, y) {
-  return revealDone() || Math.hypot(x, y) <= revealR
+  return revealDone() || Math.hypot(x, y) <= revealR()
 }
 
 // =============================================================================
@@ -1123,6 +1467,122 @@ function drawPocket(ctx, timeS) {
   ctx.restore()
 }
 
+// The elastic band, drawn as a live electric line.
+//
+// At rest it hums along its anchors with a small jitter. When a planet is caught
+// it bends through the contact point, and everything scales with the stretch:
+// the jitter gets wilder, the glow brighter, the core whiter. The load on the
+// band is the thing the player needs to read — how close this shot is to
+// punching through — so the drawing is driven by exactly the number the physics
+// uses.
+function drawBand(ctx, timeS) {
+  const s = cam.scale()
+  const field = bandField()
+
+  // Single planet ↔ band interaction for now: the first one caught wins.
+  let contact = null
+  let load = 0
+  for (const p of planets) {
+    if (p.status !== 'live') continue
+    const r = bandResponse(field, p.x, p.y, p.bandSide ?? 0)
+    if (r.engaged) {
+      contact = { x: p.x, y: p.y }
+      // Normalised against the deepest stretch this band can hold, so 1 means
+      // "about to let go".
+      const maxStretch =
+        Math.hypot(BAND.x2 - BAND.x1, BAND.y2 - BAND.y1) *
+        (Math.sqrt(
+          1 + Math.pow((2 * field.reach) / Math.hypot(BAND.x2 - BAND.x1, BAND.y2 - BAND.y1), 2),
+        ) -
+          1)
+      load = Math.max(0, Math.min(1, r.stretch / (maxStretch || 1)))
+      break
+    }
+  }
+
+  const path = bandShape(BAND, contact).map((pt) => cam.worldToScreen(pt.x, pt.y))
+  const reachPx = field.reach * s
+
+  ctx.save()
+
+  // The slack the band has left, as two faint rails at its stretch limit.
+  const ax = path[0]
+  const bx = path[path.length - 1]
+  const dx = bx.x - ax.x
+  const dy = bx.y - ax.y
+  const len = Math.hypot(dx, dy) || 1
+  const nx = -dy / len
+  const ny = dx / len
+  ctx.setLineDash([4, 8])
+  ctx.strokeStyle = rgba(BAND.color, 0.16)
+  ctx.lineWidth = 1
+  for (const sign of [1, -1]) {
+    ctx.beginPath()
+    ctx.moveTo(ax.x + nx * reachPx * sign, ax.y + ny * reachPx * sign)
+    ctx.lineTo(bx.x + nx * reachPx * sign, bx.y + ny * reachPx * sign)
+    ctx.stroke()
+  }
+  ctx.setLineDash([])
+
+  // Jagged polyline along the (possibly bent) band. The jitter is a couple of
+  // sine terms rather than random, so the arc crawls instead of seething.
+  const jitterPx = (1.2 + load * 9) * Math.min(2, Math.max(0.5, s / 140))
+  const points = []
+  for (let seg = 0; seg < path.length - 1; seg++) {
+    const p0 = path[seg]
+    const p1 = path[seg + 1]
+    const segDx = p1.x - p0.x
+    const segDy = p1.y - p0.y
+    const segLen = Math.hypot(segDx, segDy) || 1
+    const jx = -segDy / segLen
+    const jy = segDx / segLen
+    const steps = Math.max(6, Math.min(26, Math.round(segLen / 18)))
+    for (let i = seg === 0 ? 0 : 1; i <= steps; i++) {
+      const u = i / steps
+      // Pinned at both ends of each run, loosest in the middle.
+      const envelope = Math.sin(u * Math.PI)
+      const n =
+        Math.sin(u * 11 + timeS * 7 + seg * 2.1) * 0.6 + Math.sin(u * 23 - timeS * 11 + seg) * 0.4
+      const off = n * envelope * jitterPx
+      points.push({ x: p0.x + segDx * u + jx * off, y: p0.y + segDy * u + jy * off })
+    }
+  }
+
+  const stroke = (width, alpha, color) => {
+    ctx.strokeStyle = rgba(color, alpha)
+    ctx.lineWidth = width
+    ctx.lineJoin = 'round'
+    ctx.lineCap = 'round'
+    ctx.beginPath()
+    ctx.moveTo(points[0].x, points[0].y)
+    for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y)
+    ctx.stroke()
+  }
+
+  // Wide glow, then the filament, then a white-hot core under load.
+  ctx.globalCompositeOperation = 'lighter'
+  stroke(10 + load * 14, 0.1 + load * 0.16, BAND.color)
+  stroke(4 + load * 4, 0.28 + load * 0.3, BAND.color)
+  stroke(1.4, 0.75 + load * 0.25, load > 0.02 ? '#ffffff' : BAND.color)
+  ctx.globalCompositeOperation = 'source-over'
+
+  // Anchor posts.
+  for (const anchor of [path[0], path[path.length - 1]]) {
+    const glow = ctx.createRadialGradient(anchor.x, anchor.y, 0, anchor.x, anchor.y, 14)
+    glow.addColorStop(0, rgba(BAND.color, 0.6 + load * 0.4))
+    glow.addColorStop(1, rgba(BAND.color, 0))
+    ctx.fillStyle = glow
+    ctx.beginPath()
+    ctx.arc(anchor.x, anchor.y, 14, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.fillStyle = '#e8fbff'
+    ctx.beginPath()
+    ctx.arc(anchor.x, anchor.y, 3, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  ctx.restore()
+}
+
 function drawTrail(ctx, p) {
   const pts = p.trail?.points?.() || []
   if (pts.length < 2) return
@@ -1137,7 +1597,10 @@ function drawTrail(ctx, p) {
   const [r, g, b] = hexToRgb(p.color)
   ctx.save()
   ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY)
-  ctx.lineCap = 'round'
+  // BUTT caps, not round: each band is a separate stroke at its own alpha, and a
+  // round cap paints a filled half-disc at the seam that the neighbouring band
+  // then paints over — every seam showed up as a bead on the trail.
+  ctx.lineCap = 'butt'
   ctx.lineJoin = 'round'
   ctx.lineWidth = planetRadius(p.mass) * 0.22
 
@@ -1428,36 +1891,55 @@ function drawPrediction(ctx, prediction) {
   const path = prediction.points
   if (path.length < 2) return
   const s = cam.scale()
-  const color = prediction.hitPocket ? '#9fe6a0' : prediction.hitSun ? '#ff8a5c' : '#8fb4ff'
+  // ONE colour, whatever the outcome. Tinting the line green when the shot
+  // happens to reach the pocket would hand the player the answer before they
+  // take the shot — the corridor's job is to show where the planet goes, and
+  // judging what that means is the game.
+  const color = '#8fb4ff'
+  const [r, g, b] = hexToRgb(color)
+
+  // The forecast is an approximation integrated forward, and it is worth less
+  // the further out it goes. So the line is drawn as a corridor that spreads as
+  // it runs and fades to nothing rather than stopping at a hard marker — the
+  // picture says "here, then roughly here, then who knows".
+  const bands = corridorBands(path, {
+    bands: PRED_BANDS,
+    maxOffset: PRED_SPREAD_AU,
+    widenPow: 0.85,
+  })
+  if (!bands.length) return
 
   ctx.save()
   ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY)
-  ctx.lineWidth = 1.4 / s
-  ctx.setLineDash([6 / s, 6 / s])
-  ctx.strokeStyle = rgba(color, 0.55)
-  ctx.beginPath()
-  ctx.moveTo(path[0].x, path[0].y)
-  for (let i = 1; i < path.length; i++) ctx.lineTo(path[i].x, path[i].y)
-  ctx.stroke()
-  ctx.setLineDash([])
-  ctx.restore()
+  ctx.lineCap = 'butt'
+  ctx.lineJoin = 'round'
+  ctx.lineWidth = 1.3 / s
 
-  // End-of-path marker, in screen space so it stays a readable size.
-  const end = path[path.length - 1]
-  const sp = cam.worldToScreen(end.x, end.y)
-  ctx.save()
-  ctx.strokeStyle = rgba(color, 0.9)
-  ctx.lineWidth = 1.5
-  ctx.beginPath()
-  ctx.arc(sp.x, sp.y, 6, 0, Math.PI * 2)
-  ctx.stroke()
-  if (prediction.hitPocket || prediction.hitSun) {
-    ctx.fillStyle = rgba(color, 0.95)
-    ctx.font = '10px monospace'
-    ctx.textAlign = 'center'
-    ctx.fillText(prediction.hitPocket ? 'SINKS' : 'BURNS UP', sp.x, sp.y - 12)
+  for (const band of bands) {
+    const alpha = 0.6 * Math.pow(1 - band.t, 1.5)
+    if (alpha <= 0.004) continue
+    ctx.strokeStyle = `rgba(${r},${g},${b},${alpha})`
+    for (const edge of [band.left, band.right]) {
+      ctx.beginPath()
+      ctx.moveTo(edge[0].x, edge[0].y)
+      for (let i = 1; i < edge.length; i++) ctx.lineTo(edge[i].x, edge[i].y)
+      ctx.stroke()
+    }
   }
   ctx.restore()
+
+  // The one thing still worth saying is the hazard: flying a planet into the sun
+  // destroys it for nothing. Sinking it is left for the player to see coming.
+  if (prediction.hitSun) {
+    const end = path[path.length - 1]
+    const sp = cam.worldToScreen(end.x, end.y)
+    ctx.save()
+    ctx.fillStyle = 'rgba(255,138,92,0.75)'
+    ctx.font = '10px monospace'
+    ctx.textAlign = 'center'
+    ctx.fillText('BURNS UP', sp.x, sp.y - 10)
+    ctx.restore()
+  }
 }
 
 function drawEffects(ctx) {
@@ -1493,41 +1975,51 @@ function drawRevealOverlay(ctx, w, h) {
   if (revealDone()) return
 
   const sp = cam.worldToScreen(0, 0)
-  const rpx = revealR * cam.scale()
+  const rpx = Math.max(0, revealR(w, h) * cam.scale())
 
   ctx.save()
+
+  // The unscanned region: one flat fill of the whole canvas with a hole punched
+  // in it. Flat fills are cheap; what used to be expensive here was a radial
+  // gradient over the entire disc plus a shadow-blurred ring, both of which ran
+  // every frame of the sweep. The soft edge is now four plain strokes just
+  // inside the rim, which reads the same and costs nothing.
   ctx.beginPath()
   ctx.rect(0, 0, w, h)
   // moveTo first: rect() leaves a current point, and without this the arc would
   // be joined to it by a stray line the fill then has to resolve.
-  ctx.moveTo(sp.x + Math.max(0, rpx), sp.y)
-  ctx.arc(sp.x, sp.y, Math.max(0, rpx), 0, Math.PI * 2, true)
+  ctx.moveTo(sp.x + rpx, sp.y)
+  ctx.arc(sp.x, sp.y, rpx, 0, Math.PI * 2, true)
   ctx.fillStyle = '#04050b'
   ctx.fill()
 
-  // Soft inner falloff so the edge isn't a hard cut.
-  const edge = ctx.createRadialGradient(sp.x, sp.y, Math.max(0, rpx - 40), sp.x, sp.y, rpx)
-  edge.addColorStop(0, 'rgba(4,5,11,0)')
-  edge.addColorStop(1, 'rgba(4,5,11,0.85)')
-  ctx.fillStyle = edge
-  ctx.beginPath()
-  ctx.arc(sp.x, sp.y, Math.max(0, rpx), 0, Math.PI * 2)
-  ctx.fill()
+  // Feathered inner edge: concentric strokes fading inward.
+  for (let i = 0; i < 4; i++) {
+    const rr = rpx - 4 - i * 7
+    if (rr <= 0) break
+    ctx.strokeStyle = `rgba(4,5,11,${0.45 - i * 0.1})`
+    ctx.lineWidth = 8
+    ctx.beginPath()
+    ctx.arc(sp.x, sp.y, rr, 0, Math.PI * 2)
+    ctx.stroke()
+  }
 
-  // Leading scan ring.
-  ctx.strokeStyle = 'rgba(79,195,247,0.55)'
-  ctx.lineWidth = 2
-  ctx.shadowColor = 'rgba(79,195,247,0.8)'
-  ctx.shadowBlur = 16
+  // Leading scan ring — two strokes instead of a shadow blur.
+  ctx.strokeStyle = 'rgba(79,195,247,0.18)'
+  ctx.lineWidth = 6
   ctx.beginPath()
-  ctx.arc(sp.x, sp.y, Math.max(0, rpx), 0, Math.PI * 2)
+  ctx.arc(sp.x, sp.y, rpx, 0, Math.PI * 2)
   ctx.stroke()
-  ctx.shadowBlur = 0
+  ctx.strokeStyle = 'rgba(79,195,247,0.6)'
+  ctx.lineWidth = 1.5
+  ctx.beginPath()
+  ctx.arc(sp.x, sp.y, rpx, 0, Math.PI * 2)
+  ctx.stroke()
 
   ctx.fillStyle = 'rgba(79,195,247,0.75)'
   ctx.font = '11px monospace'
   ctx.textAlign = 'center'
-  ctx.fillText(`SURVEYING SYSTEM · ${Math.round((revealR / REVEAL_FULL_R) * 100)}%`, w / 2, h - 24)
+  ctx.fillText(`SURVEYING SYSTEM · ${Math.round(revealProgress * 100)}%`, w / 2, h - 124)
   ctx.restore()
 }
 
@@ -1535,90 +2027,140 @@ function drawRevealOverlay(ctx, w, h) {
 // HUD
 // =============================================================================
 
-const ENERGY_PANEL = { x: 14, y: 52, w: 62 }
+// Both readouts are the same curved band: an arc of a circle far off-screen, so
+// it reads as a shallow curve rather than a straight rule. The time band hangs
+// from a centre ABOVE the screen and sags like a hammock; the energy band hangs
+// from a centre BELOW it and domes upward. Same object, mirrored.
+const BAND_SPAN = 0.38 // radians of visible arc
+const BAND_TOP_INSET = 34 // px from the top of the canvas to the dome's peak
+const BAND_BOTTOM_INSET = 54 // px from the bottom to the hammock's lowest point
+
+function bandGeometry(w, h, edge) {
+  const R = w * 1.1
+  return edge === 'bottom'
+    ? { R, cxp: w / 2, cyp: h - R - BAND_BOTTOM_INSET, dir: 1 }
+    : { R, cxp: w / 2, cyp: R + BAND_TOP_INSET, dir: -1 }
+}
+
+// Angle along a band at position t (0 = left end, 1 = right end).
+function bandAngle(g, t) {
+  return g.dir === 1
+    ? Math.PI / 2 + BAND_SPAN / 2 - BAND_SPAN * t
+    : -Math.PI / 2 - BAND_SPAN / 2 + BAND_SPAN * t
+}
+
+function bandPoint(g, t) {
+  const a = bandAngle(g, t)
+  return { x: g.cxp + Math.cos(a) * g.R, y: g.cyp + Math.sin(a) * g.R }
+}
+
+// Stroke a run of the band between two positions.
+function strokeBandArc(ctx, g, t0, t1, style, width) {
+  if (Math.abs(t1 - t0) < 1e-4) return
+  const a0 = bandAngle(g, t0)
+  const a1 = bandAngle(g, t1)
+  ctx.strokeStyle = style
+  ctx.lineWidth = width
+  ctx.beginPath()
+  ctx.arc(g.cxp, g.cyp, g.R, Math.min(a0, a1), Math.max(a0, a1))
+  ctx.stroke()
+}
 
 // Vertical energy column. The bar is stored energy; while aiming, the top slice
 // of it turns red to show what the shot will take, and an outline above it shows
 // the part of the pull the bar cannot cover.
-function drawEnergyHUD(ctx, w, h) {
-  const x = ENERGY_PANEL.x
-  const y = ENERGY_PANEL.y
-  const pw = ENERGY_PANEL.w
-  const ph = h - y - 110
-  if (ph < 80) return
+// Energy the band's full width represents. Fixed for a run, so the fill can be
+// compared with itself over time rather than silently rescaling under the
+// player as they bank more.
+function energyScaleMax() {
+  return Math.max(settings.settings.table.startEnergy, TOTAL_YIELD * 0.6, 100)
+}
 
-  const scaleMax = Math.max(settings.settings.table.startEnergy, TOTAL_YIELD * 0.6, 100)
-  const barX = x + 16
-  const barW = 20
-  const barY = y + 26
-  const barH = ph - 58
+// Energy, drawn as the mirror of the time band: a shallow dome across the top.
+//
+// It fills SYMMETRICALLY from the middle out — an empty tank is a single point
+// of light at the centre and a full one reaches both ends. Reading it is a
+// glance at how wide the light is, not a comparison against a scale, and the
+// growth is visible from either side of the screen.
+function drawEnergyBand(ctx, w, h) {
+  const g = bandGeometry(w, h, 'top')
+  const scaleMax = energyScaleMax()
+  const frac = Math.max(0, Math.min(1, energyShown / scaleMax))
+  const draw = shot ? shotDraw() : null
+
+  // Half-widths as band positions either side of centre.
+  const half = frac / 2
+  const spendHalf = draw ? Math.min(half, draw.affordable / scaleMax / 2) : 0
+  const keepHalf = half - spendHalf
+  const overHalf = draw
+    ? Math.min(0.5 - half, (draw.requested - draw.affordable) / scaleMax / 2)
+    : 0
 
   ctx.save()
-  ctx.fillStyle = 'rgba(8,10,20,0.72)'
-  ctx.strokeStyle = 'rgba(79,195,247,0.22)'
-  ctx.lineWidth = 1
-  roundRect(ctx, x, y, pw, ph, 6)
-  ctx.fill()
-  ctx.stroke()
 
-  ctx.fillStyle = 'rgba(255,255,255,0.45)'
-  ctx.font = '9px monospace'
-  ctx.textAlign = 'center'
-  ctx.fillText('ENERGY', x + pw / 2, y + 16)
-
-  // Track.
-  ctx.fillStyle = 'rgba(255,255,255,0.06)'
-  roundRect(ctx, barX, barY, barW, barH, 4)
-  ctx.fill()
-
-  const frac = Math.max(0, Math.min(1, energy / scaleMax))
-  const fillH = barH * frac
-  const draw = shot ? shotDraw() : null
-  const spendH = draw ? Math.min(fillH, (draw.affordable / scaleMax) * barH) : 0
-
-  // Stored energy (minus what the aim is about to take).
-  const keepH = fillH - spendH
-  if (keepH > 0) {
-    const g = ctx.createLinearGradient(0, barY + barH - keepH, 0, barY + barH)
-    g.addColorStop(0, '#7fe0a8')
-    g.addColorStop(1, '#2f8f63')
-    ctx.fillStyle = g
-    roundRect(ctx, barX, barY + barH - keepH, barW, keepH, 4)
-    ctx.fill()
-  }
-  // The slice this shot would burn.
-  if (spendH > 0) {
-    ctx.fillStyle = 'rgba(235,90,90,0.85)'
-    roundRect(ctx, barX, barY + barH - fillH, barW, spendH, 4)
-    ctx.fill()
-  }
-  // Pull the bar can't pay for: outlined above the fill.
-  if (draw && draw.requested > draw.affordable + 0.001) {
-    const overH = Math.min(barH - fillH, ((draw.requested - draw.affordable) / scaleMax) * barH)
-    ctx.strokeStyle = 'rgba(235,90,90,0.6)'
-    ctx.setLineDash([3, 3])
-    ctx.lineWidth = 1
-    roundRect(ctx, barX, barY + barH - fillH - overH, barW, overH, 3)
+  // The rail, and ticks at the ends so "full" has a visible destination.
+  strokeBandArc(ctx, g, 0, 1, 'rgba(120,150,200,0.18)', 5)
+  for (const t of [0, 1]) {
+    const a = bandAngle(g, t)
+    ctx.strokeStyle = 'rgba(120,150,200,0.3)'
+    ctx.lineWidth = 1.5
+    ctx.beginPath()
+    ctx.moveTo(g.cxp + Math.cos(a) * (g.R - 6), g.cyp + Math.sin(a) * (g.R - 6))
+    ctx.lineTo(g.cxp + Math.cos(a) * (g.R + 6), g.cyp + Math.sin(a) * (g.R + 6))
     ctx.stroke()
+  }
+
+  // Stored energy, mirrored either side of the middle.
+  if (keepHalf > 0) {
+    strokeBandArc(ctx, g, 0.5 - keepHalf, 0.5 + keepHalf, 'rgba(127,224,168,0.9)', 5)
+  }
+  // The slice the current pull would burn, at the outer ends of the fill.
+  if (spendHalf > 0) {
+    strokeBandArc(ctx, g, 0.5 - half, 0.5 - keepHalf, 'rgba(235,90,90,0.9)', 5)
+    strokeBandArc(ctx, g, 0.5 + keepHalf, 0.5 + half, 'rgba(235,90,90,0.9)', 5)
+  }
+  // Pull the bar cannot pay for, sketched beyond the fill.
+  if (overHalf > 0.001) {
+    ctx.setLineDash([3, 4])
+    strokeBandArc(ctx, g, 0.5 - half - overHalf, 0.5 - half, 'rgba(235,90,90,0.45)', 3)
+    strokeBandArc(ctx, g, 0.5 + half, 0.5 + half + overHalf, 'rgba(235,90,90,0.45)', 3)
     ctx.setLineDash([])
   }
 
-  ctx.strokeStyle = 'rgba(255,255,255,0.14)'
-  ctx.lineWidth = 1
-  roundRect(ctx, barX, barY, barW, barH, 4)
-  ctx.stroke()
+  // The centre bead: always lit, so an empty tank still reads as a live gauge
+  // rather than a broken one.
+  const mid = bandPoint(g, 0.5)
+  const glow = ctx.createRadialGradient(mid.x, mid.y, 0, mid.x, mid.y, 14)
+  glow.addColorStop(0, energyShown > 0 ? 'rgba(160,240,200,0.85)' : 'rgba(235,120,120,0.8)')
+  glow.addColorStop(1, 'rgba(120,240,180,0)')
+  ctx.fillStyle = glow
+  ctx.beginPath()
+  ctx.arc(mid.x, mid.y, 14, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillStyle = energyShown > 0 ? '#dffbe9' : '#ffb4b4'
+  ctx.beginPath()
+  ctx.arc(mid.x, mid.y, 3.5, 0, Math.PI * 2)
+  ctx.fill()
 
-  ctx.fillStyle = energy > 0 ? '#9fe6c0' : '#e57373'
-  ctx.font = 'bold 13px monospace'
+  // Leading beads at the two tips of the fill.
+  if (frac > 0.004) {
+    for (const t of [0.5 - half, 0.5 + half]) {
+      const p = bandPoint(g, t)
+      ctx.fillStyle = 'rgba(200,255,225,0.95)'
+      ctx.beginPath()
+      ctx.arc(p.x, p.y, 3, 0, Math.PI * 2)
+      ctx.fill()
+    }
+  }
+
+  // Readout under the dome.
   ctx.textAlign = 'center'
-  ctx.fillText(String(Math.round(energy)), x + pw / 2, barY + barH + 20)
-
-  ctx.fillStyle = 'rgba(255,255,255,0.3)'
+  ctx.font = 'bold 13px monospace'
+  ctx.fillStyle = energyShown > 0 ? 'rgba(190,240,215,0.95)' : 'rgba(235,120,120,0.95)'
+  ctx.fillText(String(Math.round(energyShown)), w / 2, BAND_TOP_INSET + 30)
   ctx.font = '9px monospace'
-  ctx.fillText('BANKED', x + pw / 2, barY + barH + 36)
-  ctx.fillStyle = 'rgba(200,210,230,0.7)'
-  ctx.font = '11px monospace'
-  ctx.fillText(String(Math.round(energyBanked)), x + pw / 2, barY + barH + 48)
+  ctx.fillStyle = 'rgba(130,170,150,0.55)'
+  ctx.fillText(`ENERGY · BANKED ${Math.round(energyBanked)}`, w / 2, BAND_TOP_INSET + 44)
   ctx.restore()
 }
 
@@ -1726,12 +2268,12 @@ function drawScoreHUD(ctx) {
   ctx.textAlign = 'left'
   ctx.font = '11px monospace'
   ctx.fillStyle = 'rgba(140,160,190,0.8)'
-  ctx.fillText(`SUNK ${pocketed.length}/${TOTAL_PLANETS}`, 92, 66)
+  ctx.fillText(`SUNK ${pocketed.length}/${TOTAL_PLANETS}`, 16, 66)
   ctx.fillStyle = 'rgba(110,125,150,0.75)'
-  ctx.fillText(`shots ${shotsFired} · spent ${Math.round(energySpent)}`, 92, 82)
+  ctx.fillText(`shots ${shotsFired} · spent ${Math.round(energySpent)}`, 16, 82)
   if (burned.length || lost.length) {
     ctx.fillStyle = 'rgba(220,130,110,0.75)'
-    ctx.fillText(`burned ${burned.length} · lost ${lost.length}`, 92, 98)
+    ctx.fillText(`burned ${burned.length} · lost ${lost.length}`, 16, 98)
   }
   ctx.restore()
 }
@@ -1751,7 +2293,78 @@ function drawHint(ctx, w, h) {
   ctx.textAlign = 'center'
   ctx.font = '11px monospace'
   ctx.fillStyle = energy <= 0 ? 'rgba(235,120,120,0.9)' : 'rgba(150,165,190,0.65)'
-  ctx.fillText(msg, w / 2, h - 16)
+  ctx.fillText(msg, w / 2, h - 102)
+  ctx.restore()
+}
+
+// The time warp control, drawn as a curved band across the foot of the screen —
+// the hyperwarp rig's design, and much the better one. The band is an arc of a
+// huge circle centred ABOVE the screen, so it sags like a hammock: its lowest
+// point is the middle, which is exactly where the bead rests and where the
+// cruising speed is pinned. Slow is left, fast is right, and the notch marks
+// home. The bead rides `warp.shown`, the eased twin of the real position, so
+// jumping to a preset glides instead of snapping.
+function drawTimeBand(ctx, w, h) {
+  const R = w * 1.1
+  const cxp = w / 2
+  const cyp = h - R - 54
+  const span = 0.38 // radians of visible arc
+  const held = !simRunning()
+
+  ctx.save()
+
+  // The rail.
+  ctx.strokeStyle = held ? 'rgba(90,110,150,0.18)' : 'rgba(120,150,200,0.25)'
+  ctx.lineWidth = 5
+  ctx.beginPath()
+  ctx.arc(cxp, cyp, R, Math.PI / 2 - span / 2, Math.PI / 2 + span / 2)
+  ctx.stroke()
+
+  // Centre notch — the home position the spring returns to.
+  const na = Math.PI / 2
+  ctx.strokeStyle = 'rgba(160,190,240,0.5)'
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  ctx.moveTo(cxp + Math.cos(na) * (R - 9), cyp + Math.sin(na) * (R - 9))
+  ctx.lineTo(cxp + Math.cos(na) * (R + 9), cyp + Math.sin(na) * (R + 9))
+  ctx.stroke()
+
+  // End ticks, so the travel has visible limits.
+  for (const side of [-1, 1]) {
+    const ea = Math.PI / 2 + (side * span) / 2
+    ctx.strokeStyle = 'rgba(120,150,200,0.35)'
+    ctx.lineWidth = 1.5
+    ctx.beginPath()
+    ctx.moveTo(cxp + Math.cos(ea) * (R - 6), cyp + Math.sin(ea) * (R - 6))
+    ctx.lineTo(cxp + Math.cos(ea) * (R + 6), cyp + Math.sin(ea) * (R + 6))
+    ctx.stroke()
+  }
+
+  // The bead. x grows with t, so the angle DECREASES from the left end.
+  const a = Math.PI / 2 + span / 2 - span * warp.shown
+  const bx = cxp + Math.cos(a) * R
+  const by = cyp + Math.sin(a) * R
+  const glow = ctx.createRadialGradient(bx, by, 0, bx, by, 16)
+  glow.addColorStop(0, held ? 'rgba(150,170,200,0.6)' : 'rgba(190,220,255,0.95)')
+  glow.addColorStop(1, 'rgba(120,170,255,0)')
+  ctx.fillStyle = glow
+  ctx.beginPath()
+  ctx.arc(bx, by, 16, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillStyle = held ? 'rgba(190,200,215,0.7)' : '#e8f0fa'
+  ctx.beginPath()
+  ctx.arc(bx, by, 4, 0, Math.PI * 2)
+  ctx.fill()
+
+  // Readout under the bead.
+  ctx.textAlign = 'center'
+  ctx.font = 'bold 13px monospace'
+  ctx.fillStyle = held ? 'rgba(150,165,190,0.65)' : 'rgba(190,215,245,0.95)'
+  ctx.fillText(formatWarp(warp.shownWarp()), w / 2, h - 30)
+
+  ctx.font = '9px monospace'
+  ctx.fillStyle = 'rgba(130,150,185,0.5)'
+  ctx.fillText('Q ◂ TIME ▸ E', w / 2, h - 15)
   ctx.restore()
 }
 
@@ -1767,16 +2380,19 @@ function drawTimeHeld(ctx, w) {
   ctx.fillStyle = 'rgba(10,14,28,0.8)'
   ctx.strokeStyle = 'rgba(79,195,247,0.35)'
   ctx.lineWidth = 1
-  roundRect(ctx, w / 2 - tw / 2, 44, tw, 20, 10)
+  roundRect(ctx, w / 2 - tw / 2, BAND_TOP_INSET + 54, tw, 20, 10)
   ctx.fill()
   ctx.stroke()
   ctx.fillStyle = 'rgba(150,205,240,0.9)'
-  ctx.fillText(label, w / 2, 58)
+  ctx.fillText(label, w / 2, BAND_TOP_INSET + 68)
   ctx.restore()
 }
 
 function drawRunOver(ctx, w, h) {
-  if (livePlanets().length > 0) return
+  // Wait for the payouts to land, or the final balance would be shown short.
+  if (livePlanets().length > 0 || energyFlights.length || Math.abs(energy - energyShown) > 0.5) {
+    return
+  }
 
   ctx.save()
   ctx.textAlign = 'center'
@@ -1825,9 +2441,10 @@ function drawRunOver(ctx, w, h) {
 
 function render(ctx, w, h, timeS) {
   const c = cam.worldCenter(w, h)
-  starfield.draw(ctx, w, h, c.x, c.y, cam.zoom)
+  starfield.draw(ctx, w, h, c.x, c.y, cam.scale())
 
   drawOrbitGuides(ctx)
+  drawBand(ctx, timeS)
   drawPocket(ctx, timeS)
   drawSun(ctx)
 
@@ -1850,6 +2467,12 @@ function render(ctx, w, h, timeS) {
   }
 
   drawEffects(ctx)
+
+  // Stars in FRONT of the system: drawn over the world so that zooming in sends
+  // them sweeping outward past the camera. Under the cue and the HUD, which have
+  // to stay readable.
+  starfield.drawForeground(ctx, w, h, c.x, c.y, cam.scale())
+
   drawCue(ctx)
 
   // Labels last, over the field but under the fog and HUD. Zoomed out they'd
@@ -1862,9 +2485,11 @@ function render(ctx, w, h, timeS) {
 
   drawRevealOverlay(ctx, w, h)
 
-  drawEnergyHUD(ctx, w, h)
+  drawEnergyFlights(ctx, w, h)
+  drawEnergyBand(ctx, w, h)
   drawRoster(ctx, w)
   drawScoreHUD(ctx)
+  drawTimeBand(ctx, w, h)
   drawTimeHeld(ctx, w)
   drawHint(ctx, w, h)
   drawRunOver(ctx, w, h)
@@ -1913,19 +2538,17 @@ function initCanvas(canvas) {
       shot = null
       return
     }
+    // Q/E are HELD, not tapped — the slide happens in the frame loop.
     if (e.key === 'q' || e.key === 'Q') {
-      timeScaleStepIdx = Math.max(0, timeScaleStepIdx - 1)
-      timeScaleTarget = TIME_STEPS[timeScaleStepIdx]
+      keys.slower = true
       return
     }
     if (e.key === 'e' || e.key === 'E') {
-      timeScaleStepIdx = Math.min(TIME_STEPS.length - 1, timeScaleStepIdx + 1)
-      timeScaleTarget = TIME_STEPS[timeScaleStepIdx]
+      keys.faster = true
       return
     }
     if (e.key >= '1' && e.key <= '4') {
-      timeScaleStepIdx = Number(e.key) - 1
-      timeScaleTarget = TIME_STEPS[timeScaleStepIdx]
+      warp.setWarp(TIME_PRESETS[Number(e.key) - 1])
       return
     }
     if (e.key === 'r' || e.key === 'R') {
@@ -2029,15 +2652,35 @@ function initCanvas(canvas) {
 
   function onWheel(e) {
     e.preventDefault()
-    cam.focus = 'free'
-    cam.zoomAt(Math.pow(1.12, -e.deltaY / 100), e.offsetX, e.offsetY)
+    // Zoom about the CENTRE of the view, not the cursor. Cursor-anchored zoom is
+    // usually the nicer gesture, but the star field expands about the centre of
+    // the screen — that is what "the camera is here" means to a parallax field —
+    // so anchoring the world somewhere else gives the two different fixed points
+    // and the whole scene feels like it is sliding under itself.
+    //
+    // Move the TARGET and let the camera ease into it: a wheel delivers discrete
+    // notches, and applying each one directly makes the view jump.
+    cam.zoomToward(Math.pow(1.12, -e.deltaY / 100), _w / 2, _h / 2)
   }
 
   function onContextMenu(e) {
     e.preventDefault() // right-drag is the pan gesture
   }
 
+  function onKeyUp(e) {
+    if (e.key === 'q' || e.key === 'Q') keys.slower = false
+    if (e.key === 'e' || e.key === 'E') keys.faster = false
+  }
+  // A key held while the window loses focus never sends its keyup, which would
+  // leave the clock sliding forever.
+  function clearKeys() {
+    keys.slower = false
+    keys.faster = false
+  }
+
   window.addEventListener('keydown', onKeyDown)
+  window.addEventListener('keyup', onKeyUp)
+  window.addEventListener('blur', clearKeys)
   canvas.addEventListener('mousedown', onMouseDown)
   canvas.addEventListener('mousemove', onMouseMove)
   canvas.addEventListener('mouseup', onMouseUp)
@@ -2047,35 +2690,37 @@ function initCanvas(canvas) {
 
   // --- Canvas sizing + frame loop (shared: composables/useCanvasLoop.js) ---
   loop = useCanvasLoop(canvas, {
-    bottomInset: CONTROL_BAR_H,
+    bottomInset: () => controlBarHeight(canvas),
     onResize(w, h, isFirst) {
       _w = w
       _h = h
       if (isFirst) buildScene(w, h)
-      else starfield.build(w, h)
+      else starfield.build()
     },
     onFrame(realDt, ctx, w, h) {
-      // Ease the time-scale toward its target in log space, like sketch 001, so
-      // stepping 1× → 5M× reads as a smooth ramp rather than a jump.
-      const cur = timeScale.value
-      const tgt = timeScaleTarget
-      if (Math.abs(cur - tgt) < 1) {
-        timeScale.value = tgt
-      } else {
-        const logNew =
-          Math.log(Math.max(1, cur)) +
-          (Math.log(Math.max(1, tgt)) - Math.log(Math.max(1, cur))) * Math.min(1, realDt * 4)
-        timeScale.value = Math.exp(logNew)
-      }
+      // The clock slides on the real clock, so the control still responds while
+      // the simulation itself is paused or held for a shot.
+      warp.spring = settings.settings.time.spring
+      warp.update(realDt, { slower: keys.slower, faster: keys.faster })
 
       tickReveal(realDt)
       tickEffects(realDt)
+      tickEnergyFlights(realDt)
+      tickEnergyDisplay(realDt)
       applyFocus(w, h)
 
       if (simRunning()) {
-        const dt_yr = (realDt * timeScale.value) / SECONDS_PER_YEAR
-        gravityStep(dt_yr)
-        resolveOutcomes()
+        const dt_yr = (realDt * warp.warp()) / SECONDS_PER_YEAR
+        // Substepped, so the physics is the same whether the clock is crawling
+        // or racing — see planSubsteps in engine/timeWarp.js.
+        const { steps, h } = planSubsteps(dt_yr, {
+          maxStep: MAX_SUBSTEP_YR,
+          maxSteps: MAX_SUBSTEPS,
+        })
+        for (let i = 0; i < steps; i++) {
+          gravityStep(h)
+          resolveOutcomes()
+        }
         simYears += dt_yr
         for (const p of planets) {
           if (p.status === 'live') p.trail.push(p.x, p.y)
@@ -2091,6 +2736,9 @@ function initCanvas(canvas) {
     loop.stop()
     loop = null
     window.removeEventListener('keydown', onKeyDown)
+    window.removeEventListener('keyup', onKeyUp)
+    window.removeEventListener('blur', clearKeys)
+    clearKeys()
     canvas.removeEventListener('mousedown', onMouseDown)
     canvas.removeEventListener('mousemove', onMouseMove)
     canvas.removeEventListener('mouseup', onMouseUp)
@@ -2111,9 +2759,7 @@ function togglePlay() {
 function reset() {
   loop?.resetClock()
   isPlaying.value = true
-  timeScaleStepIdx = 2
-  timeScaleTarget = TIME_STEPS[2]
-  timeScale.value = TIME_STEPS[2]
+  warp.reset()
   buildScene(_w, _h)
 }
 
@@ -2154,6 +2800,57 @@ onUnmounted(() => teardown?.())
 }
 .ctrl-btn:hover {
   background: #2a2a4e;
+}
+
+/* Two-state toggle inside the settings panel — same control 001 uses. */
+.steering-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.steering-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.steering-label {
+  color: #99a;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.steering-options {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+}
+
+.steering-btn {
+  padding: 5px 0;
+  background: #111128;
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  color: #889;
+  font-family: monospace;
+  font-size: 11px;
+  cursor: pointer;
+  transition:
+    background 0.12s,
+    color 0.12s,
+    border-color 0.12s;
+}
+.steering-btn:hover {
+  background: #161640;
+  color: #aab;
+}
+.steering-btn.active {
+  background: #0d1a2a;
+  border-color: #4fc3f7;
+  color: #4fc3f7;
 }
 
 .modal-backdrop {

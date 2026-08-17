@@ -522,6 +522,7 @@ import { useSettings } from '../composables/useSettings.js'
 import { TIME_STEP_VALUES } from '../timeSteps.js'
 import { G_SIM, SOFTENING, AU_KM, SECONDS_PER_YEAR } from '../engine/units.js'
 import { makeTrail, batchTrail } from '../engine/trail.js'
+import { corridorBands } from '../engine/corridor.js'
 import { createCamera } from '../engine/camera.js'
 import { createStarfield } from '../engine/starfield.js'
 import { computeThrust, getThrustState as classifyThrust } from '../engine/steering.js'
@@ -570,6 +571,7 @@ const PRED_INTERVAL = 3 // recalculate every N rendered frames
 // to the world and grows/shrinks with zoom instead of being a fixed screen size.
 const PRED_CORRIDOR_HALF_AU = 0.022 // corridor half-width at the far end
 const PRED_CORRIDOR_LINE_AU = 0.0015 // line thickness
+const PRED_CORRIDOR_BANDS = 14 // single-alpha polylines per edge (see engine/corridor.js)
 
 const CAPTURE_DURATION_S = 1.25
 const CAPTURE_DWELL_YR = 0.008 // sim-years ship must stay within ring to trigger capture
@@ -1252,8 +1254,8 @@ let solarEfficiency = 0 // 0..1, recomputed each frame
 
 const starfield = createStarfield({ backdropUrl: hubbleUrl })
 
-function buildStarfield(w, h) {
-  starfield.build(w, h)
+function buildStarfield() {
+  starfield.build()
 }
 
 // =============================================================================
@@ -2243,7 +2245,7 @@ function computeShotPrediction(planet, nx, ny, dv) {
 function buildScene(w, h) {
   bodies = []
   resetFog()
-  buildStarfield(w, h)
+  buildStarfield()
   shipAngle = -Math.PI / 2
   shipPredPath = []
   debris = []
@@ -2386,7 +2388,7 @@ function applyFocusMode(w, h) {
 
 function drawStarfield(ctx, w, h) {
   const c = cam.worldCenter(w, h)
-  starfield.draw(ctx, w, h, c.x, c.y, cam.zoom)
+  starfield.draw(ctx, w, h, c.x, c.y, cam.scale())
 }
 
 // =============================================================================
@@ -3046,51 +3048,34 @@ function drawPredictionPath(ctx) {
 }
 
 function drawProjectionCorridor(ctx, path, color, maxAlpha) {
-  if (path.length < 2) return
-  const s = scale()
-  ctx.save()
-  ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY)
-  ctx.lineCap = 'round'
-  ctx.lineJoin = 'round'
-
   // Width and divergence are in SIM-space (AU), so the corridor is anchored to
   // the world: zooming in makes the divergence visibly grow, zooming out shrinks
   // it. (It scales with the trajectory, not with the screen.)
-  const lineW = PRED_CORRIDOR_LINE_AU
-  const maxOffset = PRED_CORRIDOR_HALF_AU
+  const bands = corridorBands(path, {
+    bands: PRED_CORRIDOR_BANDS,
+    maxOffset: PRED_CORRIDOR_HALF_AU,
+    widenPow: 0.9,
+  })
+  if (!bands.length) return
 
-  for (let i = 1; i < path.length; i++) {
-    const t = Math.max(0, Math.min(1, path[i].t ?? i / (path.length - 1)))
-    const alpha = maxAlpha * Math.pow(1 - t, 1.35)
+  const s = scale()
+  ctx.save()
+  ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY)
+  ctx.lineCap = 'butt'
+  ctx.lineJoin = 'round'
+  ctx.lineWidth = PRED_CORRIDOR_LINE_AU
+
+  for (const band of bands) {
+    const alpha = maxAlpha * Math.pow(1 - band.t, 1.35)
     if (alpha <= 0.003) continue
-
-    const dx = path[i].x - path[i - 1].x
-    const dy = path[i].y - path[i - 1].y
-    const len = Math.sqrt(dx * dx + dy * dy)
-    if (len <= 1e-8) continue
-
-    // Perpendicular unit vector in world-space.
-    const nx = -dy / len
-    const ny = dx / len
-    const prevT = Math.max(0, Math.min(1, path[i - 1].t ?? (i - 1) / (path.length - 1)))
-    // Divergence grows along the path (corridor widens), in world-space AU.
-    const prevOffset = Math.pow(prevT, 0.9) * maxOffset
-    const offset = Math.pow(t, 0.9) * maxOffset
-
-    ctx.lineWidth = lineW
     ctx.strokeStyle = `rgba(${color},${alpha})`
-
-    ctx.beginPath()
-    ctx.moveTo(path[i - 1].x + nx * prevOffset, path[i - 1].y + ny * prevOffset)
-    ctx.lineTo(path[i].x + nx * offset, path[i].y + ny * offset)
-    ctx.stroke()
-
-    ctx.beginPath()
-    ctx.moveTo(path[i - 1].x - nx * prevOffset, path[i - 1].y - ny * prevOffset)
-    ctx.lineTo(path[i].x - nx * offset, path[i].y - ny * offset)
-    ctx.stroke()
+    for (const edge of [band.left, band.right]) {
+      ctx.beginPath()
+      ctx.moveTo(edge[0].x, edge[0].y)
+      for (let i = 1; i < edge.length; i++) ctx.lineTo(edge[i].x, edge[i].y)
+      ctx.stroke()
+    }
   }
-
   ctx.restore()
 }
 
@@ -3139,7 +3124,10 @@ function drawBody(ctx, body, w, h) {
 
     ctx.save()
     ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY)
-    ctx.lineCap = 'round'
+    // BUTT caps, not round: each band is a separate stroke at its own alpha, and
+    // a round cap paints a filled half-disc at the seam that the neighbouring
+    // band then paints over — every seam showed up as a bead on the trail.
+    ctx.lineCap = 'butt'
     ctx.lineJoin = 'round'
     ctx.lineWidth = isShip ? SHIP_DRAW_R * 0.3 : body.drawR * 1.2
     for (const band of bands) {
@@ -5144,7 +5132,7 @@ function initCanvas(canvas) {
       _w = w
       _h = h
       if (isFirst) buildScene(_w, _h)
-      else buildStarfield(_w, _h)
+      else buildStarfield()
     },
     onFrame(realDt, ctx, w, h) {
       // Sim-years advanced THIS frame (0 while paused) — drives the radar sweep.

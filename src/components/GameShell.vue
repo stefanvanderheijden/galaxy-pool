@@ -9,7 +9,7 @@
     <slot />
 
     <div class="controls">
-      <div class="controls-center">
+      <div v-if="showSpeed" class="controls-center">
         <div class="speed-display">
           <span class="speed-label">SPEED</span>
           <div class="speed-track-wrap">
@@ -66,6 +66,10 @@ const props = defineProps({
   timeScale: { type: Number, default: 1 },
   bodyCount: { type: Number, default: 0 },
   elapsedLabel: { type: String, default: '' },
+  // The stepped speed track. A sketch that draws its own time control (002's
+  // continuous warp band, for instance) switches it off and keeps the rest of
+  // the shell.
+  showSpeed: { type: Boolean, default: true },
 })
 
 const emit = defineEmits(['toggle-play', 'reset', 'canvas-ready'])
