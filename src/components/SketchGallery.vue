@@ -7,7 +7,22 @@
 
     <ul class="sketch-list">
       <li v-for="sketch in SKETCHES" :key="sketch.id">
-        <RouterLink :to="`/sketch/${sketch.id}`" class="card">
+        <!-- A sketch with an `href` lives outside the SPA shell (its own page, its own
+             keyboard capture) and gets a plain link; every other sketch is a mounted
+             Vue component reached through the router. -->
+        <a v-if="sketch.href" :href="sketch.href" class="card">
+          <span class="card-id">{{ sketch.id }}</span>
+          <div class="card-body">
+            <span class="card-name">{{ sketch.name }}</span>
+            <span class="card-tagline">{{ sketch.tagline }}</span>
+            <span class="card-desc">{{ sketch.description }}</span>
+            <span class="card-tags">
+              <span v-for="tag in sketch.tags" :key="tag" class="tag">{{ tag }}</span>
+            </span>
+          </div>
+          <span class="card-go">play →</span>
+        </a>
+        <RouterLink v-else :to="`/sketch/${sketch.id}`" class="card">
           <span class="card-id">{{ sketch.id }}</span>
           <div class="card-body">
             <span class="card-name">{{ sketch.name }}</span>

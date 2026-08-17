@@ -34,6 +34,15 @@ export const SKETCHES = [
       and decide what is worth the shot.`,
     tags: ['no ship', 'drag to shoot', 'mass = size', 'yield economy'],
   },
+  {
+    id: '003',
+    name: '003 Hyperwarp',
+    href: '/hyperwarp.html',
+    tagline: 'A feel rig for drift flight, time control and the tools that bend it.',
+    description: `Hyperwarp feel rig: drift flight, continuous time slider, time-stop bubble,
+      antigravity, charge shockwave, teleport. WASD, Q/E, Space, Shift, mouse.`,
+    tags: ['drift flight', 'time control', 'antigravity', 'teleport'],
+  },
 ]
 
 /** @param {string} id */
