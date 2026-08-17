@@ -137,3 +137,10 @@ shared deep link.
 Each run's settings can be exported to / imported from a `.json` file via the
 settings panel. Files are stamped with an `id` and a `settings` tree; importing
 merges known keys and ignores the rest.
+
+## Hyperwarp feel rig
+
+The hyperwarp branch prototype lives at [/hyperwarp.html](public/hyperwarp.html):
+a standalone canvas rig, no build step, served verbatim from `public/`. The master
+copy is `Reference/mockups/hyperwarp.html` in the Unity repo; this one is the
+published mirror and is overwritten from there.
