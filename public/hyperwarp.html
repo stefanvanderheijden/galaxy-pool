@@ -28,8 +28,8 @@
     Q / E hold     time slider, slow / fast, continuous 1x..5,000,000x
     Space          hold: grow a time-stop bubble. Press again later: unpause, refund
     Shift hold     antigravity (blocked while Q/E held)
-    LMB hold       charge the particle accelerator; release to fire; RMB cancels
-    RMB            teleport to cursor, momentum kept, 1 s cooldown, blocked near bodies
+    LMB hold       charge the particle accelerator; release to fire; Esc cancels
+    RMB            teleport to cursor, momentum kept, works mid-charge, blocked near bodies
     Scroll         zoom    R  reset    P  pause
 -->
 <style>
@@ -280,7 +280,8 @@ function fireShot() {
 }
 
 function tryTeleport() {
-  if (charging) { charging = false; charge = 0; note("SHOT CANCELLED", "#9fb4cc"); return; }
+  // A held charge does NOT block the jump: teleporting mid-charge is the trick-shot
+  // grammar (wind up, jump into position, release). Esc is the cancel now.
   if (teleCooldown > 0 && !S.teleNoCooldown) { note("TELEPORT RECHARGING", "#e8b463"); return; }
   const [wx, wy] = screenToWorld(mouse.sx, mouse.sy);
   for (const b of [...bodies.filter(p => p.alive), { x: STAR.x, y: STAR.y, drawR: STAR.drawR }]) {
@@ -724,6 +725,7 @@ addEventListener("keydown", e => {
   }
   if (e.code === "KeyR") resetWorld();
   if (e.code === "KeyP") paused = !paused;
+  if (e.code === "Escape" && charging) { charging = false; charge = 0; note("SHOT CANCELLED", "#9fb4cc"); }
 });
 addEventListener("keyup", e => {
   const k = KEYMAP[e.code];
