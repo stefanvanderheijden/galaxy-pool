@@ -27,12 +27,14 @@ export const SKETCHES = [
     file: './002-planet-pool.vue',
     tagline: 'No ship. Drag any planet, and pocketing one is what pays you.',
     description: `A direct-control mode: grab any planet with the mouse, pull back
-      and release. There is no solar power — energy comes only from sinking
-      planets, and each planet is worth a fixed yield that has nothing to do with
-      how heavy it is. Mass is drawn (a planet's radius follows its mass) and so
-      is yield (the segmented ring around it), so you can read both at a glance
-      and decide what is worth the shot.`,
-    tags: ['no ship', 'drag to shoot', 'mass = size', 'yield economy'],
+      and release — time holds while you aim. There is no solar power; energy
+      comes only from sinking planets, and each planet is worth a fixed yield
+      that has nothing to do with how heavy it is. Mass is drawn (a planet's
+      radius follows its mass) and so is yield (the segmented ring around it).
+      Planets you have shot turn "rogue" and gain a comically exaggerated
+      gravity, so one good break can knock the rest of the rack loose in a chain
+      reaction.`,
+    tags: ['no ship', 'drag to shoot', 'mass = size', 'yield economy', 'chain reactions'],
   },
   {
     id: '003',

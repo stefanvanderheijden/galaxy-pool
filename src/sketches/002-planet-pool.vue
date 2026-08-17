@@ -26,6 +26,11 @@
             classic pool. Pull further for more power; the arc gauge on the cue shows how much.
             Release right next to the planet (or press <strong>Esc</strong>) to cancel for free.
           </p>
+          <p>
+            <strong>Time stops while you aim.</strong> Lining a shot up against a moving target
+            would be a reflex test, not a pool shot — so the moment you grab a planet the whole
+            system holds still, and the dashed preview is exactly what will happen.
+          </p>
 
           <div class="help-h">2 · Mass is drawn as size</div>
           <p>
@@ -44,7 +49,27 @@
             Read the ring, not the size.
           </p>
 
-          <div class="help-h">4 · Energy</div>
+          <div class="help-h">4 · Stable and rogue</div>
+          <p>
+            A planet sitting on its opening orbit is <strong>stable</strong>: it feels the sun and
+            nothing else. Real planetary gravity is about a ten-thousandth of the star's here, so
+            left alone the rack would never disturb itself.
+          </p>
+          <p>
+            The moment you shoot one it goes <strong>rogue</strong>, and its gravity is turned up to
+            something comical — enough to rival the sun at close range. A rogue is drawn with a
+            bright outline inside its field: a faint <strong>outer rim</strong> where its pull fades
+            to nothing, and a live <strong>inner ring</strong> where the pull is strong enough to
+            tear a stable planet off its orbit.
+          </p>
+          <p>
+            Drift a stable planet through that inner ring and it is knocked loose too — it goes
+            rogue and starts pulling on everything in turn. A single well-placed break can unravel
+            the whole rack. A distant pass only bends an orbit; it takes a real tug to wake
+            something.
+          </p>
+
+          <div class="help-h">5 · Energy</div>
           <p>
             There is no solar power here. <strong>Pocketing a planet is your only income.</strong>
             Every shot spends energy from the bar on the left (the red segment previews what the
@@ -58,7 +83,7 @@
             and the run is stranded — reset and try a different order.
           </p>
 
-          <div class="help-h">5 · Looking around</div>
+          <div class="help-h">6 · Looking around</div>
           <p>
             The level is revealed at the start by a scan expanding out from the sun. After that:
             <strong>right-drag</strong> to pan, <strong>scroll</strong> to zoom,
@@ -68,7 +93,7 @@
 
           <div class="help-h">Controls</div>
           <p class="help-keys">
-            <strong>Left-drag a planet</strong> — aim &amp; fire &nbsp;·&nbsp;
+            <strong>Left-drag a planet</strong> — aim &amp; fire (time holds) &nbsp;·&nbsp;
             <strong>Esc</strong> — cancel the shot &nbsp;·&nbsp; <strong>Right-drag</strong> — pan
             &nbsp;·&nbsp; <strong>Wheel</strong> — zoom &nbsp;·&nbsp; <strong>Z</strong> — centre on
             the sun &nbsp;·&nbsp; <strong>F</strong> — fit the system &nbsp;·&nbsp;
@@ -147,6 +172,36 @@
           />
         </SettingsSection>
 
+        <SettingsSection title="Rogue gravity">
+          <SettingsRow
+            v-model="settings.settings.rogue.boost"
+            label="Rogue pull"
+            :min="0"
+            :max="60000"
+            :step="500"
+            :decimals="0"
+            tooltip="Multiplier on G between rogue planets. Real planetary gravity is about 1/10000th of the sun's here, so nothing you shot would ever disturb anything — this is the knob that makes planets matter to each other. 0 switches the whole mechanic off."
+          />
+          <SettingsRow
+            v-model="settings.settings.rogue.influence"
+            label="Rogue reach (AU)"
+            :min="0.05"
+            :max="1.5"
+            :step="0.05"
+            :decimals="2"
+            tooltip="Radius at which a rogue planet's pull falls to zero — the outer dashed rim drawn around it."
+          />
+          <SettingsRow
+            v-model="settings.settings.rogue.wakeAccel"
+            label="Wake threshold"
+            :min="0.5"
+            :max="60"
+            :step="0.5"
+            :decimals="1"
+            tooltip="Net pull (AU/yr²) a stable planet must feel before it is knocked loose and goes rogue itself. The solid inner ring on a rogue shows where that happens. Lower = chain reactions spread easily; higher = only a close pass breaks the rack. For scale, the sun pulls at about 39 AU/yr² from 1 AU."
+          />
+        </SettingsSection>
+
         <SettingsSection title="Table">
           <SettingsRow
             v-model="settings.settings.table.pocketRadius"
@@ -221,10 +276,11 @@ import { useSettings } from '../composables/useSettings.js'
 import { useCanvasLoop } from '../composables/useCanvasLoop.js'
 import { TIME_STEP_VALUES } from '../timeSteps.js'
 import { G_SIM, SOFTENING, SECONDS_PER_YEAR } from '../engine/units.js'
-import { makeTrail } from '../engine/trail.js'
+import { makeTrail, batchTrail } from '../engine/trail.js'
 import { createCamera } from '../engine/camera.js'
 import { createStarfield } from '../engine/starfield.js'
 import { radiusFromMass, deltaVFromShot } from '../engine/planets.js'
+import { applyRogueGravity, wakeRadius } from '../engine/gravity.js'
 import hubbleUrl from '../Images/hubble.jpg'
 
 // =============================================================================
@@ -284,6 +340,12 @@ const YIELD_SEGMENTS = 12
 
 // A planet this far from the sun is gone for good.
 const ESCAPE_R = 40
+
+// Trail rendering budget. Ten single-alpha polylines read the same as a
+// per-segment fade and cost three orders of magnitude fewer draw calls, and
+// points landing within ~1.5px of each other are dropped before drawing.
+const TRAIL_BANDS = 10
+const TRAIL_MIN_STEP_PX = 1.5
 
 // Pull shorter than this is a cancel, not a shot.
 const SHOT_DEADZONE_PX = 10
@@ -388,6 +450,13 @@ const settings = useSettings(SKETCH_ID, {
     pocketPull: 1.2,
     pocketInfluence: 0.9,
     startEnergy: 140,
+  },
+  rogue: {
+    // Comically large on purpose: at real scale a planet's pull on another
+    // planet is ~1e-4 of the sun's and nothing you shoot ever disturbs anything.
+    boost: 12000,
+    influence: 0.35, // AU — where a rogue's pull reaches zero
+    wakeAccel: 8, // AU/yr² of net pull needed to knock a stable planet loose
   },
   reveal: { duration: 4 },
   visuals: { trailLength: 900 },
@@ -496,6 +565,10 @@ function buildScene(w, h) {
       vx: o.vx,
       vy: o.vy,
       status: 'live', // 'live' | 'pocketed' | 'burned' | 'lost'
+      // Gravity state. Stable planets are on rails (sun only); a planet goes
+      // rogue when it is shot, or when a rogue pulls it hard enough. See
+      // engine/gravity.js.
+      rogue: false,
       trail: makeTrail(trailLen),
     }
   })
@@ -514,6 +587,7 @@ function buildScene(w, h) {
   pan = null
   hoverPlanet = null
   revealR = 0
+  invalidatePrediction()
 
   starfield.build(w, h)
   fitSystem(w, h)
@@ -524,21 +598,46 @@ function livePlanets() {
   return planets.filter((p) => p.status === 'live')
 }
 
+// The clock stops by itself while a shot is being aimed. Lining a shot up
+// against a moving target is a reflex test, not a pool shot — and it also makes
+// the prediction exact, since nothing drifts between aiming and firing.
+//
+// This is deliberately NOT the same thing as `isPlaying`: that stays the
+// player's own play/pause intent, so releasing the cue never resumes a sim they
+// paused on purpose.
+function simRunning() {
+  return isPlaying.value && !shot
+}
+
 // =============================================================================
 // PHYSICS
 // =============================================================================
 
-// The sun is fixed at the origin and vastly outweighs everything else, so each
-// planet is integrated independently against it (semi-implicit Euler). Planets
-// do not pull on each other — at these masses the effect is invisible, and
-// keeping them independent means a shot goes exactly where the preview said.
-function gravityStep(dt) {
+// The current rogue-gravity field, read straight from the settings panel.
+function rogueField(wake = true) {
+  return {
+    influenceR: settings.settings.rogue.influence,
+    boost: settings.settings.rogue.boost,
+    wakeAccel: settings.settings.rogue.wakeAccel,
+    wake,
+  }
+}
+
+// One step of the world, in place. THE one stepper: the live sim and the shot
+// preview both call it, so what the dashed line promises is what happens.
+//
+// The sun is fixed at the origin and outweighs everything by six orders of
+// magnitude, so it acts on every planet regardless of state; the pocket is a
+// short-range well. Planet-on-planet gravity is the interesting part and lives
+// in engine/gravity.js — only rogue planets take part in it.
+//
+// `wake` is off for the preview: the prediction must not mutate the real world's
+// gravity states while you are only thinking about a shot.
+function stepWorld(bodies, dt, { wake = true } = {}) {
   const pocketMass = settings.settings.table.pocketPull
   const pocketInfluence = settings.settings.table.pocketInfluence
 
-  for (const p of planets) {
-    if (p.status !== 'live') continue
-
+  for (const p of bodies) {
     // Sun.
     const r2 = p.x * p.x + p.y * p.y + SOFTENING
     const r = Math.sqrt(r2)
@@ -560,9 +659,23 @@ function gravityStep(dt) {
         p.vy += (dy / d) * pa * dt
       }
     }
+  }
 
+  // Planet ↔ planet, rogues only.
+  const woken = applyRogueGravity(bodies, dt, rogueField(wake))
+
+  for (const p of bodies) {
     p.x += p.vx * dt
     p.y += p.vy * dt
+  }
+  return woken
+}
+
+function gravityStep(dt) {
+  const woken = stepWorld(livePlanets(), dt)
+  // Getting knocked loose is a real event — announce it.
+  for (const p of woken) {
+    spawnShockwave(p.x, p.y, settings.settings.rogue.influence * 0.9, p.color)
   }
 }
 
@@ -717,79 +830,95 @@ function fireShot() {
     })
     planet.vx += nx * dv
     planet.vy += ny * dv
+    // Taking the shot is what knocks it off its rails: from here it feels, and
+    // exerts, the exaggerated planetary gravity.
+    planet.rogue = true
 
     spawnShockwave(planet.x, planet.y, planetRadius(planet.mass) * 18, planet.color)
   }
 
   shot = null
+  invalidatePrediction()
 }
 
-// Where the aimed planet would go, integrated with the same forces the sim uses.
-// Recomputed while aiming only, so it always matches the shot about to be taken.
+// Where the aimed planet would go. This runs the WHOLE system forward on
+// throwaway copies using the same stepper as the sim, not just the one planet
+// against the sun — with rogue planets in play a shot's path depends on what
+// else is loose out there, and a preview that ignored them would lie.
+//
+// Waking is disabled: thinking about a shot must not knock anything loose. The
+// consequence is that the preview under-states a chain reaction rather than
+// over-stating it.
+//
 // Returns { points, hitPocket, hitSun } — the outcome flags colour the preview.
 function predictShot() {
   const pull = shotPull()
   const none = { points: [], hitPocket: false, hitSun: false }
   if (!shot || !pull || pull.dist < SHOT_DEADZONE_PX) return none
 
-  const planet = shot.planet
   const power = effectivePower()
   const nx = -pull.dx / pull.dist
   const ny = -pull.dy / pull.dist
-  const dv = deltaVFromShot(power * settings.settings.cue.shotPower, planet.mass, {
+
+  // Copies, so the preview can never touch the real bodies.
+  const ghosts = livePlanets().map((p) => ({
+    x: p.x,
+    y: p.y,
+    vx: p.vx,
+    vy: p.vy,
+    mass: p.mass,
+    rogue: p.rogue,
+  }))
+  const aimed = ghosts[livePlanets().indexOf(shot.planet)]
+  if (!aimed) return none
+
+  const dv = deltaVFromShot(power * settings.settings.cue.shotPower, aimed.mass, {
     refMass: REF_MASS,
     massExponent: settings.settings.cue.massExponent,
   })
+  aimed.vx += nx * dv
+  aimed.vy += ny * dv
+  aimed.rogue = true
 
-  let x = planet.x
-  let y = planet.y
-  let vx = planet.vx + nx * dv
-  let vy = planet.vy + ny * dv
-
-  const pocketMass = settings.settings.table.pocketPull
-  const pocketInfluence = settings.settings.table.pocketInfluence
   const pocketR = settings.settings.table.pocketRadius
-
-  const points = [{ x, y }]
+  const points = [{ x: aimed.x, y: aimed.y }]
   let hitPocket = false
   let hitSun = false
 
   for (let i = 0; i < PRED_STEPS; i++) {
-    const r2 = x * x + y * y + SOFTENING
-    const r = Math.sqrt(r2)
-    const a = (G_SIM * SUN.mass) / r2
-    vx -= (x / r) * a * PRED_DT_YR
-    vy -= (y / r) * a * PRED_DT_YR
-
-    if (pocketMass > 0 && pocketInfluence > 0) {
-      const dx = POCKET.x - x
-      const dy = POCKET.y - y
-      const d2 = dx * dx + dy * dy + SOFTENING
-      const d = Math.sqrt(d2)
-      if (d < pocketInfluence) {
-        const falloff = 1 - d / pocketInfluence
-        const pa = (G_SIM * pocketMass * falloff) / d2
-        vx += (dx / d) * pa * PRED_DT_YR
-        vy += (dy / d) * pa * PRED_DT_YR
-      }
-    }
-
-    x += vx * PRED_DT_YR
-    y += vy * PRED_DT_YR
-    points.push({ x, y })
+    stepWorld(ghosts, PRED_DT_YR, { wake: false })
+    points.push({ x: aimed.x, y: aimed.y })
 
     // Stop the preview where the shot would end.
-    if (Math.hypot(x - POCKET.x, y - POCKET.y) <= pocketR) {
+    if (Math.hypot(aimed.x - POCKET.x, aimed.y - POCKET.y) <= pocketR) {
       hitPocket = true
       break
     }
-    if (Math.hypot(x, y) <= SUN.killR) {
+    if (Math.hypot(aimed.x, aimed.y) <= SUN.killR) {
       hitSun = true
       break
     }
-    if (Math.hypot(x, y) > ESCAPE_R) break
+    if (Math.hypot(aimed.x, aimed.y) > ESCAPE_R) break
   }
   return { points, hitPocket, hitSun }
+}
+
+// The preview is an n-body run over every live planet, which is far too much to
+// redo 60 times a second for a picture that has not changed. Time is frozen
+// while aiming, so the ONLY thing that can move the line is the cursor — cache
+// on the aim and recompute when it actually moves.
+let predCache = { key: null, value: null }
+
+function cachedPrediction() {
+  if (!shot) return { points: [], hitPocket: false, hitSun: false }
+  const p = shot.planet
+  const key = `${p.id}|${shot.curX}|${shot.curY}|${p.x}|${p.y}|${energy}`
+  if (predCache.key !== key) predCache = { key, value: predictShot() }
+  return predCache.value
+}
+
+function invalidatePrediction() {
+  predCache = { key: null, value: null }
 }
 
 // =============================================================================
@@ -998,19 +1127,78 @@ function drawTrail(ctx, p) {
   const pts = p.trail?.points?.() || []
   if (pts.length < 2) return
   const s = cam.scale()
+
+  // One stroke per BAND, not per segment — see batchTrail in engine/trail.js.
+  // Points closer than ~1.5 screen pixels are dropped, which at a wide zoom
+  // throws away most of the buffer for no visible difference.
+  const bands = batchTrail(pts, { bands: TRAIL_BANDS, minStep: TRAIL_MIN_STEP_PX / s })
+  if (!bands.length) return
+
+  const [r, g, b] = hexToRgb(p.color)
   ctx.save()
   ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY)
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
   ctx.lineWidth = planetRadius(p.mass) * 0.22
-  const [r, g, b] = hexToRgb(p.color)
-  for (let i = 1; i < pts.length; i++) {
-    const t = i / (pts.length - 1)
-    ctx.strokeStyle = `rgba(${r},${g},${b},${0.02 + t * 0.18})`
+
+  for (const band of bands) {
+    ctx.strokeStyle = `rgba(${r},${g},${b},${0.02 + band.t * 0.18})`
     ctx.beginPath()
-    ctx.moveTo(pts[i - 1].x, pts[i - 1].y)
-    ctx.lineTo(pts[i].x, pts[i].y)
+    ctx.moveTo(band.points[0].x, band.points[0].y)
+    for (let i = 1; i < band.points.length; i++) ctx.lineTo(band.points[i].x, band.points[i].y)
     ctx.stroke()
+  }
+  ctx.restore()
+}
+
+// A rogue planet's gravity, made visible: the outer dashed rim is where its pull
+// reaches zero, and the inner solid ring is where the pull is strong enough to
+// knock a stable planet loose. Anything that drifts inside the inner ring joins
+// the chain reaction, so that ring is the one the player actually plays against.
+function drawRogueField(ctx, p, timeS) {
+  const sp = cam.worldToScreen(p.x, p.y)
+  const s = cam.scale()
+  const rimR = settings.settings.rogue.influence * s
+  if (rimR < 6) return
+
+  const wakeR =
+    wakeRadius(p.mass, {
+      influenceR: settings.settings.rogue.influence,
+      boost: settings.settings.rogue.boost,
+      wakeAccel: settings.settings.rogue.wakeAccel,
+    }) * s
+
+  ctx.save()
+  const field = ctx.createRadialGradient(sp.x, sp.y, 0, sp.x, sp.y, rimR)
+  field.addColorStop(0, rgba(p.color, 0.16))
+  field.addColorStop(0.55, rgba(p.color, 0.06))
+  field.addColorStop(1, rgba(p.color, 0))
+  ctx.fillStyle = field
+  ctx.beginPath()
+  ctx.arc(sp.x, sp.y, rimR, 0, Math.PI * 2)
+  ctx.fill()
+
+  // Outer rim — the edge of the field.
+  ctx.setLineDash([3, 6])
+  ctx.strokeStyle = rgba(p.color, 0.3)
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.arc(sp.x, sp.y, rimR, 0, Math.PI * 2)
+  ctx.stroke()
+  ctx.setLineDash([])
+
+  // Inner ring — the wake threshold. Slowly rotating dashes so a live field
+  // reads as dangerous rather than decorative.
+  if (wakeR > 4) {
+    ctx.setLineDash([7, 5])
+    ctx.lineDashOffset = -(timeS * 14) % 12
+    ctx.strokeStyle = rgba(p.color, 0.75)
+    ctx.lineWidth = 1.5
+    ctx.beginPath()
+    ctx.arc(sp.x, sp.y, wakeR, 0, Math.PI * 2)
+    ctx.stroke()
+    ctx.setLineDash([])
+    ctx.lineDashOffset = 0
   }
   ctx.restore()
 }
@@ -1060,6 +1248,16 @@ function drawPlanet(ctx, p, w, h) {
   ctx.stroke()
 
   drawYieldRing(ctx, sp.x, sp.y, ringR, p, isHeld || isHover)
+
+  // Rogue planets carry a bright outline, so state is legible on the body
+  // itself and not only from the field around it.
+  if (p.rogue) {
+    ctx.strokeStyle = rgba(p.color, 0.95)
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.arc(sp.x, sp.y, r + 2.5, 0, Math.PI * 2)
+    ctx.stroke()
+  }
   ctx.restore()
 }
 
@@ -1483,7 +1681,9 @@ function drawRoster(ctx, w) {
           ? 'rgba(255,140,90,0.8)'
           : p.status === 'lost'
             ? 'rgba(150,160,190,0.7)'
-            : 'rgba(120,135,165,0.7)'
+            : p.rogue
+              ? 'rgba(255,205,120,0.95)'
+              : 'rgba(120,135,165,0.7)'
     const statusText =
       p.status === 'pocketed'
         ? `SUNK +${p.energyYield}`
@@ -1491,7 +1691,9 @@ function drawRoster(ctx, w) {
           ? 'BURNED · 0'
           : p.status === 'lost'
             ? 'LOST · 0'
-            : `${(p.mass / REF_MASS).toFixed(2)} M⊕`
+            : p.rogue
+              ? `ROGUE · ${(p.mass / REF_MASS).toFixed(2)} M⊕`
+              : `${(p.mass / REF_MASS).toFixed(2)} M⊕`
     ctx.fillText(statusText, x + 32, ry + 19)
 
     // Mass bar (blue) and yield bar (gold) — same length scale, different
@@ -1550,6 +1752,26 @@ function drawHint(ctx, w, h) {
   ctx.font = '11px monospace'
   ctx.fillStyle = energy <= 0 ? 'rgba(235,120,120,0.9)' : 'rgba(150,165,190,0.65)'
   ctx.fillText(msg, w / 2, h - 16)
+  ctx.restore()
+}
+
+// While a shot is being lined up the simulation is held. Say so, rather than
+// leaving the player to wonder why the planets stopped.
+function drawTimeHeld(ctx, w) {
+  if (!shot || !isPlaying.value) return
+  ctx.save()
+  ctx.textAlign = 'center'
+  ctx.font = '10px monospace'
+  const label = '⏸ TIME HELD WHILE AIMING'
+  const tw = ctx.measureText(label).width + 22
+  ctx.fillStyle = 'rgba(10,14,28,0.8)'
+  ctx.strokeStyle = 'rgba(79,195,247,0.35)'
+  ctx.lineWidth = 1
+  roundRect(ctx, w / 2 - tw / 2, 44, tw, 20, 10)
+  ctx.fill()
+  ctx.stroke()
+  ctx.fillStyle = 'rgba(150,205,240,0.9)'
+  ctx.fillText(label, w / 2, 58)
   ctx.restore()
 }
 
@@ -1614,7 +1836,13 @@ function render(ctx, w, h, timeS) {
     drawTrail(ctx, p)
   }
 
-  if (shot) drawPrediction(ctx, predictShot())
+  // Gravity fields under the planets, so a rogue's reach is never hidden by a
+  // disc sitting on top of it.
+  for (const p of planets) {
+    if (p.status === 'live' && p.rogue) drawRogueField(ctx, p, timeS)
+  }
+
+  if (shot) drawPrediction(ctx, cachedPrediction())
 
   for (const p of planets) {
     if (p.status !== 'live') continue
@@ -1637,6 +1865,7 @@ function render(ctx, w, h, timeS) {
   drawEnergyHUD(ctx, w, h)
   drawRoster(ctx, w)
   drawScoreHUD(ctx)
+  drawTimeHeld(ctx, w)
   drawHint(ctx, w, h)
   drawRunOver(ctx, w, h)
 }
@@ -1733,6 +1962,7 @@ function initCanvas(canvas) {
     const p = planetAtScreen(pt.x, pt.y)
     if (p) {
       shot = { planet: p, curX: pt.x, curY: pt.y }
+      invalidatePrediction()
       emptyClick = null
     } else {
       shot = null
@@ -1842,7 +2072,7 @@ function initCanvas(canvas) {
       tickEffects(realDt)
       applyFocus(w, h)
 
-      if (isPlaying.value) {
+      if (simRunning()) {
         const dt_yr = (realDt * timeScale.value) / SECONDS_PER_YEAR
         gravityStep(dt_yr)
         resolveOutcomes()

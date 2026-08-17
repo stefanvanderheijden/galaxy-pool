@@ -521,7 +521,7 @@ import SettingsRow from '../components/SettingsRow.vue'
 import { useSettings } from '../composables/useSettings.js'
 import { TIME_STEP_VALUES } from '../timeSteps.js'
 import { G_SIM, SOFTENING, AU_KM, SECONDS_PER_YEAR } from '../engine/units.js'
-import { makeTrail } from '../engine/trail.js'
+import { makeTrail, batchTrail } from '../engine/trail.js'
 import { createCamera } from '../engine/camera.js'
 import { createStarfield } from '../engine/starfield.js'
 import { computeThrust, getThrustState as classifyThrust } from '../engine/steering.js'
@@ -554,6 +554,11 @@ const SHIP_MASS = 5.03e-18 // M☉ — 10,000 Gt
 
 // Minimum pixel size below which we switch to icon rendering
 const MIN_PLANET_PX = 3 // px
+
+// Trail rendering budget — see batchTrail in engine/trail.js. Ten single-alpha
+// polylines look the same as a per-segment fade at a fraction of the draw calls.
+const TRAIL_BANDS = 10
+const TRAIL_MIN_STEP_PX = 1.5
 
 // Prediction config
 const PRED_HORIZON_YR = 0.5 // simulated years to preview
@@ -3120,34 +3125,29 @@ function drawBody(ctx, body, w, h) {
   const s = scale()
   const screenR = body.drawR * s
 
-  // Trail
+  // Trail — one stroke per BAND rather than per segment, and points that would
+  // land within ~1.5px of each other are dropped first. With trails up to 5000
+  // points long the per-segment version was the single most expensive thing in
+  // the frame. See batchTrail in engine/trail.js.
   const pts = body.trail?.points?.() || []
-  if (pts.length >= 2) {
+  const bands = batchTrail(pts, { bands: TRAIL_BANDS, minStep: TRAIL_MIN_STEP_PX / s })
+  if (bands.length) {
+    const isShip = body.id === 'ship'
+    const [r, g, b] = isShip ? [255, 132, 38] : hexToRgb(body.color)
+    const base = isShip ? 0.03 : 0.02
+    const range = isShip ? 0.3 : 0.22
+
     ctx.save()
     ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY)
     ctx.lineCap = 'round'
     ctx.lineJoin = 'round'
-    if (body.id === 'ship') {
-      ctx.lineWidth = SHIP_DRAW_R * 0.3
-      for (let i = 1; i < pts.length; i++) {
-        const t = i / (pts.length - 1)
-        ctx.strokeStyle = `rgba(255,132,38,${0.03 + t * 0.3})`
-        ctx.beginPath()
-        ctx.moveTo(pts[i - 1].x, pts[i - 1].y)
-        ctx.lineTo(pts[i].x, pts[i].y)
-        ctx.stroke()
-      }
-    } else {
-      const [r, g, b] = hexToRgb(body.color)
-      ctx.lineWidth = body.drawR * 1.2
-      for (let i = 1; i < pts.length; i++) {
-        const t = i / (pts.length - 1)
-        ctx.strokeStyle = `rgba(${r},${g},${b},${0.02 + t * 0.22})`
-        ctx.beginPath()
-        ctx.moveTo(pts[i - 1].x, pts[i - 1].y)
-        ctx.lineTo(pts[i].x, pts[i].y)
-        ctx.stroke()
-      }
+    ctx.lineWidth = isShip ? SHIP_DRAW_R * 0.3 : body.drawR * 1.2
+    for (const band of bands) {
+      ctx.strokeStyle = `rgba(${r},${g},${b},${base + band.t * range})`
+      ctx.beginPath()
+      ctx.moveTo(band.points[0].x, band.points[0].y)
+      for (let i = 1; i < band.points.length; i++) ctx.lineTo(band.points[i].x, band.points[i].y)
+      ctx.stroke()
     }
     ctx.restore()
   }
