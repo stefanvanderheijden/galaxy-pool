@@ -77,9 +77,10 @@ const DEFAULTS = {
   driftMode: true,       // centre free, slow end costs, spring back on release
   coneMode: true,        // true: cone shockwave; false: nearest body on the aim line
   teleNoCooldown: true,
-  projections: true,     // ship forecast, hidden while any ability is engaged
+  projections: true,     // forecasts (ship + struck worlds), hidden during ability use
+  gravLines: true,       // equipotential contours of the field the ship flies
   thrustAccel: 4000,     // AU/yr^2. Hohmann's tall ship is 120; this turns on a dime
-  shotPower: 4.0,        // AU/yr of delta-v at full charge, point blank
+  shotPower: 8.0,        // AU/yr of delta-v at full charge, point blank
   chargeSeconds: 1.5,    // real seconds from empty to full charge
   coneWidthDeg: 28,      // feel-critical number one
   coneRangeAU: 1.6,      // feel-critical number two
@@ -377,7 +378,7 @@ function frame(now) {
   // millisecond, and smoothness is the entire point of this rig.
   const busy = timeBusy() || charging || antigrav || (bubble && bubble.growing) || teleCooldown > 0.6;
   if (S.projections && !busy) buildGhost();
-  if (busy) ghostPath = null;
+  if (busy) { ghostPath = null; ghostBodies = []; }
 
   // camera glides after the ship
   cam.x += (ship.x - cam.x) * Math.min(1, realDt * 4);
@@ -401,31 +402,48 @@ function pushTrail(trail, x, y, cap) {
   while (trail.length > cap) trail.shift();
 }
 
-// The ship's forecast: clone everything, integrate a while at a fixed step (the branch
+// The forecasts: clone everything, integrate a while at a fixed step (the branch
 // lesson: never a state-dependent step), frozen worlds stay put in the ghost too.
-let ghostPath = null;
+// The ship's line, and one line per STRUCK world - an unstruck world's future IS its
+// authored ring, already on screen, so drawing it again would be ink for nothing.
+let ghostPath = null, ghostBodies = [];
 function buildGhost() {
   const gb = bodies.filter(b => b.alive).map(b => ({ ...b }));
   const gs = { x: ship.x, y: ship.y, vx: ship.vx, vy: ship.vy };
   const path = [{ x: gs.x, y: gs.y }];
+  const tracked = gb.filter(b => b.struck && !frozen(b))
+                    .map(b => ({ b, color: b.color, pts: [{ x: b.x, y: b.y }], dead: false }));
   const H = 2e-4, N = 4000;                  // 0.8 yr of future
+  let shipDead = false;
   for (let i = 0; i < N; i++) {
     for (const b of gb) {
-      if (frozen(b)) continue;
+      if (frozen(b) || b.ghostDead) continue;
       pull(STAR.x, STAR.y, G * STAR.mass, b, H);
       // same forces the real step gives a struck world, or the forecast lies near the hole
       if (b.struck && dist(b.x, b.y, BH.x, BH.y) < BH.influenceR) pull(BH.x, BH.y, G * BH.mass, b, H);
     }
-    pull(STAR.x, STAR.y, G * STAR.mass, gs, H);
-    for (const b of gb) pull(b.x, b.y, G * b.mass * S.planetBoost, gs, H);
-    if (dist(gs.x, gs.y, BH.x, BH.y) < BH.influenceR) pull(BH.x, BH.y, G * BH.mass, gs, H);
-    for (const b of gb) if (!frozen(b)) { b.x += b.vx * H; b.y += b.vy * H; }
-    gs.x += gs.vx * H; gs.y += gs.vy * H;
-    if (i % 8 === 0) path.push({ x: gs.x, y: gs.y });
-    if (dist(gs.x, gs.y, BH.x, BH.y) < BH.captureR) break;
-    if (dist(gs.x, gs.y, STAR.x, STAR.y) < STAR.drawR) break;
+    if (!shipDead) {
+      pull(STAR.x, STAR.y, G * STAR.mass, gs, H);
+      for (const b of gb) if (!b.ghostDead) pull(b.x, b.y, G * b.mass * S.planetBoost, gs, H);
+      if (dist(gs.x, gs.y, BH.x, BH.y) < BH.influenceR) pull(BH.x, BH.y, G * BH.mass, gs, H);
+    }
+    for (const b of gb) if (!frozen(b) && !b.ghostDead) { b.x += b.vx * H; b.y += b.vy * H; }
+    if (!shipDead) { gs.x += gs.vx * H; gs.y += gs.vy * H; }
+    if (i % 8 === 0) {
+      if (!shipDead) path.push({ x: gs.x, y: gs.y });
+      for (const t of tracked) if (!t.dead) t.pts.push({ x: t.b.x, y: t.b.y });
+    }
+    if (!shipDead && (dist(gs.x, gs.y, BH.x, BH.y) < BH.captureR ||
+                      dist(gs.x, gs.y, STAR.x, STAR.y) < STAR.drawR)) shipDead = true;
+    // a tracked world's line ends where the world would: the hole or the star. It also
+    // stops moving and pulling in the ghost, the way the real sim removes it.
+    for (const t of tracked)
+      if (!t.dead && (dist(t.b.x, t.b.y, BH.x, BH.y) < BH.captureR ||
+                      dist(t.b.x, t.b.y, STAR.x, STAR.y) < STAR.drawR + t.b.drawR))
+      { t.dead = true; t.b.ghostDead = true; }
   }
   ghostPath = path;
+  ghostBodies = tracked.map(t => ({ color: t.color, pts: t.pts }));
 }
 
 // ============================== DRAWING =========================================
@@ -466,6 +484,8 @@ function draw(realDt) {
     cx.fillRect(sx, sy, 2, 2);
   }
 
+  drawGravityLines(W, H);
+
   // authored rings: the table the game is played on, bright enough to plan against
   cx.strokeStyle = "rgba(120,155,210,0.40)"; cx.lineWidth = 1;
   for (const d of PLANET_DEFS) {
@@ -477,13 +497,21 @@ function draw(realDt) {
   for (const b of bodies) if (b.alive) strokeTrail(b.trail, b.color, 0.35);
   strokeTrail(ship.trail, "#bcd6ee", 0.5);
 
-  // forecast
+  // forecasts: the ship's line, then one per struck world in its own colour
   if (ghostPath && ghostPath.length > 2) {
     cx.strokeStyle = "rgba(160,200,240,0.65)"; cx.lineWidth = 1.5;
     cx.setLineDash([6, 6]);
     cx.beginPath();
     ghostPath.forEach((p, i) => { const [sx, sy] = worldToScreen(p.x, p.y); i ? cx.lineTo(sx, sy) : cx.moveTo(sx, sy); });
     cx.stroke(); cx.setLineDash([]);
+  }
+  for (const g of ghostBodies) {
+    if (g.pts.length < 2) continue;
+    cx.strokeStyle = g.color; cx.globalAlpha = 0.55; cx.lineWidth = 1.5;
+    cx.setLineDash([5, 5]);
+    cx.beginPath();
+    g.pts.forEach((p, i) => { const [sx, sy] = worldToScreen(p.x, p.y); i ? cx.lineTo(sx, sy) : cx.moveTo(sx, sy); });
+    cx.stroke(); cx.setLineDash([]); cx.globalAlpha = 1;
   }
 
   // the star, through the flare quote: slow spike rotation, a breath of flicker
@@ -640,6 +668,64 @@ function colA(hex, a) {
   return `rgba(${c[0]},${c[1]},${c[2]},${Math.max(0, Math.min(1, a))})`;
 }
 
+// THE GRAVITY LINES: equipotential contours of the field the ship actually flies -
+// star plus every world at its boosted game-layer mass plus the black hole - drawn by
+// marching squares over a viewport grid. The levels are the potentials of a fixed
+// geometric ladder of radii around the bare star, so the picture is stable under
+// camera motion and a boosted world's well shows up as the same levels wrapping it.
+const GRAV_LADDER = [];
+for (let k = 0; k < 14; k++) GRAV_LADDER.push(0.10 * Math.pow(1.45, k));
+function drawGravityLines(W, H) {
+  if (!S.gravLines) return;
+  const NX = 88, NY = Math.max(24, Math.round(NX * H / W));
+  const wxs = W / cam.scale, wys = H / cam.scale;
+  const x0 = cam.x - wxs / 2, y0 = cam.y - wys / 2;
+  const dx = wxs / NX, dy = wys / NY;
+  const wells = [{ x: STAR.x, y: STAR.y, gm: G * STAR.mass }];
+  for (const b of bodies) if (b.alive) wells.push({ x: b.x, y: b.y, gm: G * b.mass * S.planetBoost });
+  wells.push({ x: BH.x, y: BH.y, gm: G * BH.mass });
+  const SOFT = 2e-3;   // fatter than the sim's, so the lines stay curves near a core
+  const grid = new Float64Array((NX + 1) * (NY + 1));
+  for (let j = 0; j <= NY; j++)
+    for (let i = 0; i <= NX; i++) {
+      const wx = x0 + i * dx, wy = y0 + j * dy;
+      let phi = 0;
+      for (const w of wells) {
+        const ax = wx - w.x, ay = wy - w.y;
+        phi -= w.gm / Math.sqrt(ax * ax + ay * ay + SOFT);
+      }
+      grid[j * (NX + 1) + i] = phi;
+    }
+  cx.strokeStyle = "rgba(110,150,210,0.16)"; cx.lineWidth = 1;
+  cx.beginPath();
+  const toS = (wx, wy) => [(wx - cam.x) * cam.scale + W / 2, (wy - cam.y) * cam.scale + H / 2];
+  for (const r of GRAV_LADDER) {
+    const lv = -G * STAR.mass / r;
+    for (let j = 0; j < NY; j++)
+      for (let i = 0; i < NX; i++) {
+        const a = grid[j * (NX + 1) + i] - lv, b = grid[j * (NX + 1) + i + 1] - lv,
+              c = grid[(j + 1) * (NX + 1) + i + 1] - lv, d = grid[(j + 1) * (NX + 1) + i] - lv;
+        const code = (a > 0 ? 8 : 0) | (b > 0 ? 4 : 0) | (c > 0 ? 2 : 0) | (d > 0 ? 1 : 0);
+        if (code === 0 || code === 15) continue;
+        const X = x0 + i * dx, Y = y0 + j * dy;
+        // edge crossings by linear interpolation: top, right, bottom, left
+        const pts = [];
+        if ((a > 0) !== (b > 0)) pts.push([X + dx * a / (a - b), Y]);
+        if ((b > 0) !== (c > 0)) pts.push([X + dx, Y + dy * b / (b - c)]);
+        if ((d > 0) !== (c > 0)) pts.push([X + dx * d / (d - c), Y + dy]);
+        if ((a > 0) !== (d > 0)) pts.push([X, Y + dy * a / (a - d)]);
+        // two crossings is a segment; four (the saddle cases) joins them pairwise,
+        // which is wrong half the time and invisible at this alpha
+        for (let p = 0; p + 1 < pts.length; p += 2) {
+          const [s1x, s1y] = toS(pts[p][0], pts[p][1]);
+          const [s2x, s2y] = toS(pts[p + 1][0], pts[p + 1][1]);
+          cx.moveTo(s1x, s1y); cx.lineTo(s2x, s2y);
+        }
+      }
+  }
+  cx.stroke();
+}
+
 function strokeTrail(trail, color, alpha) {
   if (trail.length < 2) return;
   cx.strokeStyle = color; cx.lineWidth = 1;
@@ -751,7 +837,7 @@ cv.addEventListener("wheel", e => {
 // ============================== TEST PANEL ======================================
 // The storage key carries a version: saved settings hold EVERY value, so a retune of
 // the defaults would otherwise be invisible to anyone who ever touched a slider.
-const STORE_KEY = "hyperwarp.v4";
+const STORE_KEY = "hyperwarp.v5";
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
   catch { return { ...DEFAULTS }; }
@@ -766,6 +852,7 @@ const PANEL = [
   ["b", "coneMode", "shot: cone (off = aim line)"],
   ["b", "teleNoCooldown", "teleport: no cooldown"],
   ["b", "projections", "projections (outside abilities)"],
+  ["b", "gravLines", "gravity lines"],
   ["-"],
   ["r", "thrustAccel", "thrust AU/yr^2", 100, 12000, 50],
   ["r", "shotPower", "shot power AU/yr", 0.5, 8, 0.1],
@@ -825,7 +912,8 @@ window.RIG = {
                                              alive: b.alive, struck: b.struck })),
                   bubble: bubble ? { x: bubble.x, y: bubble.y, r: bubble.r, growing: bubble.growing } : null,
                   score: { ...score }, notices: notices.map(n => n.text),
-                  ghostPoints: ghostPath ? ghostPath.length : 0 }),
+                  ghostPoints: ghostPath ? ghostPath.length : 0,
+                  ghostBodyLines: ghostBodies.length }),
   settings: () => S,
   set: (k, v) => { S[k] = v; },
   reset: resetWorld,
