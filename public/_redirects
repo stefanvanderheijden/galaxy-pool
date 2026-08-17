@@ -1,0 +1,4 @@
+# Cloudflare Pages SPA fallback: the router owns /sketch/:id, so every path that
+# isn't a real file must be served index.html (200, not a redirect) or a deep
+# link / page refresh would 404.
+/*    /index.html   200

@@ -17,9 +17,9 @@
         <div class="modal-title">Galaxy Pool — How to play</div>
         <div class="modal-body help-body">
           <p class="help-intro">
-            Galaxy Pool is cosmic billiards. You fly a single ship through a solar system and use
-            it to knock the planets into a black hole — like sinking balls into a pocket. The catch
-            is that everything obeys real orbital gravity, so a good shot is about angle, timing and
+            Galaxy Pool is cosmic billiards. You fly a single ship through a solar system and use it
+            to knock the planets into a black hole — like sinking balls into a pocket. The catch is
+            that everything obeys real orbital gravity, so a good shot is about angle, timing and
             momentum, not just power.
           </p>
 
@@ -27,9 +27,9 @@
           <p>
             Drop <strong>every planet</strong> into the black hole. Each planet that goes in scores
             <strong>+1</strong>. If a planet falls into the <strong>sun</strong> instead, that's a
-            <strong>−1 penalty</strong> and it's gone for good. Sink the whole set with no losses for
-            a <strong>perfect run</strong>. Your running tally (planets, consumed, speed, distance)
-            shows on the screen at the bottom-right.
+            <strong>−1 penalty</strong> and it's gone for good. Sink the whole set with no losses
+            for a <strong>perfect run</strong>. Your running tally (planets, consumed, speed,
+            distance) shows on the screen at the bottom-right.
           </p>
 
           <div class="help-h">2 · The playfield</div>
@@ -50,8 +50,8 @@
             <strong>Drift</strong>):
           </p>
           <p class="help-sub">
-            <strong>Drift</strong> — relative to your travel: <strong>W</strong> prograde (speed up),
-            <strong>S</strong> retrograde (slow down), <strong>A/D</strong> thrust
+            <strong>Drift</strong> — relative to your travel: <strong>W</strong> prograde (speed
+            up), <strong>S</strong> retrograde (slow down), <strong>A/D</strong> thrust
             port/starboard.<br />
             <strong>Tank</strong> — <strong>A/D</strong> rotate the ship, <strong>W</strong> thrust
             along the nose, <strong>S</strong> brake.<br />
@@ -60,16 +60,14 @@
           </p>
           <p>
             The sun constantly pulls you, so you can <strong>slingshot</strong> around it to swing
-            between planets cheaply. Use the speed slider (or <strong>1–4</strong> / <strong>Q</strong>
-            <strong>E</strong>) to fast-forward time while you wait for orbits to line up, and
-            <strong>pause</strong> to plan. Press <strong>Z</strong> to centre the view on the sun,
-            <strong>X</strong> to follow the ship, and scroll to zoom.
+            between planets cheaply. Use the speed slider (or <strong>1–4</strong> /
+            <strong>Q</strong> <strong>E</strong>) to fast-forward time while you wait for orbits to
+            line up, and <strong>pause</strong> to plan. Press <strong>Z</strong> to centre the view
+            on the sun, <strong>X</strong> to follow the ship, and scroll to zoom.
           </p>
 
           <div class="help-h">4 · Fog of war &amp; radar</div>
-          <p>
-            Space starts dark. Two systems light it up:
-          </p>
+          <p>Space starts dark. Two systems light it up:</p>
           <p class="help-sub">
             <strong>Vision</strong> — a circle around the ship that permanently clears the fog grid
             as you fly over it. Cleared squares stay revealed forever.<br />
@@ -79,24 +77,24 @@
           </p>
           <p>
             Detecting a body isn't the same as knowing it. The first time you come close, an
-            <strong>observation</strong> scan runs ("Observing Unknown Celestial Body"). Only when it
-            finishes does the body's <strong>name and full readout</strong> appear — and only then
-            can you dock with it. Leave range mid-scan and it restarts next time.
+            <strong>observation</strong> scan runs ("Observing Unknown Celestial Body"). Only when
+            it finishes does the body's <strong>name and full readout</strong> appear — and only
+            then can you dock with it. Leave range mid-scan and it restarts next time.
           </p>
 
           <div class="help-h">5 · The shot (the main move)</div>
           <p>
-            Drift gently into a fully-observed planet to <strong>dock</strong> — your ship latches on
-            and a cue appears. Now aim like pool: <strong>drag the mouse back</strong> from the
+            Drift gently into a fully-observed planet to <strong>dock</strong> — your ship latches
+            on and a cue appears. Now aim like pool: <strong>drag the mouse back</strong> from the
             planet in the opposite direction to where you want it to go. The further you pull, the
             more power; an arrow and a power ring preview the shot and its predicted path.
             <strong>Release the mouse</strong> to fire.
           </p>
           <p>
             Firing costs <strong>energy</strong> and kicks your ship back a little
-            (<strong>recoil</strong>), so each shot also repositions you. Changed your mind? Move the
-            mouse right next to the planet — the cue turns into a red <strong>RELEASE</strong> ring —
-            and click to undock without firing.
+            (<strong>recoil</strong>), so each shot also repositions you. Changed your mind? Move
+            the mouse right next to the planet — the cue turns into a red
+            <strong>RELEASE</strong> ring — and click to undock without firing.
           </p>
 
           <div class="help-h">6 · Energy</div>
@@ -110,7 +108,8 @@
 
           <div class="help-h">7 · Tips</div>
           <p class="help-sub">
-            • Aim planets at the <strong>open side</strong> of the black hole's cone, or they bounce.<br />
+            • Aim planets at the <strong>open side</strong> of the black hole's cone, or they
+            bounce.<br />
             • Let gravity do the work — a gentle nudge into a good orbit beats a hard shot.<br />
             • Keep some energy in reserve; coast near the sun to top up between shots.<br />
             • Mind the gas clouds — they'll sap a planet's speed before it reaches the pocket.
@@ -120,11 +119,10 @@
           <p class="help-keys">
             <strong>W A S D</strong> — thrust &nbsp;·&nbsp; <strong>Space</strong> — full brake
             &nbsp;·&nbsp; <strong>Mouse drag + release</strong> — aim &amp; fire a docked planet
-            &nbsp;·&nbsp; <strong>Esc</strong> — release dock &nbsp;·&nbsp;
-            <strong>1–4</strong> / <strong>Q</strong> <strong>E</strong> — time speed &nbsp;·&nbsp;
-            <strong>Z</strong> — focus sun &nbsp;·&nbsp; <strong>X</strong> — focus ship
-            &nbsp;·&nbsp; <strong>Mouse wheel</strong> — zoom &nbsp;·&nbsp; <strong>R</strong> —
-            reset.
+            &nbsp;·&nbsp; <strong>Esc</strong> — release dock &nbsp;·&nbsp; <strong>1–4</strong> /
+            <strong>Q</strong> <strong>E</strong> — time speed &nbsp;·&nbsp; <strong>Z</strong> —
+            focus sun &nbsp;·&nbsp; <strong>X</strong> — focus ship &nbsp;·&nbsp;
+            <strong>Mouse wheel</strong> — zoom &nbsp;·&nbsp; <strong>R</strong> — reset.
           </p>
         </div>
         <button class="modal-close" @click="helpOpen = false">Close</button>
@@ -516,17 +514,19 @@
 
 <script setup>
 import { ref, reactive, computed, watch, onUnmounted } from 'vue'
-import GameShell from './components/GameShell.vue'
-import SettingsPanel from './components/SettingsPanel.vue'
-import SettingsSection from './components/SettingsSection.vue'
-import SettingsRow from './components/SettingsRow.vue'
-import { useSettings } from './composables/useSettings.js'
-import { TIME_STEP_VALUES } from './timeSteps.js'
-import { G_SIM, SOFTENING, AU_KM, PX_PER_AU, MAX_DT, SECONDS_PER_YEAR } from './engine/units.js'
-import { seededRandom } from './engine/rng.js'
-import { makeTrail } from './engine/trail.js'
-import { computeThrust, getThrustState as classifyThrust } from './engine/steering.js'
-import hubbleUrl from './Images/hubble.jpg'
+import GameShell from '../components/GameShell.vue'
+import SettingsPanel from '../components/SettingsPanel.vue'
+import SettingsSection from '../components/SettingsSection.vue'
+import SettingsRow from '../components/SettingsRow.vue'
+import { useSettings } from '../composables/useSettings.js'
+import { TIME_STEP_VALUES } from '../timeSteps.js'
+import { G_SIM, SOFTENING, AU_KM, SECONDS_PER_YEAR } from '../engine/units.js'
+import { makeTrail } from '../engine/trail.js'
+import { createCamera } from '../engine/camera.js'
+import { createStarfield } from '../engine/starfield.js'
+import { computeThrust, getThrustState as classifyThrust } from '../engine/steering.js'
+import { useCanvasLoop } from '../composables/useCanvasLoop.js'
+import hubbleUrl from '../Images/hubble.jpg'
 
 // =============================================================================
 // CONSTANTS
@@ -1038,7 +1038,6 @@ let timeScaleTarget = TIME_STEPS[timeScaleStepIdx]
 
 let bodies = []
 let ship = null // reference into bodies[]
-let starLayers = []
 
 // The level the scene is built from. Seeded from the hardcoded solar system so
 // the game boots exactly as before; the level editor mutates this in place. It's
@@ -1070,7 +1069,8 @@ const EDITOR_TOOLS = [
   { value: 'gascloud', label: 'Gas cloud', title: 'Click + drag to draw the cloud line (C)' },
 ]
 const EDITOR_TOOL_HINTS = {
-  select: 'Drag handles to move. Click a planet to edit its mass. Right-drag to pan, wheel to zoom.',
+  select:
+    'Drag handles to move. Click a planet to edit its mass. Right-drag to pan, wheel to zoom.',
   planet: 'Click to drop a planet — it auto-enters a stable orbit. Advanced: drag to set velocity.',
   ship: 'Click to set the ship’s start. Advanced: drag to set its launch velocity.',
   blackhole: 'Click to place the black hole, then drag to aim its gravity cone.',
@@ -1172,15 +1172,8 @@ function resetFog() {
 }
 
 // Camera
-const cam = {
-  zoom: 0.33,
-  panX: 0,
-  panY: 0,
-  focus: 'sun', // 'sun' | 'ship' | 'orbit' | 'free'
-}
-
-// Camera zoom animation
-let camTargetZoom = 0.33
+// Camera — shared world↔screen camera (engine/camera.js).
+const cam = createCamera({ zoom: 0.33, focus: 'sun' }) // focus: 'sun' | 'ship' | 'orbit' | 'free'
 
 // Spaceship angular state
 let shipAngle = 0 // radians
@@ -1246,135 +1239,16 @@ let shipEnergy = 30
 let solarEfficiency = 0 // 0..1, recomputed each frame
 
 // =============================================================================
-// STARFIELD DATA
+// STARFIELD
 // =============================================================================
-// makeTrail (ring buffer) and seededRandom (PRNG) come from engine/.
+// The parallax sky (star layers, nebula clouds, Hubble backdrop) is shared with
+// every other sketch — see engine/starfield.js. makeTrail (ring buffer) comes
+// from engine/trail.js.
 
-// Stellar color palette by spectral class frequency
-const STAR_COLORS = [
-  // Common — white/yellow-white (G/F class)
-  { rgb: '255,255,245', weight: 0.28 },
-  { rgb: '255,248,220', weight: 0.18 },
-  // Blue-white (A/B class)
-  { rgb: '180,210,255', weight: 0.15 },
-  { rgb: '140,185,255', weight: 0.1 },
-  { rgb: '100,160,255', weight: 0.06 },
-  // Orange/yellow (K class)
-  { rgb: '255,218,150', weight: 0.1 },
-  { rgb: '255,190,110', weight: 0.06 },
-  // Red (M class)
-  { rgb: '255,140,100', weight: 0.04 },
-  { rgb: '255,100,80', weight: 0.02 },
-  // Rare hot blue (O class)
-  { rgb: '180,220,255', weight: 0.01 },
-]
-
-function pickStarColor(rand) {
-  const r = rand()
-  let acc = 0
-  for (const c of STAR_COLORS) {
-    acc += c.weight
-    if (r < acc) return c.rgb
-  }
-  return STAR_COLORS[0].rgb
-}
-
-// Nebula clouds — seeded random soft blobs drawn as radial gradients
-let nebulaClouds = []
-
-// Hubble backdrop — a faint, translucent photo laid over the black base so the
-// player can tell SEEN space (image shows through) from fog (solid black). Loaded
-// once; drawImage no-ops until it decodes.
-//
-// Parallax: the image drifts opposite the camera's world motion (parX/parY are
-// the camera's world position × PARALLAX_GAIN). HUBBLE_DEPTH controls how strong
-// the effect is — well above the deep starfield (0.004) so the photo visibly
-// slides as you pan, reading as a near-ish backdrop. To keep its edges off-screen
-// at the largest drift, we cover-fit with extra HUBBLE_MARGIN headroom.
-const HUBBLE_ALPHA = 0.16 // very translucent overlay
-const HUBBLE_DEPTH = 0.16 // parallax strength (strong drift; deep stars are 0.004)
-const HUBBLE_MARGIN = 0.45 // fraction of viewport reserved as drift headroom
-const hubbleImg = new Image()
-hubbleImg.src = hubbleUrl
-
-function drawHubbleBackdrop(ctx, w, h, parX, parY) {
-  if (!hubbleImg.complete || !hubbleImg.naturalWidth) return
-  const iw = hubbleImg.naturalWidth
-  const ih = hubbleImg.naturalHeight
-  // Parallax offset (opposite the camera's motion, like the star layers).
-  const ox = -parX * HUBBLE_DEPTH
-  const oy = -parY * HUBBLE_DEPTH
-  // Cover fit + margin so the image overfills the viewport by HUBBLE_MARGIN on
-  // every side, leaving room for the drift offset without exposing an edge.
-  const scale = Math.max(w / iw, h / ih) * (1 + HUBBLE_MARGIN * 2)
-  const dw = iw * scale
-  const dh = ih * scale
-  const dx = (w - dw) / 2 + ox
-  const dy = (h - dh) / 2 + oy
-  ctx.save()
-  ctx.setTransform(1, 0, 0, 1, 0, 0)
-  ctx.globalAlpha = HUBBLE_ALPHA
-  ctx.drawImage(hubbleImg, dx, dy, dw, dh)
-  ctx.restore()
-}
+const starfield = createStarfield({ backdropUrl: hubbleUrl })
 
 function buildStarfield(w, h) {
-  const rand = seededRandom(0x6a51cafe)
-  const layerDefs = [
-    // Deep background — dense, tiny, almost no movement
-    { count: 320, depth: 0.004, alpha: 0.18, size: 0.45 },
-    // Mid field
-    { count: 180, depth: 0.03, alpha: 0.32, size: 0.7 },
-    // Near field — sparser, brighter, noticeably faster
-    { count: 90, depth: 0.1, alpha: 0.52, size: 1.05 },
-    // Foreground — few large bright stars, clearly faster
-    { count: 28, depth: 0.22, alpha: 0.82, size: 1.6 },
-    // Hero stars — very few, large, fast, with diffraction spikes
-    { count: 7, depth: 0.42, alpha: 1.0, size: 2.4, hero: true },
-  ]
-  const tw = Math.max(w * 3.5, 2800)
-  const th = Math.max(h * 3.5, 2200)
-
-  starLayers = layerDefs.map((def) => ({
-    ...def,
-    tw,
-    th,
-    stars: Array.from({ length: def.count }, () => ({
-      x: rand() * tw,
-      y: rand() * th,
-      r: def.size * (0.55 + rand() * 1.4),
-      twinkle: rand() * Math.PI * 2,
-      twinkleSpeed: 0.4 + rand() * 1.2,
-      color: pickStarColor(rand),
-    })),
-  }))
-
-  // Nebula clouds — fixed to canvas tile, very slow parallax
-  const nebulaRand = seededRandom(0xdeadbeef)
-  nebulaClouds = Array.from({ length: 9 }, () => {
-    const hue = Math.floor(nebulaRand() * 6)
-    // Palette: blue, purple, teal, magenta, deep red, indigo
-    const colors = [
-      [40, 80, 200],
-      [120, 40, 200],
-      [20, 160, 180],
-      [180, 30, 160],
-      [180, 30, 60],
-      [60, 20, 180],
-    ]
-    const [r, g, b] = colors[hue]
-    return {
-      x: nebulaRand() * tw,
-      y: nebulaRand() * th,
-      rx: (0.18 + nebulaRand() * 0.32) * tw,
-      ry: (0.12 + nebulaRand() * 0.22) * th,
-      alpha: 0.028 + nebulaRand() * 0.038,
-      color: `${r},${g},${b}`,
-      depth: 0.002 + nebulaRand() * 0.025,
-      tw,
-      th,
-    }
-  })
+  starfield.build(w, h)
 }
 
 // =============================================================================
@@ -2015,7 +1889,7 @@ function consumeBodyInBlackHole(body, index) {
     deathTextAge = 0
     deathFocus = { x: BLACK_HOLE.x, y: BLACK_HOLE.y }
     cam.focus = 'death'
-    camTargetZoom = 80
+    cam.targetZoom = 80
     orbitState = { mode: 'free', planet: null, shipOffset: null }
     orbitDrag = null
   } else {
@@ -2049,7 +1923,7 @@ function destroyBodyInSun(body, index) {
     shipLoss = 'SUN'
     deathTextAge = 0
     cam.focus = 'sun'
-    camTargetZoom = 55
+    cam.targetZoom = 55
     orbitState = { mode: 'free', planet: null, shipOffset: null }
     orbitDrag = null
   } else {
@@ -2384,7 +2258,7 @@ function buildScene(w, h) {
   orbitDrag = null
   captureCooldown = 0
   captureReleaseLockPlanetId = null
-  camTargetZoom = cam.zoom
+  cam.targetZoom = cam.zoom
 
   // The whole scene is driven by levelData. Hazard geometry is mirrored onto the
   // live BLACK_HOLE/GAS_CLOUD consts (and the reactive blackhole settings) so all
@@ -2443,7 +2317,7 @@ function buildScene(w, h) {
     cam.panY = h / 2
     cam.focus = 'ship'
     cam.zoom = 4
-    camTargetZoom = 4
+    cam.targetZoom = 4
   }
 }
 
@@ -2451,34 +2325,27 @@ function buildScene(w, h) {
 // CAMERA HELPERS
 // =============================================================================
 
+// Thin aliases over the shared camera, kept as free functions because the draw
+// code below calls them on nearly every line.
 function scale() {
-  return cam.zoom * PX_PER_AU
+  return cam.scale()
 }
 
 function worldToScreen(wx, wy) {
-  const s = scale()
-  return { x: wx * s + cam.panX, y: wy * s + cam.panY }
+  return cam.worldToScreen(wx, wy)
 }
 
 function screenToWorld(mx, my) {
-  const s = scale()
-  return { x: (mx - cam.panX) / s, y: (my - cam.panY) / s }
+  return cam.screenToWorld(mx, my)
 }
 
 function zoomAt(factor, mx, my) {
-  const s0 = scale()
-  const wx = (mx - cam.panX) / s0
-  const wy = (my - cam.panY) / s0
-  cam.zoom = Math.max(0.004, Math.min(200000, cam.zoom * factor))
-  camTargetZoom = cam.zoom
-  const s1 = scale()
-  cam.panX = mx - wx * s1
-  cam.panY = my - wy * s1
+  cam.zoomAt(factor, mx, my)
 }
 
 function applyFocusMode(w, h) {
   // Animate zoom toward target
-  cam.zoom += (camTargetZoom - cam.zoom) * 0.08
+  cam.tickZoom(0.08)
 
   if (!ship && deathFocus) cam.focus = 'death'
   else if (!ship && shipLoss === 'SUN') cam.focus = 'sun'
@@ -2507,125 +2374,14 @@ function applyFocusMode(w, h) {
 // =============================================================================
 // STARFIELD
 // =============================================================================
-
-function wrap(value, max) {
-  return ((value % max) + max) % max
-}
-
-// Pixels of parallax drift per AU the camera center moves through the world.
-// Driving parallax from the camera's WORLD center (not cam.panX) keeps it
-// anchored to whatever the camera follows — ship, sun, or planet — and makes it
-// independent of zoom and the screen-center constant baked into cam.panX.
-const PARALLAX_GAIN = 120
+// Layers, nebula and the Hubble backdrop all live in engine/starfield.js — the
+// sky is shared by every sketch. Parallax is driven by the camera’s WORLD
+// centre, so it stays anchored to whatever the camera follows (ship, sun or a
+// planet) and is independent of zoom.
 
 function drawStarfield(ctx, w, h) {
-  if (!starLayers.length) buildStarfield(w, h)
-
-  const t = Date.now() / 1000
-
-  // World point currently at the center of the screen (inverse of worldToScreen).
-  const s = scale()
-  const camWorldX = (w / 2 - cam.panX) / s
-  const camWorldY = (h / 2 - cam.panY) / s
-  // Parallax basis in pixels: how far the followed target has moved through space.
-  const parX = camWorldX * PARALLAX_GAIN
-  const parY = camWorldY * PARALLAX_GAIN
-
-  ctx.save()
-  ctx.setTransform(1, 0, 0, 1, 0, 0)
-  ctx.fillStyle = '#01020a'
-  ctx.fillRect(0, 0, w, h)
-  ctx.restore()
-
-  // Hubble photo backdrop over the black base (so seen space reads differently
-  // from fog). Drawn before nebula/stars so they layer on top of it. Parallax
-  // basis (parX/parY) gives it a pronounced drift.
-  drawHubbleBackdrop(ctx, w, h, parX, parY)
-
-  ctx.save()
-  ctx.setTransform(1, 0, 0, 1, 0, 0)
-  // --- Nebula clouds ---
-  ctx.globalCompositeOperation = 'screen'
-  for (const cloud of nebulaClouds) {
-    const zoomDrift = Math.log2(Math.max(cam.zoom, 0.004) / 0.33) * 18 * cloud.depth
-    let cx = wrap(cloud.x - wrap(parX * cloud.depth - zoomDrift, cloud.tw), cloud.tw)
-    let cy = wrap(cloud.y - wrap(parY * cloud.depth + zoomDrift * 0.6, cloud.th), cloud.th)
-    if (cx > w + cloud.rx) cx -= cloud.tw
-    if (cy > h + cloud.ry) cy -= cloud.th
-
-    ctx.save()
-    ctx.translate(cx, cy)
-    ctx.scale(1, cloud.ry / cloud.rx)
-    const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, cloud.rx)
-    grad.addColorStop(0, `rgba(${cloud.color},${cloud.alpha})`)
-    grad.addColorStop(0.4, `rgba(${cloud.color},${(cloud.alpha * 0.5).toFixed(3)})`)
-    grad.addColorStop(1, `rgba(${cloud.color},0)`)
-    ctx.fillStyle = grad
-    ctx.beginPath()
-    ctx.arc(0, 0, cloud.rx, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.restore()
-  }
-  ctx.globalCompositeOperation = 'source-over'
-
-  // --- Stars ---
-  for (const layer of starLayers) {
-    const zoomDrift = Math.log2(Math.max(cam.zoom, 0.004) / 0.33) * 18 * layer.depth
-    // Negated: as the camera moves +x through the world, the stars slide -x.
-    const ox = wrap(-parX * layer.depth + zoomDrift, layer.tw)
-    const oy = wrap(-parY * layer.depth - zoomDrift * 0.6, layer.th)
-
-    for (const star of layer.stars) {
-      let x = wrap(star.x + ox, layer.tw)
-      let y = wrap(star.y + oy, layer.th)
-      if (x > w + 20) x -= layer.tw
-      if (y > h + 20) y -= layer.th
-      if (x < -20 || x > w + 20 || y < -20 || y > h + 20) continue
-
-      const twinkle = 0.78 + 0.22 * Math.sin(t * star.twinkleSpeed + star.twinkle)
-      const alpha = layer.alpha * twinkle
-
-      // Soft halo
-      const haloR = star.r * (layer.hero ? 5 : 2.6)
-      const halo = ctx.createRadialGradient(x, y, 0, x, y, haloR)
-      halo.addColorStop(0, `rgba(${star.color},${(alpha * (layer.hero ? 0.55 : 0.2)).toFixed(3)})`)
-      halo.addColorStop(1, `rgba(${star.color},0)`)
-      ctx.fillStyle = halo
-      ctx.beginPath()
-      ctx.arc(x, y, haloR, 0, Math.PI * 2)
-      ctx.fill()
-
-      // Star disc
-      ctx.fillStyle = `rgba(${star.color},${alpha})`
-      ctx.beginPath()
-      ctx.arc(x, y, star.r, 0, Math.PI * 2)
-      ctx.fill()
-
-      // Diffraction spikes for hero stars
-      if (layer.hero) {
-        const spikeLen = star.r * (8 + 4 * twinkle)
-        const spikeAlpha = alpha * 0.55
-        ctx.lineCap = 'round'
-        for (const angle of [0, Math.PI / 2, Math.PI / 4, -Math.PI / 4]) {
-          for (const sign of [1, -1]) {
-            const ax = Math.cos(angle) * sign
-            const ay = Math.sin(angle) * sign
-            const sg = ctx.createLinearGradient(x, y, x + ax * spikeLen, y + ay * spikeLen)
-            sg.addColorStop(0, `rgba(${star.color},${spikeAlpha.toFixed(3)})`)
-            sg.addColorStop(1, `rgba(${star.color},0)`)
-            ctx.strokeStyle = sg
-            ctx.lineWidth = star.r * 0.55
-            ctx.beginPath()
-            ctx.moveTo(x, y)
-            ctx.lineTo(x + ax * spikeLen, y + ay * spikeLen)
-            ctx.stroke()
-          }
-        }
-      }
-    }
-  }
-
-  ctx.restore()
+  const c = cam.worldCenter(w, h)
+  starfield.draw(ctx, w, h, c.x, c.y, cam.zoom)
 }
 
 // =============================================================================
@@ -4871,7 +4627,11 @@ function updateFogDiscovery(realDt = 0, simDt = 0) {
         // acquisition double-blink.
         const cur = radarBlink[body.id]
         if (!cur || cur.pulses < 2) {
-          radarBlink[body.id] = { t: RADAR_BLINK_DUR_SINGLE, dur: RADAR_BLINK_DUR_SINGLE, pulses: 1 }
+          radarBlink[body.id] = {
+            t: RADAR_BLINK_DUR_SINGLE,
+            dur: RADAR_BLINK_DUR_SINGLE,
+            pulses: 1,
+          }
         }
       }
     }
@@ -5144,17 +4904,17 @@ function render(ctx, w, h, realDt, simDt = 0) {
 // MAIN LOOP
 // =============================================================================
 
-let rafId = null
-let lastTime = null
+// Height of GameShell’s control bar — the canvas gets the rest of the container.
+const CONTROL_BAR_H = 96
+
+let loop = null // canvas + rAF loop handle (see composables/useCanvasLoop.js)
 let _w = 0,
   _h = 0
 let simYears = 0
-let sceneBuilt = false // gate so ResizeObserver only builds the scene once
 let teardown = null // assigned by initCanvas; called from onUnmounted
 
 function initCanvas(canvas) {
   if (!canvas) return
-  let ctx = null
 
   // --- Keyboard ---
   function isTypingTarget(el) {
@@ -5372,40 +5132,23 @@ function initCanvas(canvas) {
   canvas.addEventListener('click', onCanvasClick)
   canvas.addEventListener('contextmenu', onContextMenu)
 
-  // --- Resize ---
-  // Resizing only updates canvas dimensions and the background starfield (which
-  // is tiled to the viewport). It must NOT rebuild the scene — the camera
-  // recenters itself every frame in applyFocusMode(), so a window resize leaves
-  // the running game untouched. The scene is built once on the first resize and
-  // thereafter only on explicit reset().
-  function resizeCanvas() {
-    const rect = canvas.parentElement.getBoundingClientRect()
-    _w = rect.width
-    _h = rect.height - 96
-    canvas.width = _w
-    canvas.height = _h
-    canvas.style.width = _w + 'px'
-    canvas.style.height = _h + 'px'
-    ctx = canvas.getContext('2d')
-
-    if (!sceneBuilt) {
-      buildScene(_w, _h)
-      sceneBuilt = true
-    } else {
-      buildStarfield(_w, _h)
-    }
-  }
-
-  const observer = new ResizeObserver(resizeCanvas)
-  observer.observe(canvas.parentElement)
-  resizeCanvas()
-
-  // --- Animation loop ---
-  function loop(ts) {
-    let realDt = 0
-    let simDt = 0 // sim-years advanced THIS frame (0 while paused) — drives the radar sweep
-    if (lastTime !== null) {
-      realDt = Math.min((ts - lastTime) / 1000, MAX_DT) // seconds
+  // --- Canvas sizing + frame loop (shared: composables/useCanvasLoop.js) ---
+  // A resize only updates the canvas dimensions and the viewport-tiled
+  // starfield. It must NOT rebuild the scene — the camera recenters itself every
+  // frame in applyFocusMode(), so a window resize leaves the running game
+  // untouched. The scene is built once, on the first sizing, and after that only
+  // by an explicit reset().
+  loop = useCanvasLoop(canvas, {
+    bottomInset: CONTROL_BAR_H,
+    onResize(w, h, isFirst) {
+      _w = w
+      _h = h
+      if (isFirst) buildScene(_w, _h)
+      else buildStarfield(_w, _h)
+    },
+    onFrame(realDt, ctx, w, h) {
+      // Sim-years advanced THIS frame (0 while paused) — drives the radar sweep.
+      let simDt = 0
 
       // Animate timeScale toward target in log space for perceptually even easing.
       const cur = timeScale.value
@@ -5419,8 +5162,7 @@ function initCanvas(canvas) {
         timeScale.value = Math.exp(logNew)
       }
 
-      const simScale = timeScale.value
-      const dt_yr = (realDt * simScale) / SECONDS_PER_YEAR // yr per frame
+      const dt_yr = (realDt * timeScale.value) / SECONDS_PER_YEAR // yr per frame
 
       if (isPlaying.value) {
         simDt = dt_yr
@@ -5445,24 +5187,20 @@ function initCanvas(canvas) {
           shipPredPath = computePrediction()
         }
       }
-    }
-    lastTime = ts
-    if (ctx) render(ctx, _w, _h, realDt, simDt)
-    // Plume is sim-time-driven, so it freezes with the sim while paused — no
-    // separate paused tick needed.
-    rafId = requestAnimationFrame(loop)
-  }
 
-  rafId = requestAnimationFrame(loop)
+      // The thrust plume is sim-time-driven, so it freezes with the sim while
+      // paused — no separate paused tick needed.
+      render(ctx, w, h, realDt, simDt)
+    },
+  })
 
   // initCanvas runs from GameShell's @canvas-ready emit, i.e. inside the
-  // child's onMounted where Game is NOT the active instance — so we can't call
-  // onUnmounted() here. Instead we hand teardown back to the component's own
+  // child's onMounted where this sketch is NOT the active instance — so we can't
+  // call onUnmounted() here. Instead we hand teardown back to the component's own
   // onUnmounted hook (registered at setup top-level) via this cleanup fn.
   teardown = () => {
-    cancelAnimationFrame(rafId)
-    rafId = null
-    observer.disconnect()
+    loop.stop()
+    loop = null
     window.removeEventListener('keydown', onKeyDown)
     window.removeEventListener('keyup', onKeyUp)
     window.removeEventListener('blur', clearKeys)
@@ -5488,7 +5226,7 @@ function reset() {
   simYears = 0
   shipPredPath = []
   predCountdown = 0
-  lastTime = null
+  loop?.resetClock()
   isPlaying.value = true
   timeScaleStepIdx = 2
   timeScaleTarget = TIME_STEPS[2]
@@ -5520,7 +5258,7 @@ function enterEditor() {
   editorDrag = null
   // Frame the system: pull back so the playfield fits.
   cam.zoom = 1.4
-  camTargetZoom = 1.4
+  cam.targetZoom = 1.4
   cam.panX = _w / 2
   cam.panY = _h / 2
   rebuildEditorScene()
@@ -5543,7 +5281,7 @@ function startTestPlay() {
   reset() // full gameplay build from levelData (sim runs)
   cam.focus = 'ship'
   cam.zoom = 4
-  camTargetZoom = 4
+  cam.targetZoom = 4
 }
 
 function stopTestPlay() {
@@ -5832,7 +5570,10 @@ function drawEditorPath(ctx, spawn, color) {
 
 function drawEditorVelArrow(ctx, spawn, color) {
   const sp = worldToScreen(spawn.x, spawn.y)
-  const ep = worldToScreen(spawn.x + spawn.vx * EDITOR_VEL_DRAG_K, spawn.y + spawn.vy * EDITOR_VEL_DRAG_K)
+  const ep = worldToScreen(
+    spawn.x + spawn.vx * EDITOR_VEL_DRAG_K,
+    spawn.y + spawn.vy * EDITOR_VEL_DRAG_K,
+  )
   ctx.strokeStyle = color
   ctx.lineWidth = 2
   ctx.beginPath()

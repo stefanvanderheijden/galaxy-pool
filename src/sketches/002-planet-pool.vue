@@ -1,0 +1,2015 @@
+<template>
+  <GameShell
+    :is-playing="isPlaying"
+    :time-scale="timeScale"
+    :body-count="bodyCount"
+    :elapsed-label="elapsedLabel"
+    @canvas-ready="initCanvas"
+    @toggle-play="togglePlay"
+    @reset="reset"
+  >
+    <button class="help-toggle" @click="helpOpen = true">? Help</button>
+
+    <div v-if="helpOpen" class="modal-backdrop" @click.self="helpOpen = false">
+      <div class="modal-box help-box">
+        <div class="modal-title">Planet Pool — how it works</div>
+        <div class="modal-body help-body">
+          <p class="help-intro">
+            No ship. You reach straight into the system and play the planets themselves: pull one
+            back like a cue ball, let go, and let orbital gravity carry it into the black hole.
+          </p>
+
+          <div class="help-h">1 · The shot</div>
+          <p>
+            <strong>Press and hold on a planet</strong>, drag <em>away</em> from it, and
+            <strong>release</strong>. The planet fires in the opposite direction to your pull —
+            classic pool. Pull further for more power; the arc gauge on the cue shows how much.
+            Release right next to the planet (or press <strong>Esc</strong>) to cancel for free.
+          </p>
+
+          <div class="help-h">2 · Mass is drawn as size</div>
+          <p>
+            A planet's <strong>radius follows its mass</strong>, so the big ones really are the
+            heavy ones. Mass is what resists your shot: the same pull that flings a light world
+            across the system barely nudges a heavy one. Aim heavy planets early, while you can
+            still afford the power.
+          </p>
+
+          <div class="help-h">3 · Yield is drawn as a ring</div>
+          <p>
+            Around every planet is a <strong>segmented ring</strong> — that is its
+            <strong>energy yield</strong>: what you are paid when you sink it. Yield has
+            <strong>nothing to do with mass</strong>. A cheap little rock can be the richest thing
+            on the table, and the giant you spent half your power moving may pay almost nothing.
+            Read the ring, not the size.
+          </p>
+
+          <div class="help-h">4 · Energy</div>
+          <p>
+            There is no solar power here. <strong>Pocketing a planet is your only income.</strong>
+            Every shot spends energy from the bar on the left (the red segment previews what the
+            current pull will cost), and the shot is capped at whatever you have left. Sink a planet
+            in the black hole and its yield is added to the bar.
+          </p>
+          <p>
+            A planet that falls into the <strong>sun</strong> is destroyed and pays
+            <strong>nothing</strong>. One flung out past the edge of the system is
+            <strong>lost</strong> the same way. Run the bar to zero with planets still on the table
+            and the run is stranded — reset and try a different order.
+          </p>
+
+          <div class="help-h">5 · Looking around</div>
+          <p>
+            The level is revealed at the start by a scan expanding out from the sun. After that:
+            <strong>right-drag</strong> to pan, <strong>scroll</strong> to zoom,
+            <strong>click empty space</strong> (or press <strong>Z</strong>) to re-centre on the
+            sun, and <strong>F</strong> to fit the whole system on screen.
+          </p>
+
+          <div class="help-h">Controls</div>
+          <p class="help-keys">
+            <strong>Left-drag a planet</strong> — aim &amp; fire &nbsp;·&nbsp;
+            <strong>Esc</strong> — cancel the shot &nbsp;·&nbsp; <strong>Right-drag</strong> — pan
+            &nbsp;·&nbsp; <strong>Wheel</strong> — zoom &nbsp;·&nbsp; <strong>Z</strong> — centre on
+            the sun &nbsp;·&nbsp; <strong>F</strong> — fit the system &nbsp;·&nbsp;
+            <strong>1–4</strong> / <strong>Q</strong> <strong>E</strong> — time speed &nbsp;·&nbsp;
+            <strong>R</strong> — reset.
+          </p>
+        </div>
+        <button class="modal-close" @click="helpOpen = false">Close</button>
+      </div>
+    </div>
+
+    <template #controls>
+      <button class="ctrl-btn" @click="focusSun">◎ Sun</button>
+      <button class="ctrl-btn" @click="fitSystem">⤢ Fit</button>
+    </template>
+
+    <template #settings>
+      <SettingsPanel @export="settings.exportJSON()" @import="onImport">
+        <SettingsSection title="The cue">
+          <SettingsRow
+            v-model="settings.settings.cue.shotPower"
+            label="Shot power (AU/yr)"
+            :min="0.2"
+            :max="10"
+            :step="0.1"
+            :decimals="1"
+            tooltip="Δv a full-power shot gives a reference-mass planet. Every other planet scales from this by its mass."
+          />
+          <SettingsRow
+            v-model="settings.settings.cue.maxDrag"
+            label="Max drag (px)"
+            :min="60"
+            :max="400"
+            :step="10"
+            :decimals="0"
+            tooltip="Pull distance that counts as full power. Pulling further does nothing."
+          />
+          <SettingsRow
+            v-model="settings.settings.cue.shotCost"
+            label="Full-shot cost"
+            :min="0"
+            :max="120"
+            :step="5"
+            :decimals="0"
+            tooltip="Energy a full-power shot spends. A half-power pull costs half of it."
+          />
+          <SettingsRow
+            v-model="settings.settings.cue.massExponent"
+            label="Mass resistance"
+            :min="0"
+            :max="1"
+            :step="0.05"
+            :decimals="2"
+            tooltip="How much mass resists a shot. 1 = true impulse physics (Δv = J/m), 0 = mass ignored (classic pool). The default keeps heavy planets sluggish but still playable."
+          />
+        </SettingsSection>
+
+        <SettingsSection title="Planets">
+          <SettingsRow
+            v-model="settings.settings.planets.sizeExponent"
+            label="Mass → size"
+            :min="0"
+            :max="1"
+            :step="0.01"
+            :decimals="2"
+            tooltip="Power law from mass to drawn radius. 0.33 is constant density (physically honest); higher exaggerates the spread so masses read apart at a glance."
+          />
+          <SettingsRow
+            v-model="settings.settings.planets.sizeScale"
+            label="Planet size (AU)"
+            :min="0.01"
+            :max="0.15"
+            :step="0.005"
+            :decimals="3"
+            tooltip="Drawn radius of a reference-mass planet. Purely visual — it does not change the physics."
+          />
+        </SettingsSection>
+
+        <SettingsSection title="Table">
+          <SettingsRow
+            v-model="settings.settings.table.pocketRadius"
+            label="Pocket radius (AU)"
+            :min="0.02"
+            :max="0.4"
+            :step="0.01"
+            :decimals="2"
+            tooltip="How close a planet must get to the black hole to be sunk."
+          />
+          <SettingsRow
+            v-model="settings.settings.table.pocketPull"
+            label="Pocket pull"
+            :min="0"
+            :max="5"
+            :step="0.1"
+            :decimals="1"
+            tooltip="Black hole mass (M☉). It pulls planets inside its influence radius, from any direction."
+          />
+          <SettingsRow
+            v-model="settings.settings.table.pocketInfluence"
+            label="Pocket influence (AU)"
+            :min="0.1"
+            :max="3"
+            :step="0.1"
+            :decimals="1"
+            tooltip="Radius within which the black hole pulls at all."
+          />
+          <SettingsRow
+            v-model="settings.settings.table.startEnergy"
+            label="Starting energy"
+            :min="0"
+            :max="400"
+            :step="10"
+            :decimals="0"
+            tooltip="Energy in the bar at the break. Applied on the next reset."
+          />
+        </SettingsSection>
+
+        <SettingsSection title="Reveal &amp; visuals">
+          <SettingsRow
+            v-model="settings.settings.reveal.duration"
+            label="Reveal time (s)"
+            :min="0"
+            :max="12"
+            :step="0.5"
+            :decimals="1"
+            tooltip="How long the opening scan takes to expand from the sun over the whole level. Replays on reset."
+          />
+          <SettingsRow
+            v-model="settings.settings.visuals.trailLength"
+            label="Trail length"
+            :min="0"
+            :max="4000"
+            :step="50"
+            :decimals="0"
+            tooltip="Number of past positions kept in a planet's trail. Applied on the next reset."
+          />
+        </SettingsSection>
+      </SettingsPanel>
+    </template>
+  </GameShell>
+</template>
+
+<script setup>
+import { ref, onUnmounted } from 'vue'
+import GameShell from '../components/GameShell.vue'
+import SettingsPanel from '../components/SettingsPanel.vue'
+import SettingsSection from '../components/SettingsSection.vue'
+import SettingsRow from '../components/SettingsRow.vue'
+import { useSettings } from '../composables/useSettings.js'
+import { useCanvasLoop } from '../composables/useCanvasLoop.js'
+import { TIME_STEP_VALUES } from '../timeSteps.js'
+import { G_SIM, SOFTENING, SECONDS_PER_YEAR } from '../engine/units.js'
+import { makeTrail } from '../engine/trail.js'
+import { createCamera } from '../engine/camera.js'
+import { createStarfield } from '../engine/starfield.js'
+import { radiusFromMass, deltaVFromShot } from '../engine/planets.js'
+import hubbleUrl from '../Images/hubble.jpg'
+
+// =============================================================================
+// WHAT THIS SKETCH IS
+// =============================================================================
+// Game mode 002. No ship: the player grabs a planet directly and shoots it, and
+// the ONLY source of energy is sinking planets. Two properties of a planet are
+// deliberately independent, and both are drawn:
+//
+//   mass  → the planet's RADIUS (and how much it resists a shot)
+//   yield → the SEGMENTED RING around it (and what sinking it pays)
+//
+// So the biggest thing on the table is not the most valuable thing on the table,
+// and the player has to read the rings to plan an order of shots.
+//
+// Everything that isn't specific to this mode is shared: GameShell + the settings
+// panel (components/), the camera, the parallax sky and the mass/shot math
+// (engine/), and canvas sizing + the rAF loop (composables/useCanvasLoop.js).
+
+const SKETCH_ID = 'galaxy-pool-002-planet-pool'
+
+const helpOpen = ref(false)
+
+// =============================================================================
+// CONSTANTS
+// =============================================================================
+
+// Height of GameShell's control bar — the canvas gets the rest of the container.
+const CONTROL_BAR_H = 96
+
+const SUN = {
+  mass: 1.0,
+  // Drawn larger than the heaviest planet on the table (Ferrum lands at ~0.097
+  // AU with the default size settings) so the star still reads as the star.
+  drawR: 0.13,
+  color: '#FFD700',
+  // A planet that touches this is destroyed and pays nothing.
+  killR: 0.15,
+}
+
+// The pocket. Parked well outside every orbit so nothing drifts in on its own —
+// planets only reach it because the player put them there.
+const POCKET = {
+  x: 2.95,
+  y: 1.55,
+  drawR: 0.09,
+  color: '#b48cff',
+}
+
+// Mass a planet's drawn radius and shot response are both measured against
+// (≈ Earth). Also the unit the HUD reports mass in.
+const REF_MASS = 3.003e-6 // M☉ — one Earth mass
+
+// Yield the ring is scaled against: a MAX_YIELD planet lights every segment.
+const MAX_YIELD = 100
+const YIELD_SEGMENTS = 12
+
+// A planet this far from the sun is gone for good.
+const ESCAPE_R = 40
+
+// Pull shorter than this is a cancel, not a shot.
+const SHOT_DEADZONE_PX = 10
+// Extra pixels around a planet's disc that still count as grabbing it, so small
+// planets stay clickable when zoomed out.
+const GRAB_MARGIN_PX = 14
+// How far a press may travel and still count as a click, not a drag.
+const CLICK_SLOP_PX = 4
+
+// Shot prediction.
+const PRED_HORIZON_YR = 0.75
+const PRED_STEPS = 900
+const PRED_DT_YR = PRED_HORIZON_YR / PRED_STEPS
+
+// The table. Masses span ~10× and yields are deliberately UNCORRELATED with
+// them: Ferrum is the heaviest and nearly worthless, Hollow is the lightest and
+// the richest, and the ones in between are shuffled so the pattern can't be
+// guessed from size alone.
+const PLANET_SET = [
+  {
+    id: 'ferrum',
+    name: 'Ferrum',
+    mass: 8.0e-6,
+    orbR: 0.58,
+    angle: 0.4,
+    energyYield: 20,
+    color: '#c07a3c',
+    note: 'Iron core, stripped mantle. Dense, slow, and almost worthless.',
+  },
+  {
+    id: 'vesper',
+    name: 'Vesper',
+    mass: 1.6e-6,
+    orbR: 0.84,
+    angle: 2.6,
+    energyYield: 75,
+    color: '#e8cda0',
+    note: 'Thick reactive atmosphere. Light to move and rich to sink.',
+  },
+  {
+    id: 'tessera',
+    name: 'Tessera',
+    mass: 4.2e-6,
+    orbR: 1.15,
+    angle: 4.9,
+    energyYield: 35,
+    color: '#5fd0bd',
+    note: 'Tiled crust over a deep ocean. Heavy going, modest return.',
+  },
+  {
+    id: 'hollow',
+    name: 'Hollow',
+    mass: 8.0e-7,
+    orbR: 1.46,
+    angle: 1.2,
+    energyYield: 95,
+    color: '#c9a7ff',
+    note: 'Cavernous and nearly empty. The best payout on the table.',
+  },
+  {
+    id: 'cinder',
+    name: 'Cinder',
+    mass: 6.0e-6,
+    orbR: 1.78,
+    angle: 3.9,
+    energyYield: 45,
+    color: '#e8714a',
+    note: 'Burnt-out furnace world. Big, and worth rather more than it looks.',
+  },
+  {
+    id: 'wisp',
+    name: 'Wisp',
+    mass: 1.1e-6,
+    orbR: 2.1,
+    angle: 5.6,
+    energyYield: 60,
+    color: '#7fd4ff',
+    note: 'Barely held together. Answers to the lightest touch.',
+  },
+]
+
+const TOTAL_PLANETS = PLANET_SET.length
+const TOTAL_YIELD = PLANET_SET.reduce((sum, p) => sum + p.energyYield, 0)
+
+// =============================================================================
+// SETTINGS
+// =============================================================================
+
+const settings = useSettings(SKETCH_ID, {
+  cue: {
+    shotPower: 3.0, // AU/yr delivered to a reference-mass planet at full pull
+    maxDrag: 220, // px of pull that counts as full power
+    shotCost: 45, // energy a full-power shot spends
+    massExponent: 0.5, // how hard mass resists the shot (see engine/planets.js)
+  },
+  planets: {
+    sizeExponent: 1 / 3, // constant density
+    sizeScale: 0.07, // drawn radius (AU) of a reference-mass planet
+  },
+  table: {
+    pocketRadius: 0.12,
+    pocketPull: 1.2,
+    pocketInfluence: 0.9,
+    startEnergy: 140,
+  },
+  reveal: { duration: 4 },
+  visuals: { trailLength: 900 },
+})
+
+function onImport(parsed) {
+  settings.importJSON(parsed)
+  reset()
+}
+
+// =============================================================================
+// REACTIVE STATE (for GameShell)
+// =============================================================================
+
+const isPlaying = ref(true)
+const timeScale = ref(1000000)
+const bodyCount = ref(0)
+const elapsedLabel = ref('')
+
+const TIME_STEPS = TIME_STEP_VALUES
+let timeScaleStepIdx = 2
+let timeScaleTarget = TIME_STEPS[timeScaleStepIdx]
+
+// =============================================================================
+// SIMULATION STATE
+// =============================================================================
+
+let planets = [] // every planet ever spawned, including sunk/burned/lost ones
+let simYears = 0
+
+// Energy — the whole economy of this mode.
+let energy = 0
+let energyBanked = 0 // lifetime income, for the score readout
+let energySpent = 0
+
+let shotsFired = 0
+let pocketed = [] // planets sunk, in order
+let burned = [] // planets lost to the sun
+let lost = [] // planets flung out of the system
+
+// Opening reveal: a circle centred on the sun whose radius grows until it covers
+// the level. Purely a presentation layer — it hides nothing from the physics,
+// and once `revealR` passes REVEAL_FULL_R the overlay stops being drawn at all.
+const REVEAL_FULL_R = 4.6 // AU — comfortably past the pocket and every orbit
+let revealR = 0
+
+// Shockwave rings, spawned by shots and by pocketing.
+let shockwaves = []
+// Sparks that fly out of the pocket when a planet is sunk.
+let sparks = []
+
+// Camera (shared: engine/camera.js).
+const cam = createCamera({ zoom: 2, focus: 'sun' })
+
+// Parallax sky (shared: engine/starfield.js).
+const starfield = createStarfield({ backdropUrl: hubbleUrl })
+
+// --- Input state ---
+// The in-progress shot: which planet is grabbed and where the pull is now.
+// { planet, curX, curY } — the anchor is the planet itself, which keeps moving,
+// so the cue stays attached while the sim runs.
+let shot = null
+
+// Right-drag panning: { lastX, lastY }.
+let pan = null
+
+// Where a left press on empty space started, so mouseup can tell a click (which
+// re-centres on the sun) from a drag that happened to end on empty space.
+let emptyClick = null
+
+let hoverPlanet = null
+
+// =============================================================================
+// SCENE
+// =============================================================================
+
+// Circular orbit around the (fixed, origin-centred) sun. v = sqrt(GM/r), CCW.
+function circularOrbit(orbR, angle) {
+  const v = Math.sqrt((G_SIM * SUN.mass) / orbR)
+  return {
+    x: Math.cos(angle) * orbR,
+    y: Math.sin(angle) * orbR,
+    vx: -Math.sin(angle) * v,
+    vy: Math.cos(angle) * v,
+  }
+}
+
+function planetRadius(mass) {
+  return radiusFromMass(mass, {
+    refMass: REF_MASS,
+    refRadius: settings.settings.planets.sizeScale,
+    exponent: settings.settings.planets.sizeExponent,
+    minRadius: 0.008,
+  })
+}
+
+function buildScene(w, h) {
+  const trailLen = settings.settings.visuals.trailLength
+
+  planets = PLANET_SET.map((def) => {
+    const o = circularOrbit(def.orbR, def.angle)
+    return {
+      ...def,
+      x: o.x,
+      y: o.y,
+      vx: o.vx,
+      vy: o.vy,
+      status: 'live', // 'live' | 'pocketed' | 'burned' | 'lost'
+      trail: makeTrail(trailLen),
+    }
+  })
+
+  simYears = 0
+  energy = settings.settings.table.startEnergy
+  energyBanked = 0
+  energySpent = 0
+  shotsFired = 0
+  pocketed = []
+  burned = []
+  lost = []
+  shockwaves = []
+  sparks = []
+  shot = null
+  pan = null
+  hoverPlanet = null
+  revealR = 0
+
+  starfield.build(w, h)
+  fitSystem(w, h)
+  bodyCount.value = livePlanets().length + 1
+}
+
+function livePlanets() {
+  return planets.filter((p) => p.status === 'live')
+}
+
+// =============================================================================
+// PHYSICS
+// =============================================================================
+
+// The sun is fixed at the origin and vastly outweighs everything else, so each
+// planet is integrated independently against it (semi-implicit Euler). Planets
+// do not pull on each other — at these masses the effect is invisible, and
+// keeping them independent means a shot goes exactly where the preview said.
+function gravityStep(dt) {
+  const pocketMass = settings.settings.table.pocketPull
+  const pocketInfluence = settings.settings.table.pocketInfluence
+
+  for (const p of planets) {
+    if (p.status !== 'live') continue
+
+    // Sun.
+    const r2 = p.x * p.x + p.y * p.y + SOFTENING
+    const r = Math.sqrt(r2)
+    const a = (G_SIM * SUN.mass) / r2
+    p.vx -= (p.x / r) * a * dt
+    p.vy -= (p.y / r) * a * dt
+
+    // Black hole — local, omnidirectional, and only inside its influence radius,
+    // so it reads as a pocket with a lip rather than a second sun.
+    if (pocketMass > 0 && pocketInfluence > 0) {
+      const dx = POCKET.x - p.x
+      const dy = POCKET.y - p.y
+      const d2 = dx * dx + dy * dy + SOFTENING
+      const d = Math.sqrt(d2)
+      if (d < pocketInfluence) {
+        const falloff = 1 - d / pocketInfluence
+        const pa = (G_SIM * pocketMass * falloff) / d2
+        p.vx += (dx / d) * pa * dt
+        p.vy += (dy / d) * pa * dt
+      }
+    }
+
+    p.x += p.vx * dt
+    p.y += p.vy * dt
+  }
+}
+
+function resolveOutcomes() {
+  const pocketR = settings.settings.table.pocketRadius
+
+  for (const p of planets) {
+    if (p.status !== 'live') continue
+
+    const dPocket = Math.hypot(p.x - POCKET.x, p.y - POCKET.y)
+    if (dPocket <= pocketR) {
+      sinkPlanet(p)
+      continue
+    }
+
+    const dSun = Math.hypot(p.x, p.y)
+    if (dSun <= SUN.killR + planetRadius(p.mass) * 0.5) {
+      p.status = 'burned'
+      burned.push(p)
+      releaseIfHeld(p)
+      spawnShockwave(p.x, p.y, planetRadius(p.mass) * 26, '#ff8a3d')
+      continue
+    }
+
+    if (dSun > ESCAPE_R) {
+      p.status = 'lost'
+      lost.push(p)
+      releaseIfHeld(p)
+    }
+  }
+
+  bodyCount.value = livePlanets().length + 1
+}
+
+function sinkPlanet(p) {
+  p.status = 'pocketed'
+  pocketed.push(p)
+  releaseIfHeld(p)
+
+  energy += p.energyYield
+  energyBanked += p.energyYield
+
+  spawnShockwave(POCKET.x, POCKET.y, 0.55, p.color)
+  const count = 14 + Math.round(p.energyYield / 6)
+  for (let i = 0; i < count; i++) {
+    const a = Math.random() * Math.PI * 2
+    const speed = 0.15 + Math.random() * 0.6
+    sparks.push({
+      x: POCKET.x,
+      y: POCKET.y,
+      vx: Math.cos(a) * speed,
+      vy: Math.sin(a) * speed,
+      age: 0,
+      life: 0.6 + Math.random() * 0.7,
+      color: p.color,
+    })
+  }
+}
+
+function releaseIfHeld(p) {
+  if (shot && shot.planet === p) shot = null
+}
+
+function spawnShockwave(x, y, maxR, color) {
+  shockwaves.push({ x, y, r: 0, maxR, age: 0, life: 1.1, color })
+}
+
+function tickEffects(realDt) {
+  for (let i = shockwaves.length - 1; i >= 0; i--) {
+    const s = shockwaves[i]
+    s.age += realDt
+    if (s.age >= s.life) shockwaves.splice(i, 1)
+    else s.r = s.maxR * (s.age / s.life)
+  }
+  for (let i = sparks.length - 1; i >= 0; i--) {
+    const s = sparks[i]
+    s.age += realDt
+    if (s.age >= s.life) {
+      sparks.splice(i, 1)
+      continue
+    }
+    // Sparks live in world space but drift in real time, so they read the same
+    // at every time-scale.
+    s.x += s.vx * realDt * 0.12
+    s.y += s.vy * realDt * 0.12
+  }
+}
+
+// =============================================================================
+// THE SHOT
+// =============================================================================
+
+// Pull vector, in screen pixels, from the grabbed planet to the cursor.
+function shotPull() {
+  if (!shot) return null
+  const sp = cam.worldToScreen(shot.planet.x, shot.planet.y)
+  const dx = shot.curX - sp.x
+  const dy = shot.curY - sp.y
+  const dist = Math.hypot(dx, dy)
+  return { sp, dx, dy, dist }
+}
+
+// 0..1 of a full-power shot, from the pull length alone (before energy caps it).
+function requestedPower() {
+  const pull = shotPull()
+  if (!pull || pull.dist < SHOT_DEADZONE_PX) return 0
+  return Math.min(pull.dist, settings.settings.cue.maxDrag) / settings.settings.cue.maxDrag
+}
+
+// What the current aim would cost, and what it can actually afford — the energy
+// bar previews both, so an over-pull visibly runs into the ceiling.
+function shotDraw() {
+  const requested = requestedPower() * settings.settings.cue.shotCost
+  return { requested, affordable: Math.min(requested, energy) }
+}
+
+// Power actually delivered: the requested pull, scaled down if the bar can't
+// cover it. A shot on an empty bar is a dud, not a free shot.
+function effectivePower() {
+  const requested = requestedPower()
+  const cost = requested * settings.settings.cue.shotCost
+  if (cost <= 0) return 0
+  return requested * Math.min(1, energy / cost)
+}
+
+function fireShot() {
+  const pull = shotPull()
+  if (!shot || !pull) return
+  const planet = shot.planet
+
+  // A pull inside the deadzone is a deliberate cancel — no cost, no kick.
+  if (pull.dist < SHOT_DEADZONE_PX) {
+    shot = null
+    return
+  }
+
+  const power = effectivePower()
+  const cost = requestedPower() * settings.settings.cue.shotCost
+  const spend = Math.min(cost, energy)
+  energy = Math.max(0, energy - spend)
+  energySpent += spend
+
+  // A dud on an empty bar isn't a shot taken — don't score it as one.
+  if (power > 0) {
+    shotsFired++
+    // Classic pool: the ball leaves opposite to the pull.
+    const nx = -pull.dx / pull.dist
+    const ny = -pull.dy / pull.dist
+    const dv = deltaVFromShot(power * settings.settings.cue.shotPower, planet.mass, {
+      refMass: REF_MASS,
+      massExponent: settings.settings.cue.massExponent,
+    })
+    planet.vx += nx * dv
+    planet.vy += ny * dv
+
+    spawnShockwave(planet.x, planet.y, planetRadius(planet.mass) * 18, planet.color)
+  }
+
+  shot = null
+}
+
+// Where the aimed planet would go, integrated with the same forces the sim uses.
+// Recomputed while aiming only, so it always matches the shot about to be taken.
+// Returns { points, hitPocket, hitSun } — the outcome flags colour the preview.
+function predictShot() {
+  const pull = shotPull()
+  const none = { points: [], hitPocket: false, hitSun: false }
+  if (!shot || !pull || pull.dist < SHOT_DEADZONE_PX) return none
+
+  const planet = shot.planet
+  const power = effectivePower()
+  const nx = -pull.dx / pull.dist
+  const ny = -pull.dy / pull.dist
+  const dv = deltaVFromShot(power * settings.settings.cue.shotPower, planet.mass, {
+    refMass: REF_MASS,
+    massExponent: settings.settings.cue.massExponent,
+  })
+
+  let x = planet.x
+  let y = planet.y
+  let vx = planet.vx + nx * dv
+  let vy = planet.vy + ny * dv
+
+  const pocketMass = settings.settings.table.pocketPull
+  const pocketInfluence = settings.settings.table.pocketInfluence
+  const pocketR = settings.settings.table.pocketRadius
+
+  const points = [{ x, y }]
+  let hitPocket = false
+  let hitSun = false
+
+  for (let i = 0; i < PRED_STEPS; i++) {
+    const r2 = x * x + y * y + SOFTENING
+    const r = Math.sqrt(r2)
+    const a = (G_SIM * SUN.mass) / r2
+    vx -= (x / r) * a * PRED_DT_YR
+    vy -= (y / r) * a * PRED_DT_YR
+
+    if (pocketMass > 0 && pocketInfluence > 0) {
+      const dx = POCKET.x - x
+      const dy = POCKET.y - y
+      const d2 = dx * dx + dy * dy + SOFTENING
+      const d = Math.sqrt(d2)
+      if (d < pocketInfluence) {
+        const falloff = 1 - d / pocketInfluence
+        const pa = (G_SIM * pocketMass * falloff) / d2
+        vx += (dx / d) * pa * PRED_DT_YR
+        vy += (dy / d) * pa * PRED_DT_YR
+      }
+    }
+
+    x += vx * PRED_DT_YR
+    y += vy * PRED_DT_YR
+    points.push({ x, y })
+
+    // Stop the preview where the shot would end.
+    if (Math.hypot(x - POCKET.x, y - POCKET.y) <= pocketR) {
+      hitPocket = true
+      break
+    }
+    if (Math.hypot(x, y) <= SUN.killR) {
+      hitSun = true
+      break
+    }
+    if (Math.hypot(x, y) > ESCAPE_R) break
+  }
+  return { points, hitPocket, hitSun }
+}
+
+// =============================================================================
+// CAMERA
+// =============================================================================
+
+function focusSun(w = _w, h = _h) {
+  cam.focus = 'sun'
+  cam.centerOn(0, 0, w, h)
+}
+
+// Frame the sun, the pocket and every orbit the level uses.
+function fitSystem(w = _w, h = _h) {
+  const pts = [{ x: 0, y: 0 }, POCKET]
+  for (const p of PLANET_SET) {
+    pts.push({ x: p.orbR, y: p.orbR }, { x: -p.orbR, y: -p.orbR })
+  }
+  cam.fitPoints(pts, w, h, { padding: 0.4, maxFitZoom: 6 })
+  cam.focus = 'free'
+}
+
+// The sun stays put, so 'sun' focus just means "keep the origin centred" — it
+// survives resizes without fighting the player's right-drag panning.
+function applyFocus(w, h) {
+  cam.tickZoom(0.12)
+  if (cam.focus === 'sun') cam.centerOn(0, 0, w, h)
+}
+
+// =============================================================================
+// REVEAL
+// =============================================================================
+
+// The opening scan. It grows in REAL time (not sim time) so it plays out the
+// same however fast the clock is running, and it is finished — permanently —
+// once it covers the level.
+function tickReveal(realDt) {
+  const duration = settings.settings.reveal.duration
+  if (revealR >= REVEAL_FULL_R) return
+  if (duration <= 0) {
+    revealR = REVEAL_FULL_R
+    return
+  }
+  revealR = Math.min(REVEAL_FULL_R, revealR + (REVEAL_FULL_R / duration) * realDt)
+}
+
+const revealDone = () => revealR >= REVEAL_FULL_R
+
+// True once the scan has reached a world point — used to gate grabbing a planet
+// the player cannot see yet.
+function revealed(x, y) {
+  return revealDone() || Math.hypot(x, y) <= revealR
+}
+
+// =============================================================================
+// COLOUR HELPERS
+// =============================================================================
+
+function hexToRgb(hex) {
+  const n = parseInt(hex.replace('#', ''), 16)
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+}
+function rgba(hex, alpha) {
+  const [r, g, b] = hexToRgb(hex)
+  return `rgba(${r},${g},${b},${alpha})`
+}
+function lighten(hex, t) {
+  const [r, g, b] = hexToRgb(hex)
+  return `rgb(${Math.round(r + (255 - r) * t)},${Math.round(g + (255 - g) * t)},${Math.round(b + (255 - b) * t)})`
+}
+function darken(hex, t) {
+  const [r, g, b] = hexToRgb(hex)
+  return `rgb(${Math.round(r * (1 - t))},${Math.round(g * (1 - t))},${Math.round(b * (1 - t))})`
+}
+
+// Yield colour ramp: dim copper for a poor planet, bright gold for a rich one.
+// Same ramp is used by the ring, the roster and the payout text so the player
+// only has to learn one scale.
+function yieldColor(energyYield) {
+  const t = Math.max(0, Math.min(1, energyYield / MAX_YIELD))
+  const r = Math.round(190 + 65 * t)
+  const g = Math.round(120 + 110 * t)
+  const b = Math.round(50 + 70 * t)
+  return `rgb(${r},${g},${b})`
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath()
+  ctx.moveTo(x + r, y)
+  ctx.lineTo(x + w - r, y)
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r)
+  ctx.lineTo(x + w, y + h - r)
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h)
+  ctx.lineTo(x + r, y + h)
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r)
+  ctx.lineTo(x, y + r)
+  ctx.quadraticCurveTo(x, y, x + r, y)
+  ctx.closePath()
+}
+
+// =============================================================================
+// WORLD RENDERING
+// =============================================================================
+
+function drawOrbitGuides(ctx) {
+  const s = cam.scale()
+  ctx.save()
+  ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY)
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)'
+  ctx.lineWidth = 0.6 / s
+  for (const def of PLANET_SET) {
+    ctx.beginPath()
+    ctx.arc(0, 0, def.orbR, 0, Math.PI * 2)
+    ctx.stroke()
+  }
+  ctx.restore()
+}
+
+function drawSun(ctx) {
+  const sp = cam.worldToScreen(0, 0)
+  const s = cam.scale()
+  const r = Math.max(4, SUN.drawR * s)
+
+  ctx.save()
+  const glow = ctx.createRadialGradient(sp.x, sp.y, r * 0.6, sp.x, sp.y, r * 3.5)
+  glow.addColorStop(0, 'rgba(255,220,80,0.45)')
+  glow.addColorStop(0.4, 'rgba(255,140,0,0.14)')
+  glow.addColorStop(1, 'rgba(255,80,0,0)')
+  ctx.fillStyle = glow
+  ctx.beginPath()
+  ctx.arc(sp.x, sp.y, r * 3.5, 0, Math.PI * 2)
+  ctx.fill()
+
+  const disc = ctx.createRadialGradient(sp.x - r * 0.3, sp.y - r * 0.3, 0, sp.x, sp.y, r)
+  disc.addColorStop(0, lighten(SUN.color, 0.55))
+  disc.addColorStop(0.5, SUN.color)
+  disc.addColorStop(1, darken(SUN.color, 0.5))
+  ctx.fillStyle = disc
+  ctx.beginPath()
+  ctx.arc(sp.x, sp.y, r, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
+}
+
+function drawPocket(ctx, timeS) {
+  const sp = cam.worldToScreen(POCKET.x, POCKET.y)
+  const s = cam.scale()
+  const holeR = Math.max(3, POCKET.drawR * s)
+  const captureR = settings.settings.table.pocketRadius * s
+  const influenceR = settings.settings.table.pocketInfluence * s
+
+  ctx.save()
+
+  // Influence field — where the pocket starts helping.
+  const field = ctx.createRadialGradient(sp.x, sp.y, holeR, sp.x, sp.y, influenceR)
+  field.addColorStop(0, 'rgba(150,110,255,0.16)')
+  field.addColorStop(1, 'rgba(120,80,255,0)')
+  ctx.fillStyle = field
+  ctx.beginPath()
+  ctx.arc(sp.x, sp.y, influenceR, 0, Math.PI * 2)
+  ctx.fill()
+
+  ctx.setLineDash([5, 7])
+  ctx.strokeStyle = 'rgba(180,140,255,0.22)'
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.arc(sp.x, sp.y, influenceR, 0, Math.PI * 2)
+  ctx.stroke()
+  ctx.setLineDash([])
+
+  // Accretion swirl.
+  for (let i = 0; i < 3; i++) {
+    const rr = captureR * (0.75 + i * 0.28)
+    const spin = timeS * (0.7 - i * 0.16) + i * 1.7
+    ctx.strokeStyle = `rgba(190,150,255,${0.3 - i * 0.07})`
+    ctx.lineWidth = 1.6
+    ctx.beginPath()
+    ctx.arc(sp.x, sp.y, rr, spin, spin + Math.PI * 1.25)
+    ctx.stroke()
+  }
+
+  // The pocket mouth.
+  ctx.strokeStyle = 'rgba(200,170,255,0.75)'
+  ctx.lineWidth = 1.5
+  ctx.beginPath()
+  ctx.arc(sp.x, sp.y, captureR, 0, Math.PI * 2)
+  ctx.stroke()
+
+  // The hole itself.
+  const hole = ctx.createRadialGradient(sp.x, sp.y, 0, sp.x, sp.y, holeR)
+  hole.addColorStop(0, '#000')
+  hole.addColorStop(0.75, '#05030c')
+  hole.addColorStop(1, 'rgba(90,50,180,0.5)')
+  ctx.fillStyle = hole
+  ctx.beginPath()
+  ctx.arc(sp.x, sp.y, holeR, 0, Math.PI * 2)
+  ctx.fill()
+
+  ctx.fillStyle = 'rgba(180,140,255,0.65)'
+  ctx.font = '10px monospace'
+  ctx.textAlign = 'center'
+  ctx.fillText('POCKET', sp.x, sp.y + captureR + 16)
+  ctx.restore()
+}
+
+function drawTrail(ctx, p) {
+  const pts = p.trail?.points?.() || []
+  if (pts.length < 2) return
+  const s = cam.scale()
+  ctx.save()
+  ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY)
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  ctx.lineWidth = planetRadius(p.mass) * 0.22
+  const [r, g, b] = hexToRgb(p.color)
+  for (let i = 1; i < pts.length; i++) {
+    const t = i / (pts.length - 1)
+    ctx.strokeStyle = `rgba(${r},${g},${b},${0.02 + t * 0.18})`
+    ctx.beginPath()
+    ctx.moveTo(pts[i - 1].x, pts[i - 1].y)
+    ctx.lineTo(pts[i].x, pts[i].y)
+    ctx.stroke()
+  }
+  ctx.restore()
+}
+
+// The two readable properties of a planet, drawn together:
+//   the DISC's radius is its mass,
+//   the RING around it is its energy yield.
+function drawPlanet(ctx, p, w, h) {
+  const sp = cam.worldToScreen(p.x, p.y)
+  const s = cam.scale()
+  const r = Math.max(3, planetRadius(p.mass) * s)
+  const ringR = r + 8
+
+  if (sp.x < -120 || sp.x > w + 120 || sp.y < -120 || sp.y > h + 120) return
+
+  const isHeld = shot && shot.planet === p
+  const isHover = hoverPlanet === p
+
+  ctx.save()
+
+  // Halo under a grabbed or hovered planet.
+  if (isHeld || isHover) {
+    const halo = ctx.createRadialGradient(sp.x, sp.y, r, sp.x, sp.y, ringR + 14)
+    halo.addColorStop(0, rgba(p.color, isHeld ? 0.4 : 0.22))
+    halo.addColorStop(1, rgba(p.color, 0))
+    ctx.fillStyle = halo
+    ctx.beginPath()
+    ctx.arc(sp.x, sp.y, ringR + 14, 0, Math.PI * 2)
+    ctx.fill()
+  }
+
+  // Disc — shaded so the size difference reads as volume, not as a flat dot.
+  const disc = ctx.createRadialGradient(sp.x - r * 0.35, sp.y - r * 0.35, r * 0.1, sp.x, sp.y, r)
+  disc.addColorStop(0, lighten(p.color, 0.45))
+  disc.addColorStop(0.55, p.color)
+  disc.addColorStop(1, darken(p.color, 0.55))
+  ctx.fillStyle = disc
+  ctx.beginPath()
+  ctx.arc(sp.x, sp.y, r, 0, Math.PI * 2)
+  ctx.fill()
+
+  // Terminator, so the sphere reads at small sizes too.
+  ctx.strokeStyle = rgba(p.color, 0.5)
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.arc(sp.x, sp.y, r, 0, Math.PI * 2)
+  ctx.stroke()
+
+  drawYieldRing(ctx, sp.x, sp.y, ringR, p, isHeld || isHover)
+  ctx.restore()
+}
+
+// Segmented ring = energy yield. Twelve slots; a MAX_YIELD planet lights all of
+// them. Unlit slots stay visible so the ring always reads as "N out of a scale",
+// not as an arbitrary arc.
+function drawYieldRing(ctx, cx, cy, ringR, p, emphasised) {
+  const lit = Math.round((p.energyYield / MAX_YIELD) * YIELD_SEGMENTS)
+  const step = (Math.PI * 2) / YIELD_SEGMENTS
+  const gap = step * 0.3
+  const color = yieldColor(p.energyYield)
+
+  ctx.save()
+  ctx.lineCap = 'butt'
+  for (let i = 0; i < YIELD_SEGMENTS; i++) {
+    // Start at the top and run clockwise, like a gauge.
+    const a0 = -Math.PI / 2 + i * step + gap / 2
+    const a1 = a0 + step - gap
+    const on = i < lit
+    ctx.strokeStyle = on ? color : 'rgba(255,255,255,0.09)'
+    ctx.lineWidth = on ? (emphasised ? 3.4 : 2.6) : 1.6
+    ctx.beginPath()
+    ctx.arc(cx, cy, ringR, a0, a1)
+    ctx.stroke()
+  }
+
+  if (emphasised) {
+    ctx.shadowColor = color
+    ctx.shadowBlur = 10
+    ctx.strokeStyle = color
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.arc(cx, cy, ringR, -Math.PI / 2, -Math.PI / 2 + step * lit)
+    ctx.stroke()
+    ctx.shadowBlur = 0
+  }
+  ctx.restore()
+}
+
+// Name / mass / yield next to a planet. Shown for the grabbed or hovered planet
+// always, and for everything else once the view is close enough to have room.
+function drawPlanetLabel(ctx, p) {
+  const sp = cam.worldToScreen(p.x, p.y)
+  const r = Math.max(3, planetRadius(p.mass) * cam.scale())
+  // While this planet is being aimed, the power arc sits at r + 18 — start the
+  // text outside it so the two don't overlap.
+  const x = sp.x + r + (shot && shot.planet === p ? 34 : 16)
+  const y = sp.y - r - 6
+
+  ctx.save()
+  ctx.textAlign = 'left'
+  ctx.font = '11px monospace'
+  ctx.fillStyle = rgba(p.color, 0.95)
+  ctx.fillText(p.name.toUpperCase(), x, y)
+
+  ctx.font = '10px monospace'
+  ctx.fillStyle = 'rgba(180,190,210,0.6)'
+  ctx.fillText(`${(p.mass / REF_MASS).toFixed(2)} M⊕`, x, y + 13)
+
+  ctx.fillStyle = yieldColor(p.energyYield)
+  ctx.fillText(`+${p.energyYield} energy`, x, y + 26)
+  ctx.restore()
+}
+
+// =============================================================================
+// CUE RENDERING
+// =============================================================================
+
+function drawCue(ctx) {
+  const pull = shotPull()
+  if (!shot || !pull) return
+
+  const p = shot.planet
+  const { sp, dist } = pull
+  const r = Math.max(3, planetRadius(p.mass) * cam.scale())
+  const power = requestedPower()
+  const affordable = effectivePower()
+  const cancelling = dist < SHOT_DEADZONE_PX
+
+  ctx.save()
+
+  if (cancelling) {
+    // Deadzone: releasing here is a free cancel, so say so plainly.
+    ctx.strokeStyle = 'rgba(230,110,110,0.9)'
+    ctx.lineWidth = 1.5
+    ctx.setLineDash([4, 4])
+    ctx.beginPath()
+    ctx.arc(sp.x, sp.y, r + 12, 0, Math.PI * 2)
+    ctx.stroke()
+    ctx.setLineDash([])
+    ctx.fillStyle = 'rgba(230,130,130,0.9)'
+    ctx.font = '10px monospace'
+    ctx.textAlign = 'center'
+    ctx.fillText('RELEASE TO CANCEL', sp.x, sp.y + r + 30)
+    ctx.restore()
+    return
+  }
+
+  const nx = -pull.dx / dist
+  const ny = -pull.dy / dist
+  const clamped = Math.min(dist, settings.settings.cue.maxDrag)
+
+  // The pull itself: cue line from the planet back to the cursor.
+  ctx.strokeStyle = rgba(p.color, 0.5)
+  ctx.lineWidth = 2
+  ctx.setLineDash([6, 5])
+  ctx.beginPath()
+  ctx.moveTo(sp.x, sp.y)
+  ctx.lineTo(sp.x + pull.dx, sp.y + pull.dy)
+  ctx.stroke()
+  ctx.setLineDash([])
+
+  // Fire direction: a solid arrow the length of the (clamped) pull.
+  const tipX = sp.x + nx * (clamped + r)
+  const tipY = sp.y + ny * (clamped + r)
+  const grad = ctx.createLinearGradient(sp.x, sp.y, tipX, tipY)
+  grad.addColorStop(0, rgba(p.color, 0.15))
+  grad.addColorStop(1, rgba(p.color, 0.95))
+  ctx.strokeStyle = grad
+  ctx.lineWidth = 3
+  ctx.beginPath()
+  ctx.moveTo(sp.x + nx * r, sp.y + ny * r)
+  ctx.lineTo(tipX, tipY)
+  ctx.stroke()
+
+  const head = 9
+  const a = Math.atan2(ny, nx)
+  ctx.fillStyle = rgba(p.color, 0.95)
+  ctx.beginPath()
+  ctx.moveTo(tipX, tipY)
+  ctx.lineTo(tipX - Math.cos(a - 0.4) * head, tipY - Math.sin(a - 0.4) * head)
+  ctx.lineTo(tipX - Math.cos(a + 0.4) * head, tipY - Math.sin(a + 0.4) * head)
+  ctx.closePath()
+  ctx.fill()
+
+  // Power arc around the planet: full sweep = full power. A second, dimmer arc
+  // shows how much of that the energy bar can actually pay for.
+  const arcR = r + 18
+  ctx.lineWidth = 3
+  ctx.strokeStyle = 'rgba(255,255,255,0.1)'
+  ctx.beginPath()
+  ctx.arc(sp.x, sp.y, arcR, 0, Math.PI * 2)
+  ctx.stroke()
+
+  ctx.strokeStyle = 'rgba(255,120,120,0.55)'
+  ctx.beginPath()
+  ctx.arc(sp.x, sp.y, arcR, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * power)
+  ctx.stroke()
+
+  ctx.strokeStyle = rgba(p.color, 0.95)
+  ctx.beginPath()
+  ctx.arc(sp.x, sp.y, arcR, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * affordable)
+  ctx.stroke()
+
+  ctx.font = '10px monospace'
+  ctx.textAlign = 'center'
+  ctx.fillStyle = affordable < power - 0.001 ? 'rgba(255,140,140,0.95)' : 'rgba(210,220,240,0.85)'
+  const label =
+    affordable < power - 0.001
+      ? `${Math.round(affordable * 100)}% — NOT ENOUGH ENERGY`
+      : `${Math.round(power * 100)}% · −${Math.round(power * settings.settings.cue.shotCost)}`
+  ctx.fillText(label, sp.x, sp.y - arcR - 10)
+
+  ctx.restore()
+}
+
+function drawPrediction(ctx, prediction) {
+  const path = prediction.points
+  if (path.length < 2) return
+  const s = cam.scale()
+  const color = prediction.hitPocket ? '#9fe6a0' : prediction.hitSun ? '#ff8a5c' : '#8fb4ff'
+
+  ctx.save()
+  ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY)
+  ctx.lineWidth = 1.4 / s
+  ctx.setLineDash([6 / s, 6 / s])
+  ctx.strokeStyle = rgba(color, 0.55)
+  ctx.beginPath()
+  ctx.moveTo(path[0].x, path[0].y)
+  for (let i = 1; i < path.length; i++) ctx.lineTo(path[i].x, path[i].y)
+  ctx.stroke()
+  ctx.setLineDash([])
+  ctx.restore()
+
+  // End-of-path marker, in screen space so it stays a readable size.
+  const end = path[path.length - 1]
+  const sp = cam.worldToScreen(end.x, end.y)
+  ctx.save()
+  ctx.strokeStyle = rgba(color, 0.9)
+  ctx.lineWidth = 1.5
+  ctx.beginPath()
+  ctx.arc(sp.x, sp.y, 6, 0, Math.PI * 2)
+  ctx.stroke()
+  if (prediction.hitPocket || prediction.hitSun) {
+    ctx.fillStyle = rgba(color, 0.95)
+    ctx.font = '10px monospace'
+    ctx.textAlign = 'center'
+    ctx.fillText(prediction.hitPocket ? 'SINKS' : 'BURNS UP', sp.x, sp.y - 12)
+  }
+  ctx.restore()
+}
+
+function drawEffects(ctx) {
+  const s = cam.scale()
+
+  ctx.save()
+  ctx.setTransform(s, 0, 0, s, cam.panX, cam.panY)
+  for (const sw of shockwaves) {
+    const t = sw.age / sw.life
+    ctx.strokeStyle = rgba(sw.color, (1 - t) * 0.6)
+    ctx.lineWidth = (2.5 * (1 - t)) / s
+    ctx.beginPath()
+    ctx.arc(sw.x, sw.y, sw.r, 0, Math.PI * 2)
+    ctx.stroke()
+  }
+  for (const sp of sparks) {
+    const t = sp.age / sp.life
+    ctx.fillStyle = rgba(sp.color, (1 - t) * 0.9)
+    ctx.beginPath()
+    ctx.arc(sp.x, sp.y, (2.2 * (1 - t) + 0.6) / s, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  ctx.restore()
+}
+
+// =============================================================================
+// REVEAL OVERLAY
+// =============================================================================
+
+// Black everywhere the opening scan hasn't reached yet, with a bright leading
+// edge. Drawn as one rect with a reverse-wound circle punched out of it.
+function drawRevealOverlay(ctx, w, h) {
+  if (revealDone()) return
+
+  const sp = cam.worldToScreen(0, 0)
+  const rpx = revealR * cam.scale()
+
+  ctx.save()
+  ctx.beginPath()
+  ctx.rect(0, 0, w, h)
+  // moveTo first: rect() leaves a current point, and without this the arc would
+  // be joined to it by a stray line the fill then has to resolve.
+  ctx.moveTo(sp.x + Math.max(0, rpx), sp.y)
+  ctx.arc(sp.x, sp.y, Math.max(0, rpx), 0, Math.PI * 2, true)
+  ctx.fillStyle = '#04050b'
+  ctx.fill()
+
+  // Soft inner falloff so the edge isn't a hard cut.
+  const edge = ctx.createRadialGradient(sp.x, sp.y, Math.max(0, rpx - 40), sp.x, sp.y, rpx)
+  edge.addColorStop(0, 'rgba(4,5,11,0)')
+  edge.addColorStop(1, 'rgba(4,5,11,0.85)')
+  ctx.fillStyle = edge
+  ctx.beginPath()
+  ctx.arc(sp.x, sp.y, Math.max(0, rpx), 0, Math.PI * 2)
+  ctx.fill()
+
+  // Leading scan ring.
+  ctx.strokeStyle = 'rgba(79,195,247,0.55)'
+  ctx.lineWidth = 2
+  ctx.shadowColor = 'rgba(79,195,247,0.8)'
+  ctx.shadowBlur = 16
+  ctx.beginPath()
+  ctx.arc(sp.x, sp.y, Math.max(0, rpx), 0, Math.PI * 2)
+  ctx.stroke()
+  ctx.shadowBlur = 0
+
+  ctx.fillStyle = 'rgba(79,195,247,0.75)'
+  ctx.font = '11px monospace'
+  ctx.textAlign = 'center'
+  ctx.fillText(`SURVEYING SYSTEM · ${Math.round((revealR / REVEAL_FULL_R) * 100)}%`, w / 2, h - 24)
+  ctx.restore()
+}
+
+// =============================================================================
+// HUD
+// =============================================================================
+
+const ENERGY_PANEL = { x: 14, y: 52, w: 62 }
+
+// Vertical energy column. The bar is stored energy; while aiming, the top slice
+// of it turns red to show what the shot will take, and an outline above it shows
+// the part of the pull the bar cannot cover.
+function drawEnergyHUD(ctx, w, h) {
+  const x = ENERGY_PANEL.x
+  const y = ENERGY_PANEL.y
+  const pw = ENERGY_PANEL.w
+  const ph = h - y - 110
+  if (ph < 80) return
+
+  const scaleMax = Math.max(settings.settings.table.startEnergy, TOTAL_YIELD * 0.6, 100)
+  const barX = x + 16
+  const barW = 20
+  const barY = y + 26
+  const barH = ph - 58
+
+  ctx.save()
+  ctx.fillStyle = 'rgba(8,10,20,0.72)'
+  ctx.strokeStyle = 'rgba(79,195,247,0.22)'
+  ctx.lineWidth = 1
+  roundRect(ctx, x, y, pw, ph, 6)
+  ctx.fill()
+  ctx.stroke()
+
+  ctx.fillStyle = 'rgba(255,255,255,0.45)'
+  ctx.font = '9px monospace'
+  ctx.textAlign = 'center'
+  ctx.fillText('ENERGY', x + pw / 2, y + 16)
+
+  // Track.
+  ctx.fillStyle = 'rgba(255,255,255,0.06)'
+  roundRect(ctx, barX, barY, barW, barH, 4)
+  ctx.fill()
+
+  const frac = Math.max(0, Math.min(1, energy / scaleMax))
+  const fillH = barH * frac
+  const draw = shot ? shotDraw() : null
+  const spendH = draw ? Math.min(fillH, (draw.affordable / scaleMax) * barH) : 0
+
+  // Stored energy (minus what the aim is about to take).
+  const keepH = fillH - spendH
+  if (keepH > 0) {
+    const g = ctx.createLinearGradient(0, barY + barH - keepH, 0, barY + barH)
+    g.addColorStop(0, '#7fe0a8')
+    g.addColorStop(1, '#2f8f63')
+    ctx.fillStyle = g
+    roundRect(ctx, barX, barY + barH - keepH, barW, keepH, 4)
+    ctx.fill()
+  }
+  // The slice this shot would burn.
+  if (spendH > 0) {
+    ctx.fillStyle = 'rgba(235,90,90,0.85)'
+    roundRect(ctx, barX, barY + barH - fillH, barW, spendH, 4)
+    ctx.fill()
+  }
+  // Pull the bar can't pay for: outlined above the fill.
+  if (draw && draw.requested > draw.affordable + 0.001) {
+    const overH = Math.min(barH - fillH, ((draw.requested - draw.affordable) / scaleMax) * barH)
+    ctx.strokeStyle = 'rgba(235,90,90,0.6)'
+    ctx.setLineDash([3, 3])
+    ctx.lineWidth = 1
+    roundRect(ctx, barX, barY + barH - fillH - overH, barW, overH, 3)
+    ctx.stroke()
+    ctx.setLineDash([])
+  }
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.14)'
+  ctx.lineWidth = 1
+  roundRect(ctx, barX, barY, barW, barH, 4)
+  ctx.stroke()
+
+  ctx.fillStyle = energy > 0 ? '#9fe6c0' : '#e57373'
+  ctx.font = 'bold 13px monospace'
+  ctx.textAlign = 'center'
+  ctx.fillText(String(Math.round(energy)), x + pw / 2, barY + barH + 20)
+
+  ctx.fillStyle = 'rgba(255,255,255,0.3)'
+  ctx.font = '9px monospace'
+  ctx.fillText('BANKED', x + pw / 2, barY + barH + 36)
+  ctx.fillStyle = 'rgba(200,210,230,0.7)'
+  ctx.font = '11px monospace'
+  ctx.fillText(String(Math.round(energyBanked)), x + pw / 2, barY + barH + 48)
+  ctx.restore()
+}
+
+// Roster: every planet on the table with its two numbers side by side, so the
+// mass/yield independence is legible even without hunting around the field.
+function drawRoster(ctx, w) {
+  const panelW = 208
+  const rowH = 34
+  const x = w - panelW - 14
+  const y = 52
+  const ph = 30 + planets.length * rowH
+
+  const maxMass = Math.max(...PLANET_SET.map((p) => p.mass))
+
+  ctx.save()
+  ctx.fillStyle = 'rgba(8,10,20,0.72)'
+  ctx.strokeStyle = 'rgba(79,195,247,0.22)'
+  ctx.lineWidth = 1
+  roundRect(ctx, x, y, panelW, ph, 6)
+  ctx.fill()
+  ctx.stroke()
+
+  ctx.textAlign = 'left'
+  ctx.font = '9px monospace'
+  ctx.fillStyle = 'rgba(255,255,255,0.4)'
+  ctx.fillText('PLANET', x + 12, y + 18)
+  ctx.fillStyle = 'rgba(140,170,220,0.55)'
+  ctx.fillText('MASS', x + 96, y + 18)
+  ctx.fillStyle = 'rgba(220,180,90,0.6)'
+  ctx.fillText('YIELD', x + 152, y + 18)
+
+  planets.forEach((p, i) => {
+    const ry = y + 28 + i * rowH
+    const live = p.status === 'live'
+    const alpha = live ? 1 : 0.32
+
+    if (hoverPlanet === p || (shot && shot.planet === p)) {
+      ctx.fillStyle = 'rgba(79,195,247,0.1)'
+      roundRect(ctx, x + 6, ry - 2, panelW - 12, rowH - 4, 4)
+      ctx.fill()
+    }
+
+    // Swatch, sized like the planet is on the field.
+    const swR = 4 + 6 * Math.pow(p.mass / maxMass, 1 / 3)
+    ctx.globalAlpha = alpha
+    ctx.fillStyle = p.color
+    ctx.beginPath()
+    ctx.arc(x + 18, ry + 10, swR, 0, Math.PI * 2)
+    ctx.fill()
+
+    ctx.font = '10px monospace'
+    ctx.fillStyle = live ? 'rgba(220,228,240,0.9)' : 'rgba(160,170,190,0.7)'
+    ctx.fillText(p.name, x + 32, ry + 8)
+
+    ctx.font = '8px monospace'
+    ctx.fillStyle =
+      p.status === 'pocketed'
+        ? 'rgba(140,230,170,0.85)'
+        : p.status === 'burned'
+          ? 'rgba(255,140,90,0.8)'
+          : p.status === 'lost'
+            ? 'rgba(150,160,190,0.7)'
+            : 'rgba(120,135,165,0.7)'
+    const statusText =
+      p.status === 'pocketed'
+        ? `SUNK +${p.energyYield}`
+        : p.status === 'burned'
+          ? 'BURNED · 0'
+          : p.status === 'lost'
+            ? 'LOST · 0'
+            : `${(p.mass / REF_MASS).toFixed(2)} M⊕`
+    ctx.fillText(statusText, x + 32, ry + 19)
+
+    // Mass bar (blue) and yield bar (gold) — same length scale, different
+    // meanings, deliberately adjacent so they can be compared row by row.
+    const massFrac = p.mass / maxMass
+    ctx.fillStyle = 'rgba(255,255,255,0.08)'
+    ctx.fillRect(x + 96, ry + 4, 48, 5)
+    ctx.fillStyle = `rgba(110,170,235,${0.85 * alpha})`
+    ctx.fillRect(x + 96, ry + 4, 48 * massFrac, 5)
+
+    const yieldFrac = p.energyYield / MAX_YIELD
+    ctx.fillStyle = 'rgba(255,255,255,0.08)'
+    ctx.fillRect(x + 152, ry + 4, 42, 5)
+    ctx.fillStyle = yieldColor(p.energyYield)
+    ctx.globalAlpha = alpha
+    ctx.fillRect(x + 152, ry + 4, 42 * yieldFrac, 5)
+
+    ctx.font = '9px monospace'
+    ctx.fillStyle = `rgba(220,200,150,${0.75 * alpha})`
+    ctx.fillText(`+${p.energyYield}`, x + 152, ry + 20)
+
+    ctx.globalAlpha = 1
+  })
+  ctx.restore()
+}
+
+// Run tally, tucked to the right of the energy column.
+function drawScoreHUD(ctx) {
+  ctx.save()
+  ctx.textAlign = 'left'
+  ctx.font = '11px monospace'
+  ctx.fillStyle = 'rgba(140,160,190,0.8)'
+  ctx.fillText(`SUNK ${pocketed.length}/${TOTAL_PLANETS}`, 92, 66)
+  ctx.fillStyle = 'rgba(110,125,150,0.75)'
+  ctx.fillText(`shots ${shotsFired} · spent ${Math.round(energySpent)}`, 92, 82)
+  if (burned.length || lost.length) {
+    ctx.fillStyle = 'rgba(220,130,110,0.75)'
+    ctx.fillText(`burned ${burned.length} · lost ${lost.length}`, 92, 98)
+  }
+  ctx.restore()
+}
+
+function drawHint(ctx, w, h) {
+  const remaining = livePlanets().length
+  let msg
+  if (!revealDone()) msg = ''
+  else if (remaining === 0) msg = ''
+  else if (shot) msg = 'Drag away to aim · release to fire · release near the planet to cancel'
+  else if (energy <= 0)
+    msg = 'No energy left — the run is stranded. Press R (or ↺ Reset) to rack up again.'
+  else msg = 'Drag a planet to shoot it · right-drag to pan · click empty space to centre the sun'
+  if (!msg) return
+
+  ctx.save()
+  ctx.textAlign = 'center'
+  ctx.font = '11px monospace'
+  ctx.fillStyle = energy <= 0 ? 'rgba(235,120,120,0.9)' : 'rgba(150,165,190,0.65)'
+  ctx.fillText(msg, w / 2, h - 16)
+  ctx.restore()
+}
+
+function drawRunOver(ctx, w, h) {
+  if (livePlanets().length > 0) return
+
+  ctx.save()
+  ctx.textAlign = 'center'
+  ctx.fillStyle = 'rgba(4,6,14,0.72)'
+  roundRect(ctx, w / 2 - 190, h / 2 - 92, 380, 184, 10)
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(79,195,247,0.35)'
+  ctx.lineWidth = 1
+  roundRect(ctx, w / 2 - 190, h / 2 - 92, 380, 184, 10)
+  ctx.stroke()
+
+  ctx.fillStyle = '#4fc3f7'
+  ctx.font = '16px monospace'
+  ctx.fillText('TABLE CLEARED', w / 2, h / 2 - 56)
+
+  ctx.font = '12px monospace'
+  ctx.fillStyle = 'rgba(200,215,235,0.9)'
+  ctx.fillText(`Sunk ${pocketed.length} of ${TOTAL_PLANETS}`, w / 2, h / 2 - 26)
+  ctx.fillStyle = 'rgba(140,230,170,0.9)'
+  ctx.fillText(
+    `Energy banked ${Math.round(energyBanked)} of ${TOTAL_YIELD} possible`,
+    w / 2,
+    h / 2 - 6,
+  )
+  ctx.fillStyle = 'rgba(200,215,235,0.75)'
+  ctx.fillText(
+    `Spent ${Math.round(energySpent)} over ${shotsFired} shot${shotsFired === 1 ? '' : 's'}`,
+    w / 2,
+    h / 2 + 14,
+  )
+  if (burned.length || lost.length) {
+    ctx.fillStyle = 'rgba(220,130,110,0.85)'
+    ctx.fillText(`Wasted: ${burned.length} burned, ${lost.length} lost`, w / 2, h / 2 + 34)
+  }
+  ctx.fillStyle = 'rgba(140,155,180,0.7)'
+  ctx.font = '11px monospace'
+  ctx.fillText(`Final balance ${Math.round(energy)}`, w / 2, h / 2 + 58)
+  ctx.fillStyle = 'rgba(120,135,165,0.6)'
+  ctx.fillText('R — rack up again', w / 2, h / 2 + 76)
+  ctx.restore()
+}
+
+// =============================================================================
+// FRAME
+// =============================================================================
+
+function render(ctx, w, h, timeS) {
+  const c = cam.worldCenter(w, h)
+  starfield.draw(ctx, w, h, c.x, c.y, cam.zoom)
+
+  drawOrbitGuides(ctx)
+  drawPocket(ctx, timeS)
+  drawSun(ctx)
+
+  for (const p of planets) {
+    if (p.status !== 'live') continue
+    drawTrail(ctx, p)
+  }
+
+  if (shot) drawPrediction(ctx, predictShot())
+
+  for (const p of planets) {
+    if (p.status !== 'live') continue
+    drawPlanet(ctx, p, w, h)
+  }
+
+  drawEffects(ctx)
+  drawCue(ctx)
+
+  // Labels last, over the field but under the fog and HUD. Zoomed out they'd
+  // collide with each other, so only the planet in play gets one.
+  const labelAll = cam.zoom > 3.2
+  for (const p of planets) {
+    if (p.status !== 'live') continue
+    if (labelAll || hoverPlanet === p || (shot && shot.planet === p)) drawPlanetLabel(ctx, p)
+  }
+
+  drawRevealOverlay(ctx, w, h)
+
+  drawEnergyHUD(ctx, w, h)
+  drawRoster(ctx, w)
+  drawScoreHUD(ctx)
+  drawHint(ctx, w, h)
+  drawRunOver(ctx, w, h)
+}
+
+// =============================================================================
+// MAIN LOOP
+// =============================================================================
+
+let loop = null
+let _w = 0
+let _h = 0
+let teardown = null
+
+function planetAtScreen(mx, my) {
+  const s = cam.scale()
+  let best = null
+  let bestD = Infinity
+  for (const p of planets) {
+    if (p.status !== 'live') continue
+    if (!revealed(p.x, p.y)) continue
+    const sp = cam.worldToScreen(p.x, p.y)
+    const d = Math.hypot(mx - sp.x, my - sp.y)
+    const grabR = Math.max(3, planetRadius(p.mass) * s) + GRAB_MARGIN_PX
+    if (d <= grabR && d < bestD) {
+      best = p
+      bestD = d
+    }
+  }
+  return best
+}
+
+function initCanvas(canvas) {
+  if (!canvas) return
+
+  // --- Keyboard ---
+  function isTypingTarget(el) {
+    if (!el) return false
+    return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable
+  }
+
+  function onKeyDown(e) {
+    if (isTypingTarget(e.target)) return
+
+    if (e.key === 'Escape') {
+      shot = null
+      return
+    }
+    if (e.key === 'q' || e.key === 'Q') {
+      timeScaleStepIdx = Math.max(0, timeScaleStepIdx - 1)
+      timeScaleTarget = TIME_STEPS[timeScaleStepIdx]
+      return
+    }
+    if (e.key === 'e' || e.key === 'E') {
+      timeScaleStepIdx = Math.min(TIME_STEPS.length - 1, timeScaleStepIdx + 1)
+      timeScaleTarget = TIME_STEPS[timeScaleStepIdx]
+      return
+    }
+    if (e.key >= '1' && e.key <= '4') {
+      timeScaleStepIdx = Number(e.key) - 1
+      timeScaleTarget = TIME_STEPS[timeScaleStepIdx]
+      return
+    }
+    if (e.key === 'r' || e.key === 'R') {
+      reset()
+      return
+    }
+    if (e.key === 'z' || e.key === 'Z') {
+      focusSun()
+      return
+    }
+    if (e.key === 'f' || e.key === 'F') {
+      fitSystem()
+    }
+  }
+
+  // --- Mouse ---
+  function localPoint(e) {
+    const rect = canvas.getBoundingClientRect()
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top }
+  }
+
+  function onMouseDown(e) {
+    const pt = localPoint(e)
+
+    // Right button (or middle) pans.
+    if (e.button === 2 || e.button === 1) {
+      pan = { lastX: pt.x, lastY: pt.y }
+      cam.focus = 'free'
+      e.preventDefault()
+      return
+    }
+    if (e.button !== 0) return
+
+    const p = planetAtScreen(pt.x, pt.y)
+    if (p) {
+      shot = { planet: p, curX: pt.x, curY: pt.y }
+      emptyClick = null
+    } else {
+      shot = null
+      // Remember where a click on empty space started: only a click that stays
+      // put re-centres the camera, so a stray drag doesn't yank the view.
+      emptyClick = { x: pt.x, y: pt.y }
+    }
+  }
+
+  function onMouseMove(e) {
+    const pt = localPoint(e)
+
+    if (pan) {
+      const dx = pt.x - pan.lastX
+      const dy = pt.y - pan.lastY
+      cam.panBy(dx, dy)
+      pan.lastX = pt.x
+      pan.lastY = pt.y
+      return
+    }
+
+    if (shot) {
+      shot.curX = pt.x
+      shot.curY = pt.y
+      return
+    }
+
+    hoverPlanet = planetAtScreen(pt.x, pt.y)
+    canvas.style.cursor = hoverPlanet ? 'grab' : 'default'
+  }
+
+  function onMouseUp(e) {
+    const pt = localPoint(e)
+
+    if (pan && (e.button === 2 || e.button === 1)) {
+      pan = null
+      return
+    }
+    if (e.button !== 0) return
+
+    if (shot) {
+      shot.curX = pt.x
+      shot.curY = pt.y
+      fireShot()
+      emptyClick = null
+      return
+    }
+
+    // A left click on empty space re-centres the view on the sun.
+    if (emptyClick && Math.hypot(pt.x - emptyClick.x, pt.y - emptyClick.y) <= CLICK_SLOP_PX) {
+      focusSun()
+    }
+    emptyClick = null
+  }
+
+  function onMouseLeave() {
+    hoverPlanet = null
+    pan = null
+    emptyClick = null
+    // Losing the cursor mid-pull would leave the cue stuck to the planet, so
+    // treat it as a cancel rather than a shot.
+    shot = null
+  }
+
+  function onWheel(e) {
+    e.preventDefault()
+    cam.focus = 'free'
+    cam.zoomAt(Math.pow(1.12, -e.deltaY / 100), e.offsetX, e.offsetY)
+  }
+
+  function onContextMenu(e) {
+    e.preventDefault() // right-drag is the pan gesture
+  }
+
+  window.addEventListener('keydown', onKeyDown)
+  canvas.addEventListener('mousedown', onMouseDown)
+  canvas.addEventListener('mousemove', onMouseMove)
+  canvas.addEventListener('mouseup', onMouseUp)
+  canvas.addEventListener('mouseleave', onMouseLeave)
+  canvas.addEventListener('wheel', onWheel, { passive: false })
+  canvas.addEventListener('contextmenu', onContextMenu)
+
+  // --- Canvas sizing + frame loop (shared: composables/useCanvasLoop.js) ---
+  loop = useCanvasLoop(canvas, {
+    bottomInset: CONTROL_BAR_H,
+    onResize(w, h, isFirst) {
+      _w = w
+      _h = h
+      if (isFirst) buildScene(w, h)
+      else starfield.build(w, h)
+    },
+    onFrame(realDt, ctx, w, h) {
+      // Ease the time-scale toward its target in log space, like sketch 001, so
+      // stepping 1× → 5M× reads as a smooth ramp rather than a jump.
+      const cur = timeScale.value
+      const tgt = timeScaleTarget
+      if (Math.abs(cur - tgt) < 1) {
+        timeScale.value = tgt
+      } else {
+        const logNew =
+          Math.log(Math.max(1, cur)) +
+          (Math.log(Math.max(1, tgt)) - Math.log(Math.max(1, cur))) * Math.min(1, realDt * 4)
+        timeScale.value = Math.exp(logNew)
+      }
+
+      tickReveal(realDt)
+      tickEffects(realDt)
+      applyFocus(w, h)
+
+      if (isPlaying.value) {
+        const dt_yr = (realDt * timeScale.value) / SECONDS_PER_YEAR
+        gravityStep(dt_yr)
+        resolveOutcomes()
+        simYears += dt_yr
+        for (const p of planets) {
+          if (p.status === 'live') p.trail.push(p.x, p.y)
+        }
+        elapsedLabel.value = `Year ${simYears.toFixed(2)}`
+      }
+
+      render(ctx, w, h, performance.now() / 1000)
+    },
+  })
+
+  teardown = () => {
+    loop.stop()
+    loop = null
+    window.removeEventListener('keydown', onKeyDown)
+    canvas.removeEventListener('mousedown', onMouseDown)
+    canvas.removeEventListener('mousemove', onMouseMove)
+    canvas.removeEventListener('mouseup', onMouseUp)
+    canvas.removeEventListener('mouseleave', onMouseLeave)
+    canvas.removeEventListener('wheel', onWheel)
+    canvas.removeEventListener('contextmenu', onContextMenu)
+  }
+}
+
+// =============================================================================
+// CONTROLS
+// =============================================================================
+
+function togglePlay() {
+  isPlaying.value = !isPlaying.value
+}
+
+function reset() {
+  loop?.resetClock()
+  isPlaying.value = true
+  timeScaleStepIdx = 2
+  timeScaleTarget = TIME_STEPS[2]
+  timeScale.value = TIME_STEPS[2]
+  buildScene(_w, _h)
+}
+
+onUnmounted(() => teardown?.())
+</script>
+
+<style scoped>
+.help-toggle {
+  position: absolute;
+  top: 12px;
+  right: 108px;
+  z-index: 100;
+  background: rgba(15, 15, 30, 0.9);
+  color: #aaa;
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  padding: 5px 12px;
+  cursor: pointer;
+  font-family: monospace;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+}
+.help-toggle:hover {
+  background: rgba(26, 26, 60, 0.95);
+  color: #e0e0e0;
+  border-color: #4fc3f7;
+}
+
+.ctrl-btn {
+  background: #1a1a2e;
+  color: #e0e0e0;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 3px 10px;
+  cursor: pointer;
+  font-family: monospace;
+  font-size: 13px;
+}
+.ctrl-btn:hover {
+  background: #2a2a4e;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 300;
+}
+
+.modal-box {
+  background: #0d1020;
+  border: 1px solid #2a3a5a;
+  border-radius: 8px;
+  padding: 20px 22px 16px;
+  max-width: 560px;
+  font-family: monospace;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.6);
+}
+
+.help-box {
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-title {
+  color: #4fc3f7;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  margin-bottom: 14px;
+}
+
+.modal-body {
+  color: #aab;
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.help-body {
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.help-intro {
+  color: #ccd;
+  margin-bottom: 14px;
+}
+
+.help-h {
+  color: #7bafd6;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin: 16px 0 6px;
+}
+
+.help-body p {
+  margin-bottom: 8px;
+}
+
+.help-body strong {
+  color: #dde;
+}
+
+.help-keys {
+  color: #889;
+  font-size: 11.5px;
+  line-height: 1.9;
+}
+
+.modal-close {
+  margin-top: 16px;
+  align-self: flex-start;
+  background: #1a2540;
+  color: #9cf;
+  border: 1px solid #2a3a5a;
+  border-radius: 4px;
+  padding: 5px 14px;
+  cursor: pointer;
+  font-family: monospace;
+  font-size: 12px;
+}
+.modal-close:hover {
+  background: #24345a;
+}
+</style>
