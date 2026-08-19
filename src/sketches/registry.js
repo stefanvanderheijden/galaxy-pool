@@ -56,6 +56,15 @@ export const SKETCHES = [
       orbit.`,
     tags: ['variant', 'twin-stick', 'orbit lock'],
   },
+  {
+    id: '005',
+    name: '005 Hyper Rail',
+    href: '/hyperrail.html',
+    tagline: 'Surf the gravity contour lines.',
+    description: `Surfing the gravity contour lines, where snapped to a line is the default
+      state and holding Shift lets go into free flight.`,
+    tags: ['contour lines', 'rail surfing', 'free flight'],
+  },
 ]
 
 /** @param {string} id */

@@ -1,0 +1,1354 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Hyper Rail feel rig</title>
+<!--
+  HYPER RAIL. The fifth feel rig, and a VARIANT of hyperwarp2.html rather than a
+  replacement: keep both, play them back to back. Started from hyperwarp2 and keeps its
+  conventions exactly (AU / solar masses / Julian years, G = 4*pi^2, +y DOWN, the retina
+  canvas sizing fix, the settings panel with localStorage, the window.RIG hook).
+
+  WHAT IT IS. You surf the gravity equipotentials. A line is a real object: it runs a
+  particular way, it holds you at exactly one speed, and travelling means changing which
+  line you are on. Snapped is the DEFAULT, not a mode you engage. Shift lets go.
+
+  It is a road trip. There is a NEXT STOP - the nearest world you have not struck - and
+  the way you get there is by dropping to a deeper line to buy speed, riding it round,
+  and climbing back out at the right moment. The pool shot from hyperwarp2 is kept, so
+  arriving means something.
+
+  WHERE THE MECHANIC COMES FROM. Unity, on the gravity-surf branch family (branches
+  gravity-surf, gravity-surf-rail, gravity-surf-capture, gravity-surf-lab). The three
+  facts that came out of it, all ported here:
+
+    1. THE MAP BECOMES TERRAIN (b0a1c23). Three lines per doubling of potential is a
+       legible gradient and a hopeless set of choices. If the ship rides equipotentials
+       the player is picking a line, not reading a slope, so the map has to get much
+       finer before there is anything to pick. hyperwarp2 draws 14 lines; this draws up
+       to maxLines, default 140.
+    2. A LINE IS A REAL OBJECT (f087724). Moving along an equipotential does no work
+       against gravity, so a line is free to hold and every transfer between lines is
+       paid for in exactly the potential difference:
+
+           v1^2 = v0^2 + 2*(phi0 - phi1)
+
+       Going IN is a gain, going OUT is a cost. That is the Hohmann framing as
+       arithmetic, and there is no invented resource anywhere in this rig.
+    3. A LINE HOLDS YOU AT EXACTLY ONE SPEED (fdbeb00). To follow a curved line at
+       speed v you need a centripetal acceleration of v^2 * kappa into the bend, and the
+       only thing pushing you across the line is gravity, magnitude |grad phi|, pointing
+       exactly inward because the line is a level set. So
+
+           v = sqrt(|grad phi| / kappa)
+
+       Round a single mass that reduces to sqrt(GM/r), the circular orbital speed, which
+       is what case HR7 measures it against.
+
+  THIS RIG IS THE RAIL, the first of Unity's three snap prototypes (81a4592): it HANDS
+  the player the hold speed rather than making them catch it. Catching the speed is not
+  the skill; choosing the line and the moment is. That is an assist, and GAME_DESIGN 5.6
+  is the section it answers to - if it plays as the game being played for you, that is
+  the finding.
+
+  ONLY LINES YOU CAN SEE ARE RIDABLE. See surveyLines() for how that is enforced; the
+  short version is that there is one list and both the ink and the rail read it.
+
+  CONTROLS
+    MOUSE          aim: the nose tracks the cursor, always
+    W / S          jump one line OUT / IN (W raises you, S drops you)
+    A / D          reverse the direction you run along the line
+    SHIFT hold     let go: antigravity free flight. Release to re-acquire the nearest line
+    Q / E hold     time slider, 1x..5,000,000x, springs back to 100,000x
+    LMB hold       charge the particle accelerator; release to fire the pool shot
+    ESC            cancel a held charge
+    SCROLL / R / P zoom / reset / pause
+
+  IN FREE FLIGHT W/S drive along the nose and A/D strafe, which is hyperwarp2 unchanged.
+
+  DELIBERATELY NOT PORTED FROM HYPERWARP 2: the time-stop bubble, the teleport, and the
+  001 orbit lock. All three are ways of owning the ship's state, and the rail is a fourth
+  one; having two authorities fight over the ship would make this rig about arbitration
+  rather than about surfing. The shot, the time slider, the energy ledger and the flight
+  model are all kept.
+
+  ONE SOFTENING, TWO USES, and it is worth knowing. potential() is used for the ink, for
+  the hold speed and for the projection onto a line, so those three can never disagree.
+  Free flight uses the sim's own SOFT2, which is smaller. The same asymmetry exists in
+  the game (Surf.cs records it): the two agree everywhere the ship actually flies and
+  disagree only at a core, where nothing is ridable anyway.
+-->
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #04030a; }
+  canvas { display: block; }
+  #panel {
+    position: fixed; top: 10px; right: 10px; width: 250px; z-index: 10;
+    background: rgba(8, 10, 18, 0.92); border: 1px solid #2a3448; border-radius: 6px;
+    font: 11px/1.5 "Share Tech Mono", Menlo, monospace; color: #9fb4cc; padding: 10px 12px;
+    user-select: none; max-height: 92vh; overflow-y: auto;
+  }
+  #panel h1 { font-size: 11px; margin: 0 0 6px; color: #d8e4f2; letter-spacing: 1px; }
+  #panel label { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+  #panel .row { margin: 2px 0; }
+  #panel input[type=range] { width: 106px; accent-color: #5f88c9; }
+  #panel .val { color: #e8b463; min-width: 46px; text-align: right; }
+  #panel hr { border: 0; border-top: 1px solid #223048; margin: 7px 0; }
+  #panel button { background:#1a2334; color:#9fb4cc; border:1px solid #2a3448; border-radius:4px;
+                  font:inherit; padding:2px 8px; cursor:pointer; }
+  #collapse { float: right; cursor: pointer; color:#5f88c9; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="panel"></div>
+<script>
+"use strict";
+
+// ============================== UNITS AND CONSTANTS =============================
+const G = 4 * Math.PI * Math.PI;          // AU^3 / (Msun * yr^2), Kepler's third law
+const SPY = 31557600;                      // seconds per Julian year
+const MAX_SUBSTEP_YR = 1e-4;               // same rule as the game: fixed step ceiling
+const MAX_SUBSTEPS = 64;                   // frame backstop: degrade, never freeze
+const SOFT2 = 1e-6;                        // Plummer softening^2 for FLIGHT, matches SimUnits
+const AUYR_KMS = 4.74057;                  // 1 AU/yr in km/s, for the readout only
+const WARP_MID = 1e5, WARP_MAX = 5e6;      // the slider, 100,000x pinned at the centre
+
+// ============================== TUNABLES (test panel) ===========================
+const DEFAULTS = {
+  railEnabled: true,     // off = hyperwarp2's free flight all the time, for comparison
+  gravLines: true,       // the ink. Turning it off also empties the ridable set, on purpose
+  projections: true,     // the release preview: where you go IF YOU LET GO NOW
+  driftMode: true,       // time slider springs back to the 100,000x centre
+  timeFree: true,        // the slider costs nothing in this rig
+
+  // ---- the chart, which is also the set of ridable lines ----
+  linesPerOctave: 12,    // contour lines per doubling of |phi|. The density knob
+  maxLines: 140,         // ceiling on lines drawn at once; above it the ladder is strided
+  minInkPx: 24,          // a level with less drawn length than this is not on the chart
+  gridNX: 140,           // marching-squares grid across the viewport
+  majorEvery: 4,         // every Nth line is drawn brighter. Purely a reading aid
+
+  // ---- the rail ----
+  railJumpSeconds: 0.75, // REAL seconds to slide from one line to the next
+  railAcquireSeconds: 0.9,// REAL seconds to be pulled back onto a line after letting go
+  railSpeedMult: 1.0,    // 1.0 is the honest hold speed. Below 1 you sink, above you climb
+
+  // ---- flight, from hyperwarp2 unchanged ----
+  thrustAccel: 9000,     // AU/yr^2
+  linearDamp: 0.9,       // the settle, per REAL second, free flight only
+  aimEase: 24,           // how fast the nose swings to the cursor, per second
+
+  // ---- the pool shot, from hyperwarp2 unchanged ----
+  shotPower: 8.0,        // AU/yr of delta-v at full charge, point blank
+  chargeSeconds: 1.5,
+  coneWidthDeg: 28,
+  coneRangeAU: 1.6,
+  shotCost: 25,
+  reactorPs: 3,
+  solarPs: 14,
+  solarRefAU: 0.35,
+  planetBoost: 10000,    // the game layer's boost: wells you can grab, and lines you can ride
+};
+let S = loadSettings();
+
+// ============================== WORLD ===========================================
+// hyperwarp2's table, unchanged: authored as intent (radius + angle) and derived, the
+// same discipline as Sim.StableOrbit.
+const STAR = { x: 0, y: 0, mass: 0.45, drawR: 0.045, color: "#ffd9a0" };
+const BH = { x: 3.4, y: -2.3, mass: 0.9, captureR: 0.10, influenceR: 1.3 };
+const PLANET_DEFS = [
+  { name: "TASTE",   r: 0.55, a: 0.6, mass: 4e-6,  drawR: 0.020, color: "#e0a86c" },
+  { name: "TOUCH",   r: 0.95, a: 2.7, mass: 6e-6,  drawR: 0.024, color: "#8fc3e8" },
+  { name: "SMELL",   r: 1.45, a: 4.4, mass: 1.0e-5, drawR: 0.027, color: "#c98fe8" },
+  { name: "HEARING", r: 2.10, a: 1.6, mass: 8e-6,  drawR: 0.025, color: "#8fe8b0" },
+  { name: "SIGHT",   r: 3.00, a: 5.5, mass: 1.2e-5, drawR: 0.029, color: "#e8e28f" },
+];
+let bodies, ship, score, simYears, target;
+
+function derivePlanet(d) {
+  const v = Math.sqrt(G * STAR.mass / d.r);
+  return { name: d.name, mass: d.mass, drawR: d.drawR, color: d.color, orbitR: d.r,
+           x: STAR.x + d.r * Math.cos(d.a), y: STAR.y + d.r * Math.sin(d.a),
+           vx: -v * Math.sin(d.a), vy: v * Math.cos(d.a),
+           struck: false, alive: true, trail: [] };
+}
+function resetWorld() {
+  bodies = PLANET_DEFS.map(derivePlanet);
+  const r = 1.2, a = 0.2, v = Math.sqrt(G * STAR.mass / r);
+  ship = { x: STAR.x + r * Math.cos(a), y: STAR.y + r * Math.sin(a),
+           vx: -v * Math.sin(a), vy: v * Math.cos(a), nose: 0, trail: [] };
+  ship.nose = Math.atan2(ship.vy, ship.vx);
+  score = { potted: 0, burned: 0, deaths: 0 };
+  simYears = 0;
+  energy = 100;
+  charging = false; charge = 0;
+  sliderT = 0.5; sliderShown = 0.5;
+  rail = { on: false, from: 0, to: 0, t: 1, settle: 0, dir: 1, level: 0,
+           hold: 0, grad: 0, curv: 0, bootstrap: true };
+  railLines = [];
+  target = null;
+  ghostPath = null; ghostBodies = [];
+}
+
+// ============================== STATE ===========================================
+let energy = 100;
+const MAX_ENERGY = 100;
+let charging = false, charge = 0;
+let sliderT = 0.5, sliderShown = 0.5;
+let paused = false;
+let flashes = [];
+let notices = [];
+const keys = {};
+let mouse = { sx: 0, sy: 0 };
+let cam = { x: 0, y: 0, scale: 260, targetScale: 260 };
+
+// THE RAIL'S WHOLE STATE.
+//   from, to   the levels the current slide runs between. Equal when it is not sliding
+//   t          0..1 through that slide, on the REAL clock. 1 = arrived
+//   settle     0..1 how much of the ship the rail owns. Ramps up on acquisition
+//   dir        +1 or -1 along the line's canonical tangent
+//   level      the fractional level being ridden right now, for the readout and RIG
+let rail = { on: false, from: 0, to: 0, t: 1, settle: 0, dir: 1, level: 0,
+             hold: 0, grad: 0, curv: 0, bootstrap: true };
+
+function note(text, color) {
+  const existing = notices.find(n => n.text === text);
+  if (existing) { existing.t = 0; return; }
+  notices.push({ text, color: color || "#8fb8e0", t: 0 });
+  if (notices.length > 4) notices.shift();
+}
+function dist(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return Math.sqrt(dx * dx + dy * dy); }
+function easeInOutCubic(t) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
+
+// ============================== THE FIELD =======================================
+// ONE POTENTIAL FUNCTION, used by the ink, by the hold speed and by the projection onto
+// a line. They cannot disagree about where a line is because they ask the same function.
+//
+// This is the GAME layer: star, every living world at its boosted mass, and the black
+// hole. The softening is fatter than the sim's so the lines stay curves near a core
+// rather than collapsing to a point; see the header note on the two softenings.
+const FIELD_SOFT = 2e-3;
+let wells = [];
+function gatherWells() {
+  wells = [{ x: STAR.x, y: STAR.y, gm: G * STAR.mass }];
+  for (const b of bodies) if (b.alive) wells.push({ x: b.x, y: b.y, gm: G * b.mass * S.planetBoost });
+  wells.push({ x: BH.x, y: BH.y, gm: G * BH.mass });
+}
+function potential(x, y) {
+  let phi = 0;
+  for (let i = 0; i < wells.length; i++) {
+    const w = wells[i], ax = x - w.x, ay = y - w.y;
+    phi -= w.gm / Math.sqrt(ax * ax + ay * ay + FIELD_SOFT);
+  }
+  return phi;
+}
+
+// LEVEL INCREASES INWARD. phi is negative and grows more negative toward a mass, so
+// |phi| rises and so does the level. "level + 1" is the next line DOWN the well. These
+// two are Surf.LevelAt and Surf.PotentialForLevel, ported unchanged.
+//
+// The spacing is anchored to the bare star at 4 AU so the ladder is a property of the
+// system rather than of where the camera happens to be. Move the camera and the same
+// physical lines are drawn, which is the whole reason the ladder is not derived from
+// the viewport.
+const LEVEL_SPACING = G * 0.45 / 4;
+function levelAt(phi) { return Math.log2(Math.max(1e-12, -phi) / LEVEL_SPACING) * S.linesPerOctave; }
+function phiForLevel(level) { return -LEVEL_SPACING * Math.pow(2, level / S.linesPerOctave); }
+
+// Central difference. h must be small against FIELD_SOFT or the difference straddles the
+// Plummer clamp and reports a slope the field does not have.
+const GRAD_H = 2e-4;
+function gradient(x, y) {
+  const gx = (potential(x + GRAD_H, y) - potential(x - GRAD_H, y)) / (2 * GRAD_H);
+  const gy = (potential(x, y + GRAD_H) - potential(x, y - GRAD_H)) / (2 * GRAD_H);
+  return [gx, gy];
+}
+
+// Curvature of the level set, the standard formula. The step is DELIBERATELY COARSER
+// than the gradient's: a second difference divides by h^2, so too fine a step amplifies
+// rounding noise rather than reducing error, which is the opposite of the intuition.
+const CURV_H = 2e-3;
+function curvature(x, y) {
+  const h = CURV_H;
+  const c = potential(x, y);
+  const e = potential(x + h, y), w = potential(x - h, y);
+  const n = potential(x, y + h), s = potential(x, y - h);
+  const ne = potential(x + h, y + h), nw = potential(x - h, y + h);
+  const se = potential(x + h, y - h), sw = potential(x - h, y - h);
+  const px = (e - w) / (2 * h), py = (n - s) / (2 * h);
+  const pxx = (e - 2 * c + w) / (h * h), pyy = (n - 2 * c + s) / (h * h);
+  const pxy = (ne - nw - se + sw) / (4 * h * h);
+  const g2 = px * px + py * py;
+  if (!(g2 > 1e-20)) return 0;
+  const num = pxx * py * py - 2 * pxy * px * py + pyy * px * px;
+  return Math.abs(num) / (g2 * Math.sqrt(g2));
+}
+
+// A LINE HOLDS YOU AT EXACTLY ONE SPEED: v^2 * kappa = |grad phi|. Zero curvature means
+// no speed holds you here, which is correct rather than a guard - a straight
+// equipotential needs no centripetal force, so gravity across it is unbalanced at every
+// speed.
+function holdSpeed(gradMag, curv) {
+  if (!(curv > 1e-9) || !(gradMag > 0)) return 0;
+  return Math.sqrt(gradMag / curv);
+}
+
+// Newton onto a level set: step along the gradient by however far the potential is off,
+// repeat. Converges quadratically because phi is smooth, so three is generous.
+function projectToLevel(x, y, phiTarget) {
+  for (let i = 0; i < 3; i++) {
+    const phi = potential(x, y);
+    const [gx, gy] = gradient(x, y);
+    const g2 = gx * gx + gy * gy;
+    if (!(g2 > 1e-20)) break;
+    const step = (phi - phiTarget) / g2;
+    x -= gx * step; y -= gy * step;
+  }
+  return [x, y];
+}
+
+// ============================== THE CHART =======================================
+// railLines is THE list. Sorted by level ascending, which is outermost first.
+// Each entry: { level, phi, segs: Float64Array-ish flat [x1,y1,x2,y2,...], ink }
+let railLines = [];
+let chartStride = 1;
+
+// ONLY THE LINES YOU CAN SEE ARE RIDABLE, and this function is the whole enforcement.
+//
+// It runs once per frame, BEFORE the sim and before the draw, and produces railLines.
+// draw() strokes exactly those segments. The rail indexes exactly that array: acquire
+// searches it, W and S step through it, and the RIG hook's acquire() goes through the
+// same search. There is no second list, no way to name a level directly, and nothing
+// downstream ever recomputes a level from phi and rides it.
+//
+// A level drops out of the list for three reasons, and every one of them is a reason
+// you cannot see it:
+//   1. it is outside the potential range the viewport covers, so its curve is off-screen
+//   2. more than maxLines would land on screen at once, so the ladder is strided and it
+//      was not one of the survivors
+//   3. its total drawn length is under minInkPx, so what is on screen is a scratch
+//
+// THE STRIDE IS ALIGNED TO ABSOLUTE LEVEL MULTIPLES rather than to the lowest visible
+// level. Aligning it to the viewport would make the whole set shimmer between two
+// interleaved ladders as the camera drifts, and a line you are riding would blink out
+// of existence for no physical reason.
+function surveyLines(W, H) {
+  railLines = [];
+  chartStride = 1;
+  if (!S.gravLines) return;
+
+  const NX = Math.max(24, Math.round(S.gridNX));
+  const NY = Math.max(18, Math.round(NX * H / W));
+  const wxs = W / cam.scale, wys = H / cam.scale;
+  const x0 = cam.x - wxs / 2, y0 = cam.y - wys / 2;
+  const dx = wxs / NX, dy = wys / NY;
+
+  // The grid holds LEVELS, not potentials. Marching in level space costs one log per
+  // sample and makes the crossing interpolation uniform across the whole ladder.
+  const lev = new Float64Array((NX + 1) * (NY + 1));
+  let lmin = Infinity, lmax = -Infinity;
+  for (let j = 0; j <= NY; j++)
+    for (let i = 0; i <= NX; i++) {
+      const L = levelAt(potential(x0 + i * dx, y0 + j * dy));
+      lev[j * (NX + 1) + i] = L;
+      if (L < lmin) lmin = L;
+      if (L > lmax) lmax = L;
+    }
+  const lo = Math.ceil(lmin), hi = Math.floor(lmax);
+  if (!(hi >= lo)) return;
+
+  chartStride = Math.max(1, Math.ceil((hi - lo + 1) / Math.max(1, Math.round(S.maxLines))));
+  const byLevel = new Map();
+  const want = L => {
+    let a = byLevel.get(L);
+    if (!a) { a = { segs: [], ink: 0 }; byLevel.set(L, a); }
+    return a;
+  };
+
+  for (let j = 0; j < NY; j++)
+    for (let i = 0; i < NX; i++) {
+      const a = lev[j * (NX + 1) + i], b = lev[j * (NX + 1) + i + 1];
+      const c = lev[(j + 1) * (NX + 1) + i + 1], d = lev[(j + 1) * (NX + 1) + i];
+      let cmin = a, cmax = a;
+      if (b < cmin) cmin = b; if (b > cmax) cmax = b;
+      if (c < cmin) cmin = c; if (c > cmax) cmax = c;
+      if (d < cmin) cmin = d; if (d > cmax) cmax = d;
+      const first = Math.ceil(cmin / chartStride) * chartStride;
+      const X = x0 + i * dx, Y = y0 + j * dy;
+      for (let L = first; L <= cmax; L += chartStride) {
+        const av = a - L, bv = b - L, cv = c - L, dv = d - L;
+        const code = (av > 0 ? 8 : 0) | (bv > 0 ? 4 : 0) | (cv > 0 ? 2 : 0) | (dv > 0 ? 1 : 0);
+        if (code === 0 || code === 15) continue;
+        const pts = [];
+        if ((av > 0) !== (bv > 0)) pts.push(X + dx * av / (av - bv), Y);
+        if ((bv > 0) !== (cv > 0)) pts.push(X + dx, Y + dy * bv / (bv - cv));
+        if ((dv > 0) !== (cv > 0)) pts.push(X + dx * dv / (dv - cv), Y + dy);
+        if ((av > 0) !== (dv > 0)) pts.push(X, Y + dy * av / (av - dv));
+        // Two crossings is a segment. Four is a saddle cell, joined pairwise, which is
+        // wrong half the time and invisible at this line weight.
+        const e = want(L);
+        for (let p = 0; p + 3 < pts.length; p += 4) {
+          e.segs.push(pts[p], pts[p + 1], pts[p + 2], pts[p + 3]);
+          e.ink += Math.hypot(pts[p + 2] - pts[p], pts[p + 3] - pts[p + 1]);
+        }
+      }
+    }
+
+  const minInkAu = S.minInkPx / cam.scale;
+  for (const [L, e] of byLevel) {
+    if (e.ink < minInkAu) continue;
+    railLines.push({ level: L, phi: phiForLevel(L), segs: e.segs, ink: e.ink });
+  }
+  railLines.sort((p, q) => p.level - q.level);
+}
+
+// Index of a level in the drawn set, or -1. THE ONLY WAY IN.
+function lineIndex(level) {
+  for (let i = 0; i < railLines.length; i++) if (railLines[i].level === level) return i;
+  return -1;
+}
+function nearestLineIndex(level) {
+  let best = -1, bd = Infinity;
+  for (let i = 0; i < railLines.length; i++) {
+    const d = Math.abs(railLines[i].level - level);
+    if (d < bd) { bd = d; best = i; }
+  }
+  return best;
+}
+
+// ============================== THE RAIL ========================================
+// Catch the nearest line that is on the chart. instant = true is used exactly once, at
+// spawn, because "snapped is the default" has to be true on the first frame rather than
+// a second after it.
+function acquire(instant) {
+  if (!S.railEnabled || railLines.length === 0) return false;
+  const i = nearestLineIndex(levelAt(potential(ship.x, ship.y)));
+  if (i < 0) return false;
+  return rideLine(i, instant, false);
+}
+
+// Enter a line BY ITS INDEX IN THE DRAWN SET. Every path in - spawn, jump, re-acquire,
+// the RIG hook - comes through here, which is why a level that is not on the chart has
+// no way to be ridden.
+function rideLine(i, instant, slide) {
+  if (i < 0 || i >= railLines.length) return false;
+  const L = railLines[i].level;
+  rail.from = slide ? rail.level : L;
+  rail.to = L;
+  rail.t = (slide && S.railJumpSeconds > 0 && !instant) ? 0 : 1;
+  rail.level = rail.from;
+  if (!rail.on) {
+    rail.on = true;
+    rail.settle = instant ? 1 : 0;
+    // Keep running the way the ship was already going, so "along the line" never flips
+    // under the player at the moment they are handed the helm.
+    const [gx, gy] = gradient(ship.x, ship.y);
+    const gl = Math.hypot(gx, gy);
+    if (gl > 1e-12) {
+      const tx = -gy / gl, ty = gx / gl;
+      rail.dir = (tx * ship.vx + ty * ship.vy) >= 0 ? 1 : -1;
+    }
+  }
+  return true;
+}
+
+function releaseRail(why) {
+  if (!rail.on) return;
+  rail.on = false;
+  rail.settle = 0;
+  if (why) note(why, "#e8b463");
+}
+
+// Jump to the next line out or in. dir +1 is OUTWARD, which is W, which is
+// prograde-raises-your-orbit stated in the controls the player already has. Worth
+// getting round the right way even in a rig: the point is to find out whether
+// navigating is interesting, and it will not be if the controls teach the opposite of
+// the thing being navigated.
+//
+// OUTWARD IS DOWN THE SORTED LIST because level rises inward.
+function railJump(dir) {
+  if (!rail.on || dir === 0) return;
+  if (rail.t < 1) return;                       // a slide in progress is not interruptible
+  const at = lineIndex(rail.to);
+  if (at < 0) return;
+  const i = at + (dir > 0 ? -1 : 1);
+  if (i < 0 || i >= railLines.length) { note("NO LINE THAT WAY", "#e8b463"); return; }
+  const from = potential(ship.x, ship.y), to = railLines[i].phi;
+  rideLine(i, false, true);
+  // The speed you will arrive with, by conservation and nothing else:
+  //     v1^2 = v0^2 + 2*(phi0 - phi1)
+  // Negative means unreachable by coasting, and the magnitude is what you are short by.
+  // The rail hands you the difference; this readout is what it is handing you.
+  const v0 = Math.hypot(ship.vx, ship.vy);
+  const v2 = v0 * v0 + 2 * (from - to);
+  const v1 = v2 >= 0 ? Math.sqrt(v2) : -Math.sqrt(-v2);
+  note(`LINE ${railLines[i].level}  ${(v0 * AUYR_KMS).toFixed(1)} -> ${(v1 * AUYR_KMS).toFixed(1)} km/s`,
+       dir > 0 ? "#e8b463" : "#8cf0ff");
+}
+
+function railDirection(d) {
+  if (!rail.on || rail.dir === d) return;
+  rail.dir = d;
+  note(d > 0 ? "RUNNING CLOCKWISE" : "RUNNING ANTICLOCKWISE", "#9fb4cc");
+}
+
+// ONE STEP OF BEING ON A RAIL, run INSTEAD of gravity rather than after it.
+//
+// That ordering is the whole implementation. A railed ship is not a body being pushed
+// onto a curve by forces; it is a body whose state is defined by the curve. Letting the
+// integrator move it first and then correcting would mean undoing a real gravitational
+// step every frame, which at 100,000x is thousands of seconds of it, and the result is a
+// fight between two authorities rather than one answer.
+function stepRail(dtYr, realDt) {
+  // Both animations run on the REAL clock. A slide the player watches happen has to
+  // take the same time at 1x and at 5,000,000x, or it is a teleport at speed.
+  if (rail.t < 1) rail.t = S.railJumpSeconds > 0 ? Math.min(1, rail.t + realDt / S.railJumpSeconds) : 1;
+  if (rail.settle < 1) rail.settle = S.railAcquireSeconds > 0
+    ? Math.min(1, rail.settle + realDt / S.railAcquireSeconds) : 1;
+
+  rail.level = rail.from + (rail.to - rail.from) * easeInOutCubic(rail.t);
+  const phiT = phiForLevel(rail.level);
+
+  const [gx, gy] = gradient(ship.x, ship.y);
+  const gl = Math.hypot(gx, gy);
+  if (!(gl > 1e-12)) { releaseRail("LINE LOST: FLAT FIELD"); return; }
+  // phi increases OUTWARD, so +gradient is up the well. The tangent is that turned a
+  // quarter turn; rail.dir picks which of the two ways round.
+  const tx = -gy / gl * rail.dir, ty = gx / gl * rail.dir;
+
+  rail.grad = gl;
+  rail.curv = curvature(ship.x, ship.y);
+  rail.hold = holdSpeed(gl, rail.curv) * S.railSpeedMult;
+  if (!(rail.hold > 0)) { releaseRail("LINE LOST: NO HOLD SPEED"); return; }
+
+  // EASED IN, BOTH POSITION AND VELOCITY. Teleporting the ship onto the line and setting
+  // its speed in one frame is correct arithmetic and reads as a glitch; this is a
+  // megaship and has to appear to be moved.
+  const k = rail.settle;
+  ship.vx += (tx * rail.hold - ship.vx) * k;
+  ship.vy += (ty * rail.hold - ship.vy) * k;
+
+  const [lx, ly] = projectToLevel(ship.x, ship.y, phiT);
+  const px = ship.x + (lx - ship.x) * k;
+  const py = ship.y + (ly - ship.y) * k;
+
+  // And then it MOVES ALONG THE LINE, which is what makes this a rail and not a parking
+  // brake. Advance along the tangent at the hold speed, then project back onto the line
+  // so the step's chord does not slowly cut the corner off a curve: a first-order
+  // integrator on a circle spirals outward, and over a few thousand steps at warp that
+  // is visible drift.
+  const adv = rail.hold * dtYr;
+  const [nx2, ny2] = projectToLevel(px + tx * adv, py + ty * adv, phiT);
+  ship.x = nx2; ship.y = ny2;
+}
+
+// ============================== PHYSICS =========================================
+// One softened point-mass kick, the exact Pull() shape from Sim.cs.
+function pull(sx, sy, gm, b, h) {
+  const dx = sx - b.x, dy = sy - b.y;
+  const d2 = dx * dx + dy * dy + SOFT2;
+  const k = gm * h / (d2 * Math.sqrt(d2));
+  b.vx += dx * k; b.vy += dy * k;
+}
+
+function simStep(h, realDt) {
+  // Planets: the real layer. A planet feels the star, and once struck the black hole
+  // too, so the table stays an authored set of rings until a shot breaks it.
+  for (const b of bodies) {
+    if (!b.alive) continue;
+    pull(STAR.x, STAR.y, G * STAR.mass, b, h);
+    if (b.struck && dist(b.x, b.y, BH.x, BH.y) < BH.influenceR) pull(BH.x, BH.y, G * BH.mass, b, h);
+    b.x += b.vx * h; b.y += b.vy * h;
+  }
+
+  if (rail.on) stepRail(h, realDt);
+  else {
+    // FREE FLIGHT IS ANTIGRAVITY, hyperwarp2's model unchanged: the wells do not act and
+    // momentum does the flying. Shift is the only way to be here.
+    ship.x += ship.vx * h; ship.y += ship.vy * h;
+  }
+
+  for (const b of bodies) {
+    if (!b.alive) continue;
+    if (dist(b.x, b.y, BH.x, BH.y) < BH.captureR) {
+      b.alive = false; score.potted++;
+      flash(b.x, b.y, 0.25, "#ff8c00"); burst(b.x, b.y, 0.1, "#ff8c00");
+      note("POTTED: " + b.name, "#ff8c00");
+    } else if (dist(b.x, b.y, STAR.x, STAR.y) < STAR.drawR + b.drawR) {
+      b.alive = false; score.burned++;
+      flash(b.x, b.y, 0.2, "#ff5030"); burst(b.x, b.y, 0.08, "#ff5030");
+      note("BURNED: " + b.name, "#ff5030");
+    }
+  }
+  if (dist(ship.x, ship.y, BH.x, BH.y) < BH.captureR ||
+      dist(ship.x, ship.y, STAR.x, STAR.y) < STAR.drawR * 1.2) {
+    score.deaths++; flash(ship.x, ship.y, 0.3, "#ffffff");
+    note("SHIP LOST: RESPAWNING", "#ff5030");
+    const r = 1.2, a = Math.random() * 6.28, v = Math.sqrt(G * STAR.mass / r);
+    ship.x = STAR.x + r * Math.cos(a); ship.y = STAR.y + r * Math.sin(a);
+    ship.vx = -v * Math.sin(a); ship.vy = v * Math.cos(a);
+    ship.trail = [];
+    releaseRail(null);
+    rail.bootstrap = true;      // and it re-snaps on the next frame, because snapped is default
+  }
+}
+
+// ============================== ABILITIES =======================================
+function warpNow() {
+  return sliderT <= 0.5
+    ? Math.pow(10, (sliderT / 0.5) * Math.log10(WARP_MID))
+    : Math.pow(10, Math.log10(WARP_MID) + ((sliderT - 0.5) / 0.5) * Math.log10(WARP_MAX / WARP_MID));
+}
+
+// THE HAND AIMS, THE DRIVE MOVES, hyperwarp2's rule kept: the nose chases the CURSOR so
+// the cone can stay on a world while the rail carries the ship round it. That pairing is
+// better here than it was there - on a rail you have no control of the path at all, so
+// aiming being independent is the only reason the shot is takeable.
+function aimNose(realDt) {
+  const [mwx, mwy] = screenToWorld(mouse.sx, mouse.sy);
+  const adx = mwx - ship.x, ady = mwy - ship.y;
+  if (adx * adx + ady * ady > 1e-12) {
+    const want = Math.atan2(ady, adx);
+    let d = want - ship.nose;
+    while (d > Math.PI) d -= 2 * Math.PI;
+    while (d < -Math.PI) d += 2 * Math.PI;
+    ship.nose += d * Math.min(1, realDt * S.aimEase);
+  }
+}
+
+// Free flight only. On a rail the keys mean jump and direction instead, so there is
+// never a frame where thrust and the rail are both trying to own the velocity.
+function applyThrust(dtYr) {
+  if (rail.on) return;
+  const nx = Math.cos(ship.nose), ny = Math.sin(ship.nose);
+  const lon = (keys.w ? 1 : 0) - (keys.s ? 1 : 0);
+  const lat = (keys.a ? 1 : 0) - (keys.d ? 1 : 0);
+  let fx = nx * lon + ny * lat;
+  let fy = ny * lon - nx * lat;
+  const mag = Math.hypot(fx, fy);
+  if (mag > 1e-9) {
+    fx /= mag; fy /= mag;
+    ship.vx += fx * S.thrustAccel * dtYr;
+    ship.vy += fy * S.thrustAccel * dtYr;
+  }
+}
+
+function fireShot() {
+  const cost = S.shotCost * charge;
+  const fraction = cost > 0 ? Math.min(1, energy / cost) : 1;   // underfunded = weak, never refused
+  energy = Math.max(0, energy - cost);
+  const power = charge * fraction * S.shotPower;
+  const nx = Math.cos(ship.nose), ny = Math.sin(ship.nose);
+  const halfRad = S.coneWidthDeg * Math.PI / 360;
+  let hitAny = false;
+  for (const b of bodies) {
+    if (!b.alive) continue;
+    const dx = b.x - ship.x, dy = b.y - ship.y;
+    const d = Math.hypot(dx, dy);
+    if (d > S.coneRangeAU || d < 1e-9) continue;
+    const ang = Math.acos(Math.max(-1, Math.min(1, (dx * nx + dy * ny) / d)));
+    if (ang > halfRad) continue;
+    const falloff = 1 - 0.7 * (d / S.coneRangeAU);   // 100% point blank, 30% at the lip
+    const dv = power * falloff;
+    b.vx += (dx / d) * dv; b.vy += (dy / d) * dv;
+    b.struck = true; hitAny = true;
+  }
+  // THE RECOIL IS REAL AND THE RAIL EATS IT. A railed ship's velocity is set by the line
+  // every step, so firing from a rail costs you nothing in speed. That is a consequence
+  // of the rail owning the state rather than a decision, and it is worth watching for in
+  // play: it makes the rail the safe place to shoot from.
+  ship.vx -= nx * power * 0.15; ship.vy -= ny * power * 0.15;
+  flash(ship.x + nx * 0.05, ship.y + ny * 0.05, 0.12 + charge * 0.25, "#8fc3e8");
+  burst(ship.x + nx * 0.05, ship.y + ny * 0.05, 0.05 + charge * 0.08, "#8fc3e8");
+  note(hitAny ? "SHOCKWAVE FIRED" : "SHOCKWAVE FIRED: NO CONTACT", "#8fc3e8");
+}
+
+function flash(x, y, r, color) { flashes.push({ x, y, r, t: 0, color, kind: "ring" }); }
+function burst(x, y, r, color) { flashes.push({ x, y, r, t: 0, color, kind: "flare", rot: Math.random() * 6.28 }); }
+
+// THE ROAD TRIP. The next stop is the nearest living world you have not struck yet;
+// once you have hit it, it is on its way somewhere and the trip moves on. That is all
+// the framing needs to be, and it is what makes the line you pick a decision rather than
+// a scenic route.
+function updateTarget() {
+  let best = null, bd = Infinity;
+  for (const b of bodies) {
+    if (!b.alive || b.struck) continue;
+    const d = dist(ship.x, ship.y, b.x, b.y);
+    if (d < bd) { bd = d; best = b; }
+  }
+  if (best !== target) {
+    target = best;
+    if (target) note("NEXT STOP: " + target.name, "#e8b463");
+    else note("NO STOPS LEFT", "#e8b463");
+  }
+}
+
+// ============================== FRAME ===========================================
+let last = performance.now();
+function frame(now) {
+  requestAnimationFrame(frame);
+  const realDt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+
+  gatherWells();
+  // THE SURVEY RUNS FIRST, before the sim and before the draw, so the sim and the ink
+  // are looking at the same list. Also runs while paused, so the chart is live under a
+  // paused ship.
+  surveyLines(cv.width, cv.height);
+
+  if (paused) { draw(realDt); return; }
+
+  // ---- the time slider ---------------------------------------------------------
+  const SLIDE_RATE = 0.45;
+  if (keys.q) sliderT = Math.max(0, sliderT - SLIDE_RATE * realDt);
+  if (keys.e) sliderT = Math.min(1, sliderT + SLIDE_RATE * realDt);
+  if (S.driftMode && !keys.q && !keys.e)
+    sliderT += (0.5 - sliderT) * Math.min(1, realDt * 3);
+  sliderShown += (sliderT - sliderShown) * Math.min(1, realDt * 10);
+  const warp = warpNow();
+
+  // ---- energy, on the real clock. It feeds the shot and nothing else here ------
+  const sunD = dist(ship.x, ship.y, STAR.x, STAR.y);
+  const solar = S.solarPs * Math.min(1, Math.pow(S.solarRefAU / Math.max(sunD, 0.05), 2.5));
+  if (charging) charge = Math.min(1, charge + realDt / S.chargeSeconds);
+  energy = Math.max(0, Math.min(MAX_ENERGY, energy + (S.reactorPs + solar) * realDt));
+
+  // ---- SNAPPED IS THE DEFAULT --------------------------------------------------
+  // Not a mode you engage: on the first frame the ship has a chart, it is on a line, and
+  // the only thing that takes it off is the player's hand on Shift. Shift down releases,
+  // Shift up re-acquires, both animated.
+  const wantFree = !!keys.shift || !S.railEnabled;
+  if (rail.bootstrap && !wantFree && railLines.length > 0) {
+    if (acquire(true)) { rail.bootstrap = false; note("ON THE RAIL", "#8cf0ff"); }
+  }
+  if (wantFree && rail.on) releaseRail("FREE FLIGHT");
+  if (!wantFree && !rail.on && !rail.bootstrap && S.railEnabled) {
+    if (acquire(false)) note("RE-ACQUIRED", "#8cf0ff");
+  }
+  // A line that has left the chart cannot be ridden, so the rail slides to the nearest
+  // one that is still on it. This is the rule biting in play rather than in a test: zoom
+  // far enough out and the ladder thins under you.
+  if (rail.on && rail.t >= 1 && lineIndex(rail.to) < 0) {
+    const i = nearestLineIndex(rail.level);
+    if (i >= 0) { rideLine(i, false, true); note("LINE LEFT THE CHART", "#e8b463"); }
+    else releaseRail("NO CHART: FLYING FREE");
+  }
+
+  aimNose(realDt);
+
+  // ---- the sim, substepped exactly like the game -------------------------------
+  const dtYr = warp * realDt / SPY;
+  const steps = dtYr > MAX_SUBSTEP_YR ? Math.min(MAX_SUBSTEPS, Math.ceil(dtYr / MAX_SUBSTEP_YR)) : 1;
+  const h = dtYr / steps;
+  for (let i = 0; i < steps; i++) {
+    applyThrust(h);
+    simStep(h, realDt / steps);
+  }
+  simYears += dtYr;
+
+  // The settle, once per frame on the real clock. Free flight only: on a rail the line
+  // owns the speed, and damping it would fight the hold speed every step.
+  if (S.linearDamp > 0 && !rail.on) {
+    const k = Math.exp(-S.linearDamp * realDt);
+    ship.vx *= k; ship.vy *= k;
+  }
+
+  updateTarget();
+
+  pushTrail(ship.trail, ship.x, ship.y, 700);
+  for (const b of bodies) if (b.alive) pushTrail(b.trail, b.x, b.y, 250);
+
+  // THE RELEASE PREVIEW. While railed this line is not where the ship is going, it is
+  // where the ship WOULD go if released this instant, which is exactly what a navigator
+  // about to let go wants. It is drawn yellow rather than blue for that reason: an
+  // instrument that silently changes what it is saying is worse than one that says
+  // nothing (gravity-surf-rail, ead840b).
+  if (S.projections && !charging) buildGhost();
+  else { ghostPath = null; ghostBodies = []; }
+
+  cam.x += (ship.x - cam.x) * Math.min(1, realDt * 4);
+  cam.y += (ship.y - cam.y) * Math.min(1, realDt * 4);
+  cam.scale += (cam.targetScale - cam.scale) * Math.min(1, realDt * 6);
+
+  for (const f of flashes) f.t += realDt;
+  flashes = flashes.filter(f => f.t < 0.8);
+  for (const n of notices) n.t += realDt;
+  notices = notices.filter(n => n.t < 20);
+
+  draw(realDt);
+}
+
+function pushTrail(trail, x, y, cap) {
+  const lastPt = trail[trail.length - 1];
+  if (lastPt && dist(lastPt.x, lastPt.y, x, y) < 0.004) return;
+  trail.push({ x, y });
+  while (trail.length > cap) trail.shift();
+}
+
+// The forecast: clone everything, integrate at a fixed step. The ship's line is a FREE
+// body under the game layer, which is the release preview described above; a struck
+// world gets its own line because an unstruck world's future is its authored ring and is
+// already on screen.
+let ghostPath = null, ghostBodies = [];
+function buildGhost() {
+  const gb = bodies.filter(b => b.alive).map(b => ({ ...b }));
+  const gs = { x: ship.x, y: ship.y, vx: ship.vx, vy: ship.vy };
+  const path = [{ x: gs.x, y: gs.y }];
+  const tracked = gb.filter(b => b.struck).map(b => ({ b, color: b.color, pts: [{ x: b.x, y: b.y }], dead: false }));
+  const H = 2e-4, N = 3000;
+  let shipDead = false;
+  for (let i = 0; i < N; i++) {
+    for (const b of gb) {
+      if (b.ghostDead) continue;
+      pull(STAR.x, STAR.y, G * STAR.mass, b, H);
+      if (b.struck && dist(b.x, b.y, BH.x, BH.y) < BH.influenceR) pull(BH.x, BH.y, G * BH.mass, b, H);
+    }
+    if (!shipDead) {
+      pull(STAR.x, STAR.y, G * STAR.mass, gs, H);
+      for (const b of gb) if (!b.ghostDead) pull(b.x, b.y, G * b.mass * S.planetBoost, gs, H);
+      if (dist(gs.x, gs.y, BH.x, BH.y) < BH.influenceR) pull(BH.x, BH.y, G * BH.mass, gs, H);
+    }
+    for (const b of gb) if (!b.ghostDead) { b.x += b.vx * H; b.y += b.vy * H; }
+    if (!shipDead) { gs.x += gs.vx * H; gs.y += gs.vy * H; }
+    if (i % 8 === 0) {
+      if (!shipDead) path.push({ x: gs.x, y: gs.y });
+      for (const t of tracked) if (!t.dead) t.pts.push({ x: t.b.x, y: t.b.y });
+    }
+    if (!shipDead && (dist(gs.x, gs.y, BH.x, BH.y) < BH.captureR ||
+                      dist(gs.x, gs.y, STAR.x, STAR.y) < STAR.drawR)) shipDead = true;
+    for (const t of tracked)
+      if (!t.dead && (dist(t.b.x, t.b.y, BH.x, BH.y) < BH.captureR ||
+                      dist(t.b.x, t.b.y, STAR.x, STAR.y) < STAR.drawR + t.b.drawR))
+      { t.dead = true; t.b.ghostDead = true; }
+  }
+  ghostPath = path;
+  ghostBodies = tracked.map(t => ({ color: t.color, pts: t.pts }));
+}
+
+// ============================== DRAWING =========================================
+const cv = document.getElementById("cv");
+const cx = cv.getContext("2d");
+// The buffer is in device pixels, the element in CSS pixels; without the style sizes a
+// retina screen shows only the top-left quarter and the ship sits bottom-right.
+function resize() {
+  cv.width = innerWidth * devicePixelRatio; cv.height = innerHeight * devicePixelRatio;
+  cv.style.width = innerWidth + "px"; cv.style.height = innerHeight + "px";
+}
+addEventListener("resize", resize); resize();
+
+function worldToScreen(x, y) {
+  return [(x - cam.x) * cam.scale + cv.width / 2, (y - cam.y) * cam.scale + cv.height / 2];
+}
+function screenToWorld(sx, sy) {
+  const px = sx * devicePixelRatio, py = sy * devicePixelRatio;
+  return [(px - cv.width / 2) / cam.scale + cam.x, (py - cv.height / 2) / cam.scale + cam.y];
+}
+
+const stars = [];
+for (let i = 0; i < 500; i++) {
+  const s = Math.sin(i * 127.1) * 43758.5453, t = Math.sin(i * 269.5) * 24634.6345;
+  stars.push({ x: (s - Math.floor(s)) * 16 - 8, y: (t - Math.floor(t)) * 16 - 8,
+               a: 0.15 + (i % 7) * 0.09 });
+}
+
+function draw(realDt) {
+  const W = cv.width, H = cv.height;
+  cx.fillStyle = "#04030a"; cx.fillRect(0, 0, W, H);
+
+  for (const s of stars) {
+    const [sx, sy] = worldToScreen(s.x, s.y);
+    if (sx < 0 || sy < 0 || sx > W || sy > H) continue;
+    cx.fillStyle = `rgba(210,220,240,${s.a})`;
+    cx.fillRect(sx, sy, 2, 2);
+  }
+
+  drawRailLines();
+
+  // authored rings: the table the game is played on
+  cx.strokeStyle = "rgba(120,155,210,0.22)"; cx.lineWidth = 1;
+  for (const d of PLANET_DEFS) {
+    const [sx, sy] = worldToScreen(STAR.x, STAR.y);
+    cx.beginPath(); cx.arc(sx, sy, d.r * cam.scale, 0, 6.284); cx.stroke();
+  }
+
+  for (const b of bodies) if (b.alive) strokeTrail(b.trail, b.color, 0.35);
+  strokeTrail(ship.trail, "#bcd6ee", 0.5);
+
+  // the forecast. Yellow while railed, because there it means "if you let go now".
+  if (ghostPath && ghostPath.length > 2) {
+    cx.strokeStyle = rail.on ? "rgba(240,205,120,0.55)" : "rgba(160,200,240,0.65)";
+    cx.lineWidth = 1.5; cx.setLineDash([6, 6]);
+    cx.beginPath();
+    ghostPath.forEach((p, i) => { const [sx, sy] = worldToScreen(p.x, p.y); i ? cx.lineTo(sx, sy) : cx.moveTo(sx, sy); });
+    cx.stroke(); cx.setLineDash([]);
+  }
+  for (const g of ghostBodies) {
+    if (g.pts.length < 2) continue;
+    cx.strokeStyle = g.color; cx.globalAlpha = 0.55; cx.lineWidth = 1.5;
+    cx.setLineDash([5, 5]);
+    cx.beginPath();
+    g.pts.forEach((p, i) => { const [sx, sy] = worldToScreen(p.x, p.y); i ? cx.lineTo(sx, sy) : cx.moveTo(sx, sy); });
+    cx.stroke(); cx.setLineDash([]); cx.globalAlpha = 1;
+  }
+
+  {
+    const [sx, sy] = worldToScreen(STAR.x, STAR.y);
+    const r = STAR.drawR * cam.scale;
+    const breathe = 0.92 + 0.08 * Math.sin(performance.now() * 0.0021);
+    drawFlare(sx, sy, r * 2.4, "#ffb46e", breathe, performance.now() * 0.00006);
+    cx.fillStyle = STAR.color; cx.beginPath(); cx.arc(sx, sy, r, 0, 6.284); cx.fill();
+  }
+
+  {
+    const [sx, sy] = worldToScreen(BH.x, BH.y);
+    const r = BH.captureR * cam.scale;
+    cx.strokeStyle = "rgba(255,140,0,0.6)"; cx.lineWidth = 2;
+    cx.beginPath(); cx.arc(sx, sy, r, 0, 6.284); cx.stroke();
+    cx.fillStyle = "#000"; cx.beginPath(); cx.arc(sx, sy, r * 0.85, 0, 6.284); cx.fill();
+    cx.strokeStyle = "rgba(255,140,0,0.12)";
+    cx.beginPath(); cx.arc(sx, sy, BH.influenceR * cam.scale, 0, 6.284); cx.stroke();
+  }
+
+  for (const b of bodies) {
+    if (!b.alive) continue;
+    const [sx, sy] = worldToScreen(b.x, b.y);
+    const r = Math.max(3, b.drawR * cam.scale);
+    cx.fillStyle = b.color;
+    cx.beginPath(); cx.arc(sx, sy, r, 0, 6.284); cx.fill();
+  }
+
+  // THE NEXT STOP: an amber ring on the world the trip is heading for, and a tether from
+  // the ship so it is findable when the chart is busy.
+  if (target && target.alive) {
+    const [tx, ty] = worldToScreen(target.x, target.y);
+    const r = Math.max(10, target.drawR * cam.scale + 10);
+    const pulse = 0.45 + 0.2 * Math.sin(performance.now() / 380);
+    cx.strokeStyle = `rgba(232,180,99,${pulse})`; cx.lineWidth = 1.5;
+    cx.beginPath(); cx.arc(tx, ty, r, 0, 6.284); cx.stroke();
+    const [shx, shy] = worldToScreen(ship.x, ship.y);
+    const g = cx.createLinearGradient(shx, shy, tx, ty);
+    g.addColorStop(0, "rgba(232,180,99,0.05)");
+    g.addColorStop(1, "rgba(232,180,99,0.28)");
+    cx.strokeStyle = g; cx.lineWidth = 1;
+    cx.setLineDash([3, 7]);
+    cx.beginPath(); cx.moveTo(shx, shy); cx.lineTo(tx, ty); cx.stroke();
+    cx.setLineDash([]);
+  }
+
+  if (charging) {
+    const [sx, sy] = worldToScreen(ship.x, ship.y);
+    const range = S.coneRangeAU * cam.scale;
+    const half = S.coneWidthDeg * Math.PI / 360;
+    cx.fillStyle = `rgba(143,195,232,${0.06 + charge * 0.12})`;
+    cx.beginPath(); cx.moveTo(sx, sy);
+    cx.arc(sx, sy, range, ship.nose - half, ship.nose + half);
+    cx.closePath(); cx.fill();
+  }
+
+  {
+    const [sx, sy] = worldToScreen(ship.x, ship.y);
+    // THE RAIL SHOWS ITSELF AT THE SHIP: a short bar of the line under the hull, drawn
+    // along the tangent, so which way you are running is visible without reading the HUD.
+    if (rail.on) {
+      const [gx, gy] = gradient(ship.x, ship.y);
+      const gl = Math.hypot(gx, gy);
+      if (gl > 1e-12) {
+        const tx = -gy / gl * rail.dir, ty = gx / gl * rail.dir;
+        const L = 34;
+        cx.strokeStyle = `rgba(140,240,255,${0.25 + 0.55 * rail.settle})`;
+        cx.lineWidth = 2;
+        cx.beginPath();
+        cx.moveTo(sx - tx * L * 0.4, sy - ty * L * 0.4);
+        cx.lineTo(sx + tx * L, sy + ty * L);
+        cx.stroke();
+        // an arrowhead so the direction reads at a glance
+        const ax = sx + tx * L, ay = sy + ty * L;
+        cx.beginPath();
+        cx.moveTo(ax, ay);
+        cx.lineTo(ax - tx * 9 + ty * 5, ay - ty * 9 - tx * 5);
+        cx.lineTo(ax - tx * 9 - ty * 5, ay - ty * 9 + tx * 5);
+        cx.closePath();
+        cx.fillStyle = `rgba(140,240,255,${0.25 + 0.55 * rail.settle})`;
+        cx.fill();
+      }
+    }
+    if (!rail.on && (keys.w || keys.a || keys.s || keys.d)) {
+      const tx = sx - Math.cos(ship.nose) * 10, ty = sy - Math.sin(ship.nose) * 10;
+      drawFlare(tx, ty, 7 + Math.random() * 3, "#78b4ff", 0.8, ship.nose);
+    }
+    cx.save(); cx.translate(sx, sy); cx.rotate(ship.nose);
+    if (!rail.on && (keys.w || keys.a || keys.s || keys.d)) {
+      cx.fillStyle = "rgba(120,180,255,0.5)";
+      cx.beginPath(); cx.moveTo(-8, 0); cx.lineTo(-22 - Math.random() * 8, 0); cx.lineTo(-8, 3); cx.fill();
+    }
+    // The hull says which regime it is in: cyan on the rail, plain white flying free.
+    cx.fillStyle = rail.on ? "#a8ecff" : "#e8f0fa";
+    cx.beginPath(); cx.moveTo(12, 0); cx.lineTo(-8, -5); cx.lineTo(-4, 0); cx.lineTo(-8, 5); cx.closePath(); cx.fill();
+    cx.restore();
+
+    const frac = energy / MAX_ENERGY;
+    cx.lineWidth = 4.5;
+    cx.strokeStyle = "rgba(255,255,255,0.16)";
+    cx.beginPath(); cx.arc(sx, sy, 28, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2); cx.stroke();
+    cx.strokeStyle = frac > 0.3 ? "rgba(150,245,160,0.95)" : "rgba(255,120,80,0.95)";
+    cx.beginPath(); cx.arc(sx, sy, 28, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * frac); cx.stroke();
+    if (charging) {
+      cx.strokeStyle = "rgba(143,195,232,0.9)"; cx.lineWidth = 2;
+      cx.beginPath(); cx.arc(sx, sy, 35, -Math.PI / 2, -Math.PI / 2 + 6.283 * charge); cx.stroke();
+    }
+  }
+
+  for (const f of flashes) {
+    const [sx, sy] = worldToScreen(f.x, f.y);
+    const k = f.t / 0.8;
+    if (f.kind === "flare") {
+      const i = k < 0.15 ? k / 0.15 : 1 - (k - 0.15) / 0.85;
+      drawFlare(sx, sy, f.r * cam.scale * (0.8 + k * 0.6), f.color, i, f.rot + k * 0.5);
+      continue;
+    }
+    cx.strokeStyle = f.color; cx.globalAlpha = 1 - k; cx.lineWidth = 2;
+    cx.beginPath(); cx.arc(sx, sy, f.r * cam.scale * (0.3 + k), 0, 6.284); cx.stroke();
+    cx.globalAlpha = 1;
+  }
+
+  drawTimeBand(W, H);
+  drawHud(W, H);
+}
+
+// THE INK IS THE LIST. This draws railLines and nothing else - it does no marching of
+// its own and cannot show a line the rail could not enter, nor hide one it could.
+//
+// The line being ridden is drawn brightest, its jump neighbours next, then majors, then
+// the rest. That ordering is the reading aid the density needs: at 140 lines a flat
+// chart is hatching, and the player is choosing between three of them at a time.
+function drawRailLines() {
+  if (railLines.length === 0) return;
+  const at = rail.on ? lineIndex(rail.to) : -1;
+  const from = rail.on && rail.t < 1 ? lineIndex(rail.from) : -1;
+  for (let i = 0; i < railLines.length; i++) {
+    const e = railLines[i];
+    const major = ((e.level / chartStride) % Math.max(1, Math.round(S.majorEvery))) === 0;
+    let style = major ? "rgba(110,150,210,0.30)" : "rgba(110,150,210,0.13)";
+    let width = 1;
+    if (i === at) { style = "rgba(140,240,255,0.85)"; width = 2; }
+    else if (i === from) { style = `rgba(140,240,255,${0.5 * (1 - rail.t)})`; width = 1.5; }
+    else if (rail.on && (i === at - 1 || i === at + 1)) { style = "rgba(140,200,240,0.40)"; width = 1; }
+    cx.strokeStyle = style; cx.lineWidth = width;
+    cx.beginPath();
+    const s = e.segs;
+    for (let p = 0; p + 3 < s.length; p += 4) {
+      const [x1, y1] = worldToScreen(s[p], s[p + 1]);
+      const [x2, y2] = worldToScreen(s[p + 2], s[p + 3]);
+      cx.moveTo(x1, y1); cx.lineTo(x2, y2);
+    }
+    cx.stroke();
+  }
+}
+
+// The canvas quote of the lab's flare, from hyperwarp2 unchanged.
+function drawFlare(sx, sy, radius, color, intensity, rot) {
+  if (intensity <= 0.01 || radius < 1) return;
+  cx.save();
+  cx.globalCompositeOperation = "lighter";
+  const halo = cx.createRadialGradient(sx, sy, 0, sx, sy, radius * 3);
+  halo.addColorStop(0, colA(color, 0.30 * intensity));
+  halo.addColorStop(0.3, colA(color, 0.10 * intensity));
+  halo.addColorStop(1, colA(color, 0));
+  cx.fillStyle = halo;
+  cx.beginPath(); cx.arc(sx, sy, radius * 3, 0, 6.284); cx.fill();
+  const SPIKES = 7;
+  cx.lineWidth = Math.max(1, radius * 0.06);
+  for (let i = 0; i < SPIKES; i++) {
+    const a = rot + i * (Math.PI * 2 / SPIKES);
+    const len = radius * (1.6 + 0.5 * Math.sin(i * 12.9898 + rot * 3)) * intensity;
+    const g = cx.createLinearGradient(sx, sy, sx + Math.cos(a) * len, sy + Math.sin(a) * len);
+    g.addColorStop(0, colA(color, 0.55 * intensity));
+    g.addColorStop(1, colA(color, 0));
+    cx.strokeStyle = g;
+    cx.beginPath(); cx.moveTo(sx, sy);
+    cx.lineTo(sx + Math.cos(a) * len, sy + Math.sin(a) * len); cx.stroke();
+  }
+  const core = cx.createRadialGradient(sx, sy, 0, sx, sy, radius * 0.5);
+  core.addColorStop(0, colA("#ffffff", 0.9 * intensity));
+  core.addColorStop(0.5, colA(color, 0.7 * intensity));
+  core.addColorStop(1, colA(color, 0));
+  cx.fillStyle = core;
+  cx.beginPath(); cx.arc(sx, sy, radius * 0.5, 0, 6.284); cx.fill();
+  cx.restore();
+}
+const colCache = {};
+function colA(hex, a) {
+  let c = colCache[hex];
+  if (!c) {
+    c = [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
+    colCache[hex] = c;
+  }
+  return `rgba(${c[0]},${c[1]},${c[2]},${Math.max(0, Math.min(1, a))})`;
+}
+
+function strokeTrail(trail, color, alpha) {
+  if (trail.length < 2) return;
+  cx.strokeStyle = color; cx.lineWidth = 1;
+  cx.beginPath();
+  let pen = false;
+  for (let i = 0; i < trail.length; i++) {
+    const p = trail[i];
+    if (!p) { pen = false; continue; }
+    cx.globalAlpha = alpha * (i / trail.length);
+    const [sx, sy] = worldToScreen(p.x, p.y);
+    if (pen) { cx.lineTo(sx, sy); cx.stroke(); cx.beginPath(); }
+    cx.moveTo(sx, sy); pen = true;
+  }
+  cx.globalAlpha = 1;
+}
+
+function drawTimeBand(W, H) {
+  const R = W * 1.1, cxp = W / 2, cyp = H - R - 90 * devicePixelRatio;
+  const span = 0.38;
+  cx.strokeStyle = "rgba(120,150,200,0.25)"; cx.lineWidth = 5 * devicePixelRatio;
+  cx.beginPath(); cx.arc(cxp, cyp, R, Math.PI / 2 - span / 2, Math.PI / 2 + span / 2); cx.stroke();
+  const na = Math.PI / 2;
+  cx.strokeStyle = "rgba(160,190,240,0.5)"; cx.lineWidth = 2 * devicePixelRatio;
+  cx.beginPath();
+  cx.moveTo(cxp + Math.cos(na) * (R - 10 * devicePixelRatio), cyp + Math.sin(na) * (R - 10 * devicePixelRatio));
+  cx.lineTo(cxp + Math.cos(na) * (R + 10 * devicePixelRatio), cyp + Math.sin(na) * (R + 10 * devicePixelRatio));
+  cx.stroke();
+  const a = Math.PI / 2 + span / 2 - span * sliderShown;
+  const bx = cxp + Math.cos(a) * R, by = cyp + Math.sin(a) * R;
+  const g = cx.createRadialGradient(bx, by, 0, bx, by, 16 * devicePixelRatio);
+  g.addColorStop(0, "rgba(190,220,255,0.95)"); g.addColorStop(1, "rgba(120,170,255,0)");
+  cx.fillStyle = g; cx.beginPath(); cx.arc(bx, by, 16 * devicePixelRatio, 0, 6.284); cx.fill();
+  cx.fillStyle = "#e8f0fa"; cx.beginPath(); cx.arc(bx, by, 4 * devicePixelRatio, 0, 6.284); cx.fill();
+
+  cx.fillStyle = "rgba(160,185,215,0.8)";
+  cx.font = `${12 * devicePixelRatio}px "Share Tech Mono", monospace`;
+  cx.textAlign = "center";
+  const w = warpNow();
+  const label = w < 1000 ? w.toFixed(0) + "x" : w < 1e6 ? (w / 1000).toFixed(0) + "K" : (w / 1e6).toFixed(1) + "M";
+  cx.fillText(label, W / 2, H - 64 * devicePixelRatio);
+  cx.textAlign = "left";
+}
+
+function drawHud(W, H) {
+  const px = devicePixelRatio;
+  cx.font = `${12 * px}px "Share Tech Mono", monospace`;
+  cx.fillStyle = "rgba(160,185,215,0.9)";
+  cx.fillText(`POTTED ${score.potted}   BURNED ${score.burned}   DEATHS ${score.deaths}`, 16 * px, 24 * px);
+  const speed = Math.hypot(ship.vx, ship.vy) * AUYR_KMS;
+  cx.fillText(`YEAR ${simYears.toFixed(1)}   ENERGY ${energy.toFixed(0)}   ${speed.toFixed(1)} km/s`, 16 * px, 42 * px);
+
+  // The rail readout: which line, how fast it holds you, and what the next one costs.
+  // The arrow is the whole comparison the rail exists for.
+  const y3 = 60 * px;
+  if (rail.on) {
+    const at = lineIndex(rail.to);
+    const hold = rail.hold * AUYR_KMS;
+    let txt = `LINE ${rail.to}  HOLD ${hold.toFixed(1)} km/s`;
+    if (rail.t < 1) txt = `SLIDING ${rail.from} -> ${rail.to}  ${(rail.t * 100).toFixed(0)}%`;
+    else if (at >= 0) {
+      const out = at - 1 >= 0 ? railLines[at - 1] : null;
+      const inn = at + 1 < railLines.length ? railLines[at + 1] : null;
+      const v0 = Math.hypot(ship.vx, ship.vy), phi0 = potential(ship.x, ship.y);
+      const arr = e => {
+        if (!e) return "--";
+        const v2 = v0 * v0 + 2 * (phi0 - e.phi);
+        const v = v2 >= 0 ? Math.sqrt(v2) : -Math.sqrt(-v2);
+        return (v * AUYR_KMS).toFixed(1);
+      };
+      txt += `   W out ${arr(out)}   S in ${arr(inn)} km/s`;
+    }
+    cx.fillStyle = "rgba(140,240,255,0.9)";
+    cx.fillText(txt, 16 * px, y3);
+  } else {
+    cx.fillStyle = "rgba(232,180,99,0.9)";
+    cx.fillText("FREE FLIGHT", 16 * px, y3);
+  }
+  let y4 = 78 * px;
+  if (target && target.alive) {
+    cx.fillStyle = "rgba(232,180,99,0.8)";
+    cx.fillText(`NEXT STOP ${target.name}  ${dist(ship.x, ship.y, target.x, target.y).toFixed(2)} AU`, 16 * px, y4);
+    y4 += 18 * px;
+  }
+  if (paused) { cx.fillStyle = "#e8b463"; cx.fillText("PAUSED", 16 * px, y4); y4 += 18 * px; }
+
+  const controls = [
+    ["MOUSE", "aim: the nose tracks the cursor"],
+    ["W / S", "jump one line OUT / IN"],
+    ["A / D", "run anticlockwise / clockwise"],
+    ["SHIFT", "hold: let go, free flight"],
+    ["Q / E", "time slower / faster"],
+    ["LMB hold", "charge the pool shot"],
+    ["ESC", "cancel a held charge"],
+    ["SCROLL / R / P", "zoom / reset / pause"],
+  ];
+  cx.font = `${11 * px}px "Share Tech Mono", monospace`;
+  for (let i = 0; i < controls.length; i++) {
+    const y = y4 + 12 * px + i * 16 * px;
+    cx.fillStyle = "rgba(200,215,235,0.75)";
+    cx.fillText(controls[i][0], 16 * px, y);
+    cx.fillStyle = "rgba(140,160,190,0.6)";
+    cx.fillText(controls[i][1], 116 * px, y);
+  }
+  cx.font = `${12 * px}px "Share Tech Mono", monospace`;
+  cx.textAlign = "center";
+  const n = notices.length;
+  for (let i = 0; i < n; i++) {
+    const notice = notices[i];
+    const a = Math.min(1, (20 - notice.t) / 1.5);
+    cx.fillStyle = notice.color;
+    cx.globalAlpha = a;
+    cx.fillText(notice.text, W / 2, H - (96 + (n - 1 - i) * 17) * px);
+  }
+  cx.globalAlpha = 1; cx.textAlign = "left";
+}
+
+// ============================== INPUT ===========================================
+const KEYMAP = { KeyW: "w", KeyA: "a", KeyS: "s", KeyD: "d", KeyQ: "q", KeyE: "e",
+                 ShiftLeft: "shift", ShiftRight: "shift" };
+addEventListener("keydown", e => {
+  const k = KEYMAP[e.code];
+  if (k) {
+    e.preventDefault();
+    // On the rail W and S are the jump and A and D are the direction. Fired on the EDGE,
+    // not while held: a jump is a decision, and repeating it sixty times a second would
+    // make the ladder a slider.
+    if (!keys[k] && rail.on) {
+      if (k === "w") railJump(1);
+      if (k === "s") railJump(-1);
+      if (k === "a") railDirection(-1);
+      if (k === "d") railDirection(1);
+    }
+    keys[k] = true;
+  }
+  if (e.code === "KeyR") resetWorld();
+  if (e.code === "KeyP") paused = !paused;
+  if (e.code === "Escape" && charging) { charging = false; charge = 0; note("SHOT CANCELLED", "#9fb4cc"); }
+});
+addEventListener("keyup", e => { const k = KEYMAP[e.code]; if (k) keys[k] = false; });
+cv.addEventListener("mousedown", e => { if (e.button === 0) { charging = true; charge = 0; } });
+addEventListener("mouseup", e => { if (e.button === 0 && charging) { charging = false; fireShot(); charge = 0; } });
+addEventListener("mousemove", e => { mouse.sx = e.clientX; mouse.sy = e.clientY; });
+cv.addEventListener("contextmenu", e => e.preventDefault());
+cv.addEventListener("wheel", e => {
+  e.preventDefault();
+  cam.targetScale = Math.max(30, Math.min(3000, cam.targetScale * (e.deltaY > 0 ? 0.85 : 1.18)));
+}, { passive: false });
+
+// ============================== TEST PANEL ======================================
+// The storage key carries a version: saved settings hold EVERY value, so a retune of the
+// defaults would otherwise be invisible to anyone who ever touched a slider.
+const STORE_KEY = "hyperrail.v1";
+function loadSettings() {
+  try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
+  catch { return { ...DEFAULTS }; }
+}
+function saveSettings() { localStorage.setItem(STORE_KEY, JSON.stringify(S)); }
+
+const PANEL = [
+  ["h", "HYPER RAIL TEST PANEL"],
+  ["b", "railEnabled", "the rail (off = free flight only)"],
+  ["b", "gravLines", "the chart"],
+  ["b", "projections", "release preview"],
+  ["b", "driftMode", "time drift mode (spring)"],
+  ["-"],
+  ["r", "linesPerOctave", "lines per octave", 3, 30, 1],
+  ["r", "maxLines", "max lines on screen", 10, 300, 5],
+  ["r", "minInkPx", "min drawn length px", 4, 200, 2],
+  ["r", "gridNX", "chart grid across", 40, 220, 4],
+  ["r", "majorEvery", "major every Nth", 1, 10, 1],
+  ["-"],
+  ["r", "railJumpSeconds", "jump time s", 0.05, 3, 0.05],
+  ["r", "railAcquireSeconds", "re-acquire time s", 0.05, 3, 0.05],
+  ["r", "railSpeedMult", "hold speed mult", 0.2, 3, 0.05],
+  ["-"],
+  ["r", "thrustAccel", "thrust AU/yr^2", 100, 24000, 100],
+  ["r", "linearDamp", "settle /s (free flight)", 0, 4, 0.05],
+  ["r", "aimEase", "aim ease /s", 3, 60, 1],
+  ["-"],
+  ["r", "shotPower", "shot power AU/yr", 0.5, 8, 0.1],
+  ["r", "chargeSeconds", "charge time s", 0.4, 4, 0.1],
+  ["r", "coneWidthDeg", "cone width deg", 6, 90, 1],
+  ["r", "coneRangeAU", "cone range AU", 0.3, 4, 0.1],
+  ["r", "shotCost", "shot cost full", 0, 60, 1],
+  ["r", "reactorPs", "reactor /s", 0, 10, 0.5],
+  ["r", "solarPs", "solar /s at ref", 0, 40, 1],
+  ["r", "planetBoost", "planet boost", 100, 30000, 100],
+];
+function buildPanel() {
+  const el = document.getElementById("panel");
+  let html = "";
+  for (const row of PANEL) {
+    if (row[0] === "h") { html += `<h1>${row[1]} <span id="collapse">[-]</span></h1><div id="panelBody">`; continue; }
+    if (row[0] === "-") { html += "<hr>"; continue; }
+    const [kind, key, label, min, max, step] = row;
+    if (kind === "b")
+      html += `<div class="row"><label><span>${label}</span><input type="checkbox" data-k="${key}" ${S[key] ? "checked" : ""}></label></div>`;
+    else
+      html += `<div class="row"><label><span>${label}</span><input type="range" data-k="${key}" min="${min}" max="${max}" step="${step}" value="${S[key]}"><span class="val" id="v_${key}">${S[key]}</span></label></div>`;
+  }
+  html += `<hr><button id="resetBtn">reset to defaults</button></div>`;
+  el.innerHTML = html;
+  el.querySelectorAll("input").forEach(inp => {
+    inp.addEventListener("input", () => {
+      const k = inp.dataset.k;
+      S[k] = inp.type === "checkbox" ? inp.checked : parseFloat(inp.value);
+      const v = document.getElementById("v_" + k);
+      if (v) v.textContent = inp.value;
+      saveSettings();
+    });
+  });
+  document.getElementById("resetBtn").addEventListener("click", () => {
+    localStorage.removeItem(STORE_KEY); S = { ...DEFAULTS }; buildPanel();
+  });
+  document.getElementById("collapse").addEventListener("click", () => {
+    const b = document.getElementById("panelBody");
+    b.style.display = b.style.display === "none" ? "" : "none";
+  });
+}
+buildPanel();
+
+// The headless-test handle: top-level let/const never reach window, so Playwright
+// (tools/rig-test/test-hyperrail.mjs) reads and pokes the rig through this. Not for play.
+window.RIG = {
+  state: () => ({
+    simYears, energy, paused,
+    ship: { x: ship.x, y: ship.y, vx: ship.vx, vy: ship.vy, nose: ship.nose },
+    speed: Math.hypot(ship.vx, ship.vy),
+    rail: { on: rail.on, from: rail.from, to: rail.to, t: rail.t, settle: rail.settle,
+            dir: rail.dir, level: rail.level, hold: rail.hold, index: lineIndex(rail.to) },
+    shipLevel: levelAt(potential(ship.x, ship.y)),
+    lineCount: railLines.length,
+    stride: chartStride,
+    target: target ? target.name : null,
+    score: { ...score },
+    notices: notices.map(n => n.text),
+  }),
+  settings: () => S,
+  set: (k, v) => { S[k] = v; },
+  reset: resetWorld,
+  // THE DRAWN SET, exactly as the ink has it. A test that wants to know where a line is
+  // asks for its segments and measures against those, rather than recomputing the rig's
+  // own level formula - which would pass even if that formula had a sign error.
+  lines: () => railLines.map(e => ({ level: e.level, ink: e.ink })),
+  segments: level => {
+    const i = lineIndex(level);
+    return i < 0 ? null : Array.from(railLines[i].segs);
+  },
+  // Goes through the same lineIndex search every player path uses, so a level that is
+  // not on the chart is refused here for exactly the reason it is refused in play.
+  acquire: level => rideLine(lineIndex(level), false, true),
+  park: (x, y, vx, vy) => { ship.x = x; ship.y = y; ship.vx = vx; ship.vy = vy; ship.trail.length = 0; },
+  holdSpeedAt: (x, y) => {
+    gatherWells();
+    const [gx, gy] = gradient(x, y);
+    return holdSpeed(Math.hypot(gx, gy), curvature(x, y));
+  },
+  shipScreen: () => worldToScreen(ship.x, ship.y),
+};
+
+resetWorld();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
