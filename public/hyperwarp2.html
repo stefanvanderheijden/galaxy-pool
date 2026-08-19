@@ -18,6 +18,11 @@
     3. ORBIT LOCK, ported from sketch 001 "Ship Pool" on the prototype site. Loiter
        inside a planet's ring and the ship docks onto its orbit, eased in over a beat,
        then rides the planet exactly. See THE ORBIT LOCK below for the port notes.
+    4. ANTIGRAVITY IS STANDARD AND SHIFT IS INVERTED. The ship flies free of the wells
+       by default and Shift ENGAGES them, which is the opposite of hyperwarp 1. A
+       settle (linearDamp) sheds speed when you let go. Together those are the "less
+       space nonsense" pass: the ship answers the hand first, and orbital mechanics is
+       something you reach for on purpose rather than argue with continuously.
 
   Everything else is hyperwarp 1 and is documented there.
 
@@ -123,7 +128,8 @@ const DEFAULTS = {
   teleNoCooldown: true,
   projections: true,     // forecasts (ship + struck worlds), hidden during ability use
   gravLines: true,       // equipotential contours of the field the ship flies
-  thrustAccel: 4000,     // AU/yr^2. Hohmann's tall ship is 120; this turns on a dime
+  antigravStandard: true,// gravity OFF by default, Shift engages it. See the note in frame()
+  thrustAccel: 9000,     // AU/yr^2. Hohmann's tall ship is 120; this answers the hand
   shotPower: 8.0,        // AU/yr of delta-v at full charge, point blank
   chargeSeconds: 1.5,    // real seconds from empty to full charge
   coneWidthDeg: 28,      // feel-critical number one
@@ -138,7 +144,15 @@ const DEFAULTS = {
   solarPs: 14,           // solar charge per real second at the reference distance
   solarRefAU: 0.35,      // the steeper-than-the-game curve pivots here
   planetBoost: 10000,    // the game layer's boost, unchanged: wells you can grab
-  aimEase: 14,           // how fast the nose swings to the cursor, per second
+  aimEase: 24,           // how fast the nose swings to the cursor, per second
+  // THE DIAL FOR "LESS SPACE NONSENSE", and the one number here that is not physics.
+  // A real hull coasts forever, which is correct and, at this speed, unflyable: you
+  // spend the whole game cancelling your own last input. This sheds a fraction of the
+  // speed per REAL second (real, so it does not scale with the time slider and quietly
+  // become infinite at 5M), which makes the ship settle when you let go. 0 restores
+  // honest frictionless space. It is deliberately skipped while gravity is engaged,
+  // because that is the mode where the field is supposed to own the trajectory.
+  linearDamp: 0.9,
   lockRadiusAU: 0.1,     // 001's orbit.ringRadiusMult
   lockDwellYr: 0.008,    // 001's CAPTURE_DWELL_YR
   captureSeconds: 1.25,  // 001's CAPTURE_DURATION_S
@@ -507,9 +521,20 @@ function frame(now) {
       (keys.w || keys.a || keys.s || keys.d)) breakLock(false);
   if (lockCooldown > 0) lockCooldown -= realDt;
 
-  let antigrav = false;
-  if (keys.shift && !timeBusy()) { antigrav = true; drain += S.antigravCostPs; }
-  else if (keys.shift && timeBusy()) note("ANTIGRAV UNAVAILABLE DURING TIME CONTROL", "#e8b463");
+  // ANTIGRAVITY IS THE STANDING STATE HERE, and Shift is inverted: it ENGAGES the
+  // wells rather than escaping them. That is the whole difference in how this variant
+  // flies. In hyperwarp 1 gravity owns you and antigrav is the expensive escape, so
+  // every input is an argument with the field; here the ship is simply responsive, and
+  // falling into a well is a thing you deliberately reach for when you want the speed.
+  //
+  // Both states are free. A standing state cannot cost energy per second without the
+  // battery being a countdown, and falling has never cost anything anywhere.
+  let antigrav = S.antigravStandard ? !keys.shift : keys.shift;
+  if (antigrav && timeBusy() && !S.antigravStandard) {
+    antigrav = false;
+    note("ANTIGRAV UNAVAILABLE DURING TIME CONTROL", "#e8b463");
+  }
+  if (!S.antigravStandard && antigrav) drain += S.antigravCostPs;
   if (charging) charge = Math.min(1, charge + realDt / S.chargeSeconds);
   energy = Math.max(0, Math.min(effMax, energy + (reactor + solar - drain) * realDt));
 
@@ -533,6 +558,14 @@ function frame(now) {
   }
   simYears += dtYr;
 
+  // The settle, once per frame on the real clock. See linearDamp: it is game feel, not
+  // physics, so it is applied here rather than inside the substeps, and never while
+  // gravity is engaged or while a planet is carrying the ship.
+  if (S.linearDamp > 0 && antigrav && orbit.mode === "free") {
+    const k = Math.exp(-S.linearDamp * realDt);
+    ship.vx *= k; ship.vy *= k;
+  }
+
   // trails, pushed on the sim clock so a drift line is a line through space
   pushTrail(ship.trail, ship.x, ship.y, 700);
   for (const b of bodies) if (b.alive && !frozen(b)) pushTrail(b.trail, b.x, b.y, 250);
@@ -541,6 +574,9 @@ function frame(now) {
   // Rebuilt EVERY frame it is visible: the whole line breathes with the table instead
   // of snapping every third of a second. ~50k force evaluations, well under a
   // millisecond, and smoothness is the entire point of this rig.
+  // A forecast is only meaningful when the field is what moves you. With antigravity
+  // standard the line would be a straight ray every frame, so it is drawn only while
+  // gravity is actually engaged.
   const busy = timeBusy() || charging || antigrav || (bubble && bubble.growing) || teleCooldown > 0.6;
   if (S.projections && !busy) buildGhost();
   if (busy) { ghostPath = null; ghostBodies = []; }
@@ -792,7 +828,11 @@ function draw(realDt) {
       cx.fillStyle = "rgba(120,180,255,0.5)";
       cx.beginPath(); cx.moveTo(-8, 0); cx.lineTo(-22 - Math.random() * 8, 0); cx.lineTo(-8, 3); cx.fill();
     }
-    cx.fillStyle = keys.shift && !timeBusy() ? "#d8b0ff" : "#e8f0fa";
+    // The hull tells you which regime it is in: pale violet whenever the wells are
+    // acting on it, plain white when it is flying free. With antigrav standard that
+    // reads as "Shift is doing something", which is the way round it now works.
+    const gravOn = S.antigravStandard ? keys.shift : !keys.shift;
+    cx.fillStyle = gravOn ? "#d8b0ff" : "#e8f0fa";
     cx.beginPath(); cx.moveTo(12, 0); cx.lineTo(-8, -5); cx.lineTo(-4, 0); cx.lineTo(-8, 5); cx.closePath(); cx.fill();
     cx.restore();
 
@@ -992,7 +1032,7 @@ function drawHud(W, H) {
     ["A / D", "strafe left / right"],
     ["Q / E", "time slower / faster"],
     ["SPACE", "time-stop bubble, again to resume"],
-    ["SHIFT", "antigravity"],
+    ["SHIFT", S.antigravStandard ? "engage gravity (off by default)" : "antigravity"],
     ["LMB hold", "charge shockwave"],
     ["RMB", "teleport"],
     ["ESC", "cancel charge, else drop orbit lock"],
@@ -1077,7 +1117,7 @@ cv.addEventListener("wheel", e => {
 // ============================== TEST PANEL ======================================
 // The storage key carries a version: saved settings hold EVERY value, so a retune of
 // the defaults would otherwise be invisible to anyone who ever touched a slider.
-const STORE_KEY = "hyperwarp2.v1";   // its own key: the variant tunes independently
+const STORE_KEY = "hyperwarp2.v2";   // its own key: the variant tunes independently
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
   catch { return { ...DEFAULTS }; }
@@ -1086,6 +1126,7 @@ function saveSettings() { localStorage.setItem(STORE_KEY, JSON.stringify(S)); }
 
 const PANEL = [
   ["h", "HYPERWARP 2 TEST PANEL"],
+  ["b", "antigravStandard", "antigrav standard (SHIFT = gravity)"],
   ["b", "lockEnabled", "orbit lock (001)"],
   ["b", "thrustBreaksLock", "thrust breaks the lock"],
   ["b", "timeFree", "time slider free"],
@@ -1095,14 +1136,15 @@ const PANEL = [
   ["b", "projections", "projections (outside abilities)"],
   ["b", "gravLines", "gravity lines"],
   ["-"],
-  ["r", "thrustAccel", "thrust AU/yr^2", 100, 12000, 50],
+  ["r", "thrustAccel", "thrust AU/yr^2", 100, 24000, 100],
   ["r", "shotPower", "shot power AU/yr", 0.5, 8, 0.1],
   ["r", "chargeSeconds", "charge time s", 0.4, 4, 0.1],
   ["r", "coneWidthDeg", "cone width deg", 6, 90, 1],
   ["r", "coneRangeAU", "cone range AU", 0.3, 4, 0.1],
   ["r", "bubbleGrowAUs", "bubble grow AU/s", 0.1, 2, 0.05],
   ["-"],
-  ["r", "aimEase", "aim ease /s", 3, 40, 1],
+  ["r", "aimEase", "aim ease /s", 3, 60, 1],
+  ["r", "linearDamp", "settle /s (0 = real space)", 0, 4, 0.05],
   ["r", "lockRadiusAU", "lock radius AU", 0.02, 0.5, 0.01],
   ["r", "lockDwellYr", "lock dwell yr", 0.001, 0.05, 0.001],
   ["r", "captureSeconds", "capture ease s", 0.2, 4, 0.05],
