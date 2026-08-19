@@ -65,6 +65,16 @@ export const SKETCHES = [
       state and holding Shift lets go into free flight.`,
     tags: ['contour lines', 'rail surfing', 'free flight'],
   },
+  {
+    id: '006',
+    name: '006 Hyper Rail 2',
+    href: '/hyperrail2.html',
+    tagline: 'The rails are left and right of you, so turning around swaps them.',
+    description: `A variant of the rail rig. A and D change rail in the ship's own frame,
+      W and S are a throttle the rail holds you against, momentum bleeds away in
+      antigravity free flight, and right mouse teleports while you are off the rail.`,
+    tags: ['variant', 'rail surfing', 'ship frame', 'teleport'],
+  },
 ]
 
 /** @param {string} id */
