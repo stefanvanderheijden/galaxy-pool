@@ -13,6 +13,26 @@
   particular way, it holds you at exactly one speed, and travelling means changing which
   line you are on. Snapped is the DEFAULT, not a mode you engage. Shift lets go.
 
+  THE THROTTLE IS THE STEERING, and it is the whole control. W and S are thrust along
+  the line, not jump keys. A line holds you at exactly one speed, so thrusting along it
+  is thrusting against that: faster than the hold speed and the centripetal demand
+  v^2*kappa beats gravity |grad phi| and you drift OUTWARD; slower and gravity wins and
+  you fall IN. Hold W and the ship sweeps continuously across the whole ladder in one
+  motion; let go and it settles onto whatever line it reached. There is no jump, no
+  discrete step and no queue of animations, and the level the ship rides is a real
+  number rather than an index.
+
+  AND THE CLIMB PAYS FOR ITSELF, which is why this needs no invented economy. Every step
+  the level moves, the speed is corrected by conservation:
+
+      v1^2 = v0^2 + 2*(phi0 - phi1)
+
+  Thrust adds speed, the excess speed drives you outward, climbing out spends the speed,
+  and the ship settles the moment its speed matches the new line's hold speed. That loop
+  IS the Hohmann transfer, second burn included, and the rail does the second burn for
+  you. Nothing here is a tuned exchange rate; the only invented number is railClimb,
+  which sets how fast the hand is answered.
+
   It is a road trip. There is a NEXT STOP - the nearest world you have not struck - and
   the way you get there is by dropping to a deeper line to buy speed, riding it round,
   and climbing back out at the right moment. The pool shot from hyperwarp2 is kept, so
@@ -54,17 +74,31 @@
   ONLY LINES YOU CAN SEE ARE RIDABLE. See surveyLines() for how that is enforced; the
   short version is that there is one list and both the ink and the rail read it.
 
+  THE DEEPEST LINE ROUND A WORLD IS ITS ORBIT. Inside orbitNearAU of a living world the
+  chart bottoms out at a ring drawn in that world's colour, and nothing deeper is drawn
+  or ridable. Surf in, hold S, and the rail stops you there holding the circular speed:
+  you are in orbit around the world you came to pool, which is the road trip arriving.
+
   CONTROLS
-    MOUSE          aim: the nose tracks the cursor, always
-    W / S          jump one line OUT / IN (W raises you, S drops you)
-    A / D          reverse the direction you run along the line
-    SHIFT hold     let go: antigravity free flight. Release to re-acquire the nearest line
+    W / S          throttle along the line: accelerate OUT / brake IN
+    SHIFT hold     let go: antigravity free flight. Release to re-acquire, smoothly
+    MOUSE          aims the nose ONLY in free flight. On a rail the nose follows the line
     Q / E hold     time slider, 1x..5,000,000x, springs back to 100,000x
     LMB hold       charge the particle accelerator; release to fire the pool shot
     ESC            cancel a held charge
     SCROLL / R / P zoom / reset / pause
 
   IN FREE FLIGHT W/S drive along the nose and A/D strafe, which is hyperwarp2 unchanged.
+  On a rail A/D do nothing: there is no reverse. To come about, hold Shift, turn, let go.
+
+  THE NOSE HAS TWO OWNERS. On a rail it follows the tangent of the line in the direction
+  of travel; in free flight it follows the cursor. Both go through the SAME eased rate,
+  so the handover is smooth in both directions and there is no snap at the moment the
+  hand takes over or gives back.
+
+  NO FORECAST WHILE RAILED. You are on a rail; the line is where you are going, and a
+  second dashed curve saying the same thing in a different colour is noise. This
+  deliberately reverses the release-preview decision the Unity branch made in ead840b.
 
   DELIBERATELY NOT PORTED FROM HYPERWARP 2: the time-stop bubble, the teleport, and the
   001 orbit lock. All three are ways of owning the ship's state, and the rail is a fourth
@@ -129,9 +163,27 @@ const DEFAULTS = {
   majorEvery: 4,         // every Nth line is drawn brighter. Purely a reading aid
 
   // ---- the rail ----
-  railJumpSeconds: 0.75, // REAL seconds to slide from one line to the next
+  // THESE THREE ARE ON THE REAL CLOCK, deliberately. The physical migration rate is set
+  // by orbital dynamics, and at the opening 100,000x a quarter orbit at 1.2 AU is 155
+  // real seconds, which is not a control. This is a thing the player steers with their
+  // hand, so it answers the hand, the same rule railAcquireSeconds already records. The
+  // consequence to know: at 1x the rail reads as a radial elevator, because the level
+  // sweeps while the ship has barely moved along the line. The rig lives at 100,000x.
+  railThrust: 0.7,       // W/S add this fraction of the line's hold speed per real second
+  railClimb: 14,         // levels swept per real second at 100% speed mismatch
+  railDetent: 2.5,       // spring onto the nearest drawn line, per real second. 0 = none
   railAcquireSeconds: 0.9,// REAL seconds to be pulled back onto a line after letting go
   railSpeedMult: 1.0,    // 1.0 is the honest hold speed. Below 1 you sink, above you climb
+
+  // ---- the orbit ring: the deepest line round a world ----
+  // 0.09 AU sits inside the 0.134 AU where a world's boosted gradient beats the star's,
+  // so the contour there really is a closed loop round the world. It is not smaller than
+  // that because the ring is MARCHED on the same grid as the rest of the chart, and at
+  // the opening zoom a cell is 0.035 AU: a ring at 0.05 spanned three cells and drew as
+  // a ragged spiral. Drawing a clean circle instead was the tempting fix and is the wrong
+  // one, because then the ring drawn is not the ring ridden. Zoom in and it resolves.
+  orbitRingAU: 0.09,     // radius of the ring. Well inside the world's dominant region
+  orbitNearAU: 0.16,     // inside this, that ring is the floor of the chart
 
   // ---- flight, from hyperwarp2 unchanged ----
   thrustAccel: 9000,     // AU/yr^2
@@ -147,7 +199,24 @@ const DEFAULTS = {
   reactorPs: 3,
   solarPs: 14,
   solarRefAU: 0.35,
-  planetBoost: 10000,    // the game layer's boost: wells you can grab, and lines you can ride
+  // THE BOOST IS LOWER HERE THAN IN HYPERWARP 2, and it had to be. 10,000 makes a world's
+  // boosted well beat the star's gradient out to 0.35 AU, so with worlds at 0.55, 0.95,
+  // 1.45 and 2.10 the wells overlap and the chart is not a chart of the star at all: the
+  // ship spawns inside one, and every line it can reach is a loop round a world.
+  //
+  // That is fatal to a throttle. Between a world's well and the star's field there is a
+  // saddle, and on a saddle the contour is straight: curvature goes to zero, and
+  // sqrt(|grad phi| / kappa) goes to infinity. The hold speed climbs faster than any
+  // throttle can chase it, so the mismatch crashes negative and the ship is pushed back
+  // down the well it was trying to leave. Measured on the first run of the new model:
+  // holding W, the hold speed went 5.0 -> 12.7 AU/yr while the level fell 35 -> 32, and
+  // the mismatch peaked at 20% and then decayed. The ship could not get out.
+  //
+  // 1500 puts a world's loops inside 0.134 AU, so the star owns the chart and each world
+  // is a small closed set of rings on it. The saddle is still there and still real: you
+  // cannot throttle OUT of a world's well, only around it. Shift is how you leave. That
+  // is a design statement rather than a bug, and it is worth the designer's attention.
+  planetBoost: 1500,
 };
 let S = loadSettings();
 
@@ -183,8 +252,8 @@ function resetWorld() {
   energy = 100;
   charging = false; charge = 0;
   sliderT = 0.5; sliderShown = 0.5;
-  rail = { on: false, from: 0, to: 0, t: 1, settle: 0, dir: 1, level: 0,
-           hold: 0, grad: 0, curv: 0, bootstrap: true };
+  rail = { on: false, level: 0, v: 0, m: 0, hold: 0, grad: 0, curv: 0,
+           settle: 0, dir: 1, clamped: false, bootstrap: true };
   railLines = [];
   target = null;
   ghostPath = null; ghostBodies = [];
@@ -203,13 +272,15 @@ let mouse = { sx: 0, sy: 0 };
 let cam = { x: 0, y: 0, scale: 260, targetScale: 260 };
 
 // THE RAIL'S WHOLE STATE.
-//   from, to   the levels the current slide runs between. Equal when it is not sliding
-//   t          0..1 through that slide, on the REAL clock. 1 = arrived
+//   level      the fractional level being ridden. A real number, not an index
+//   v          the ship's speed along the line. The throttle moves this
+//   hold       the one speed this line holds you at, here, right now
+//   m          (v - hold) / hold. Positive climbs out, negative falls in
 //   settle     0..1 how much of the ship the rail owns. Ramps up on acquisition
-//   dir        +1 or -1 along the line's canonical tangent
-//   level      the fractional level being ridden right now, for the readout and RIG
-let rail = { on: false, from: 0, to: 0, t: 1, settle: 0, dir: 1, level: 0,
-             hold: 0, grad: 0, curv: 0, bootstrap: true };
+//   dir        +1 or -1 along the line's canonical tangent, fixed at acquisition
+//   clamped    the level wanted to move and the chart's floor or ceiling stopped it
+let rail = { on: false, level: 0, v: 0, m: 0, hold: 0, grad: 0, curv: 0,
+             settle: 0, dir: 1, clamped: false, bootstrap: true };
 
 function note(text, color) {
   const existing = notices.find(n => n.text === text);
@@ -218,7 +289,6 @@ function note(text, color) {
   if (notices.length > 4) notices.shift();
 }
 function dist(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return Math.sqrt(dx * dx + dy * dy); }
-function easeInOutCubic(t) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
 
 // ============================== THE FIELD =======================================
 // ONE POTENTIAL FUNCTION, used by the ink, by the hold speed and by the projection onto
@@ -227,12 +297,46 @@ function easeInOutCubic(t) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * 
 // This is the GAME layer: star, every living world at its boosted mass, and the black
 // hole. The softening is fatter than the sim's so the lines stay curves near a core
 // rather than collapsing to a point; see the header note on the two softenings.
-const FIELD_SOFT = 2e-3;
+// 4e-4 AU^2 is a softening LENGTH of 0.02 AU. It was 2e-3 (0.045 AU) until the orbit
+// ring arrived: a ring at 0.07 AU sat inside the old clamp, so the field there was flat
+// and the ring had no hold speed to speak of. The number is set against the ring radius,
+// not chosen for looks.
+const FIELD_SOFT = 4e-4;
+// THE BLACK HOLE IS NOT IN THE CHART, and that is the second thing the throttle forced.
+//
+// hyperwarp2 drew it into the contours at its full mass. Its GM is 35.5 against the
+// star's 17.8, so a hole 4 AU out makes the whole field a two-body field, and between
+// the two lies a saddle where the contour goes straight, the curvature goes to zero and
+// sqrt(|grad phi| / kappa) goes to infinity. Measured before the fix: holding W, the
+// hold speed climbed 4.4 -> 12.1 AU/yr as the ship moved out, faster than a throttle can
+// chase, so the mismatch decayed to 5% and the ship stopped climbing. There was nowhere
+// to go outward at all.
+//
+// Leaving it out is not a convenience. The ship only feels the hole inside influenceR,
+// and a force that exists in one region and not another has no potential to be in a
+// chart of the whole system. Surf.cs records the same thing about the hole's cone: it is
+// directional, so it is not in the books. The hole is drawn as a hole and stays a hazard
+// you steer around rather than a line you ride.
 let wells = [];
 function gatherWells() {
   wells = [{ x: STAR.x, y: STAR.y, gm: G * STAR.mass }];
   for (const b of bodies) if (b.alive) wells.push({ x: b.x, y: b.y, gm: G * b.mass * S.planetBoost });
-  wells.push({ x: BH.x, y: BH.y, gm: G * BH.mass });
+}
+
+// THE LEVEL OF A WORLD'S ORBIT RING, sampled from the field rather than assumed. Eight
+// points round the ring, averaged: close in the world's boosted well dominates, so the
+// contour through them is very nearly that circle, but it is not exactly one and this
+// does not pretend otherwise. Recomputed once a frame, since the worlds move.
+function computeOrbitLevels() {
+  for (const b of bodies) {
+    if (!b.alive) { b.orbitLevel = null; continue; }
+    let sum = 0;
+    for (let i = 0; i < 8; i++) {
+      const a = i * Math.PI / 4;
+      sum += levelAt(potential(b.x + Math.cos(a) * S.orbitRingAU, b.y + Math.sin(a) * S.orbitRingAU));
+    }
+    b.orbitLevel = sum / 8;
+  }
 }
 function potential(x, y) {
   let phi = 0;
@@ -309,9 +413,10 @@ function projectToLevel(x, y, phiTarget) {
 
 // ============================== THE CHART =======================================
 // railLines is THE list. Sorted by level ascending, which is outermost first.
-// Each entry: { level, phi, segs: Float64Array-ish flat [x1,y1,x2,y2,...], ink }
+// Each entry: { level, phi, segs: flat [x1,y1,x2,y2,...], ink, orbit: body|null }
 let railLines = [];
 let chartStride = 1;
+let ownLine = null;      // the ship's OWN level, marched live. A readout, not a track
 
 // ONLY THE LINES YOU CAN SEE ARE RIDABLE, and this function is the whole enforcement.
 //
@@ -332,8 +437,15 @@ let chartStride = 1;
 // level. Aligning it to the viewport would make the whole set shimmer between two
 // interleaved ladders as the camera drifts, and a line you are riding would blink out
 // of existence for no physical reason.
+//
+// AND THERE IS A FOURTH REASON A LEVEL IS NOT THERE, added with the orbit ring: within
+// orbitNearAU of a living world, nothing deeper than that world's ring is drawn. That
+// cull is per CELL, so the chart bottoms out in a ring round each world while the same
+// levels carry on normally everywhere else. The ride is clamped to match, in
+// clampLevel(); the ink rule and the ride rule are two statements of one thing.
 function surveyLines(W, H) {
   railLines = [];
+  ownLine = null;
   chartStride = 1;
   if (!S.gravLines) return;
 
@@ -359,11 +471,35 @@ function surveyLines(W, H) {
 
   chartStride = Math.max(1, Math.ceil((hi - lo + 1) / Math.max(1, Math.round(S.maxLines))));
   const byLevel = new Map();
-  const want = L => {
-    let a = byLevel.get(L);
-    if (!a) { a = { segs: [], ink: 0 }; byLevel.set(L, a); }
+  const want = (key, L, orbit) => {
+    let a = byLevel.get(key);
+    if (!a) { a = { level: L, segs: [], ink: 0, orbit: orbit || null }; byLevel.set(key, a); }
     return a;
   };
+  // The ship's own line is a readout and never a ridable entry, so it must not carry a
+  // world in the `orbit` field the way a ring does; that field is what colours a ring and
+  // what exempts it from the ink test.
+
+  // The worlds whose orbit rings touch the viewport, and the ship's own level. Both are
+  // marched at their exact non-integer level alongside the ladder, which costs almost
+  // nothing because the per-cell loop already knows the cell's level range.
+  const nearWorlds = [];
+  for (const b of bodies) {
+    if (!b.alive || b.orbitLevel === null) continue;
+    if (b.x < x0 - S.orbitNearAU || b.x > x0 + wxs + S.orbitNearAU ||
+        b.y < y0 - S.orbitNearAU || b.y > y0 + wys + S.orbitNearAU) continue;
+    nearWorlds.push(b);
+  }
+  const extras = nearWorlds.map(b => ({ key: "orbit:" + b.name, level: b.orbitLevel, home: b }));
+  // WHICH COMPONENT THE SHIP IS ON. A level set is not one curve: level 25.5 is a small
+  // loop round SMELL and also a large circle round the star, and the ship is on exactly
+  // one of them. Drawing both in the "this is your line" colour says you are on both,
+  // which is false and reads as the chart having two answers. The world whose
+  // neighbourhood contains the ship, or null out in the open, decides which is drawn.
+  let ownHome = null;
+  for (const b of nearWorlds)
+    if (dist(ship.x, ship.y, b.x, b.y) <= S.orbitNearAU) { ownHome = b; break; }
+  if (rail.on) extras.push({ key: "own", level: rail.level, home: ownHome, own: true });
 
   for (let j = 0; j < NY; j++)
     for (let i = 0; i < NX; i++) {
@@ -373,12 +509,30 @@ function surveyLines(W, H) {
       if (b < cmin) cmin = b; if (b > cmax) cmax = b;
       if (c < cmin) cmin = c; if (c > cmax) cmax = c;
       if (d < cmin) cmin = d; if (d > cmax) cmax = d;
-      const first = Math.ceil(cmin / chartStride) * chartStride;
       const X = x0 + i * dx, Y = y0 + j * dy;
-      for (let L = first; L <= cmax; L += chartStride) {
+
+      // WHOSE NEIGHBOURHOOD THIS CELL IS IN, and the floor that comes with it: inside a
+      // world's neighbourhood nothing deeper than that world's ring is drawn at all.
+      let floor = Infinity, cellWorld = null;
+      for (let n = 0; n < nearWorlds.length; n++) {
+        const p = nearWorlds[n];
+        const ddx = X + dx * 0.5 - p.x, ddy = Y + dy * 0.5 - p.y;
+        if (ddx * ddx + ddy * ddy > S.orbitNearAU * S.orbitNearAU) continue;
+        cellWorld = p;
+        if (p.orbitLevel < floor) floor = p.orbitLevel;
+      }
+
+      const cut = (key, L, home, homed) => {
+        if (L > floor) return;
+        // A RING AND THE SHIP'S OWN LINE ARE DRAWN ONLY ON THE COMPONENT THEY BELONG TO.
+        // Their levels are ordinary levels, so the same contour also runs somewhere else
+        // entirely, usually as a circle round the star at the radius with that potential.
+        // Without this every world painted a spurious ring of its own colour near the
+        // star, and the ship's own line appeared twice on opposite sides of the screen.
+        if (homed && cellWorld !== home) return;
         const av = a - L, bv = b - L, cv = c - L, dv = d - L;
         const code = (av > 0 ? 8 : 0) | (bv > 0 ? 4 : 0) | (cv > 0 ? 2 : 0) | (dv > 0 ? 1 : 0);
-        if (code === 0 || code === 15) continue;
+        if (code === 0 || code === 15) return;
         const pts = [];
         if ((av > 0) !== (bv > 0)) pts.push(X + dx * av / (av - bv), Y);
         if ((bv > 0) !== (cv > 0)) pts.push(X + dx, Y + dy * bv / (bv - cv));
@@ -386,27 +540,32 @@ function surveyLines(W, H) {
         if ((av > 0) !== (dv > 0)) pts.push(X, Y + dy * av / (av - dv));
         // Two crossings is a segment. Four is a saddle cell, joined pairwise, which is
         // wrong half the time and invisible at this line weight.
-        const e = want(L);
+        const e = want(key, L, key === "own" ? null : home);
         for (let p = 0; p + 3 < pts.length; p += 4) {
           e.segs.push(pts[p], pts[p + 1], pts[p + 2], pts[p + 3]);
           e.ink += Math.hypot(pts[p + 2] - pts[p], pts[p + 3] - pts[p + 1]);
         }
+      };
+
+      const first = Math.ceil(cmin / chartStride) * chartStride;
+      for (let L = first; L <= cmax; L += chartStride) cut(L, L, null, false);
+      for (let n = 0; n < extras.length; n++) {
+        const x = extras[n];
+        if (x.level >= cmin && x.level <= cmax) cut(x.key, x.level, x.home, true);
       }
     }
 
   const minInkAu = S.minInkPx / cam.scale;
-  for (const [L, e] of byLevel) {
-    if (e.ink < minInkAu) continue;
-    railLines.push({ level: L, phi: phiForLevel(L), segs: e.segs, ink: e.ink });
+  for (const [key, e] of byLevel) {
+    if (key === "own") { ownLine = e.segs; continue; }   // a readout: never a ridable entry
+    // A world's ring is exempt from the ink test. It is the floor of the chart there and
+    // has to exist as a target even when the camera has it down to a few pixels.
+    if (!e.orbit && e.ink < minInkAu) continue;
+    railLines.push({ level: e.level, phi: phiForLevel(e.level), segs: e.segs, ink: e.ink, orbit: e.orbit });
   }
   railLines.sort((p, q) => p.level - q.level);
 }
 
-// Index of a level in the drawn set, or -1. THE ONLY WAY IN.
-function lineIndex(level) {
-  for (let i = 0; i < railLines.length; i++) if (railLines[i].level === level) return i;
-  return -1;
-}
 function nearestLineIndex(level) {
   let best = -1, bd = Infinity;
   for (let i = 0; i < railLines.length; i++) {
@@ -417,38 +576,48 @@ function nearestLineIndex(level) {
 }
 
 // ============================== THE RAIL ========================================
-// Catch the nearest line that is on the chart. instant = true is used exactly once, at
-// spawn, because "snapped is the default" has to be true on the first frame rather than
-// a second after it.
-function acquire(instant) {
-  if (!S.railEnabled || railLines.length === 0) return false;
-  const i = nearestLineIndex(levelAt(potential(ship.x, ship.y)));
-  if (i < 0) return false;
-  return rideLine(i, instant, false);
+// THE LEVEL IS A REAL NUMBER, not an index. That is the change that makes the throttle
+// possible: the ship rides level 34.62 as readily as level 34, and holding W walks it
+// continuously down the ladder without ever stopping at a rung.
+//
+// THE RIDABLE INTERVAL IS THE SPAN OF THE DRAWN SET, which is how the visibility rule
+// survives the level going continuous. You cannot ride outside [outermost, innermost]
+// of what is on the chart, and inside a world's neighbourhood the floor is that world's
+// ring. The DETENT then makes the drawn lines the only places you come to REST, so the
+// set you can see is still the set of lines you can hold.
+function clampLevel(L) {
+  if (railLines.length === 0) return L;
+  const lo = railLines[0].level;
+  let hi = railLines[railLines.length - 1].level;
+  for (const p of bodies) {
+    if (!p.alive || p.orbitLevel === null) continue;
+    if (dist(ship.x, ship.y, p.x, p.y) > S.orbitNearAU) continue;
+    if (p.orbitLevel < hi) hi = p.orbitLevel;
+  }
+  return Math.max(lo, Math.min(hi, L));
 }
 
-// Enter a line BY ITS INDEX IN THE DRAWN SET. Every path in - spawn, jump, re-acquire,
-// the RIG hook - comes through here, which is why a level that is not on the chart has
-// no way to be ridden.
-function rideLine(i, instant, slide) {
-  if (i < 0 || i >= railLines.length) return false;
-  const L = railLines[i].level;
-  rail.from = slide ? rail.level : L;
-  rail.to = L;
-  rail.t = (slide && S.railJumpSeconds > 0 && !instant) ? 0 : 1;
-  rail.level = rail.from;
-  if (!rail.on) {
-    rail.on = true;
-    rail.settle = instant ? 1 : 0;
-    // Keep running the way the ship was already going, so "along the line" never flips
-    // under the player at the moment they are handed the helm.
-    const [gx, gy] = gradient(ship.x, ship.y);
-    const gl = Math.hypot(gx, gy);
-    if (gl > 1e-12) {
-      const tx = -gy / gl, ty = gx / gl;
-      rail.dir = (tx * ship.vx + ty * ship.vy) >= 0 ? 1 : -1;
-    }
-  }
+// Start riding. THERE IS NO SNAP: the ship takes up its OWN current level, clamped into
+// the ridable interval, and the detent then walks it onto the nearest drawn line over
+// about a third of a second. Handing the helm over costs the ship no position at all,
+// which is what makes the Shift release smooth in both directions.
+function acquire(instant) {
+  if (!S.railEnabled || railLines.length === 0) return false;
+  const here = levelAt(potential(ship.x, ship.y));
+  rail.on = true;
+  rail.settle = instant ? 1 : 0;
+  rail.level = clampLevel(here);
+  rail.clamped = false;
+  // Keep running the way the ship was already going, so "along the line" never flips
+  // under the player at the moment they are handed the helm.
+  const [gx, gy] = gradient(ship.x, ship.y);
+  const gl = Math.hypot(gx, gy);
+  const tx = gl > 1e-12 ? -gy / gl : 1, ty = gl > 1e-12 ? gx / gl : 0;
+  rail.dir = (tx * ship.vx + ty * ship.vy) >= 0 ? 1 : -1;
+  // And it carries the speed it arrived with, along the line. The mismatch against the
+  // hold speed is then a real starting condition rather than something wished away: come
+  // in fast and the rail carries you outward before it settles you.
+  rail.v = Math.max(0.05, Math.abs(tx * ship.vx + ty * ship.vy));
   return true;
 }
 
@@ -459,39 +628,6 @@ function releaseRail(why) {
   if (why) note(why, "#e8b463");
 }
 
-// Jump to the next line out or in. dir +1 is OUTWARD, which is W, which is
-// prograde-raises-your-orbit stated in the controls the player already has. Worth
-// getting round the right way even in a rig: the point is to find out whether
-// navigating is interesting, and it will not be if the controls teach the opposite of
-// the thing being navigated.
-//
-// OUTWARD IS DOWN THE SORTED LIST because level rises inward.
-function railJump(dir) {
-  if (!rail.on || dir === 0) return;
-  if (rail.t < 1) return;                       // a slide in progress is not interruptible
-  const at = lineIndex(rail.to);
-  if (at < 0) return;
-  const i = at + (dir > 0 ? -1 : 1);
-  if (i < 0 || i >= railLines.length) { note("NO LINE THAT WAY", "#e8b463"); return; }
-  const from = potential(ship.x, ship.y), to = railLines[i].phi;
-  rideLine(i, false, true);
-  // The speed you will arrive with, by conservation and nothing else:
-  //     v1^2 = v0^2 + 2*(phi0 - phi1)
-  // Negative means unreachable by coasting, and the magnitude is what you are short by.
-  // The rail hands you the difference; this readout is what it is handing you.
-  const v0 = Math.hypot(ship.vx, ship.vy);
-  const v2 = v0 * v0 + 2 * (from - to);
-  const v1 = v2 >= 0 ? Math.sqrt(v2) : -Math.sqrt(-v2);
-  note(`LINE ${railLines[i].level}  ${(v0 * AUYR_KMS).toFixed(1)} -> ${(v1 * AUYR_KMS).toFixed(1)} km/s`,
-       dir > 0 ? "#e8b463" : "#8cf0ff");
-}
-
-function railDirection(d) {
-  if (!rail.on || rail.dir === d) return;
-  rail.dir = d;
-  note(d > 0 ? "RUNNING CLOCKWISE" : "RUNNING ANTICLOCKWISE", "#9fb4cc");
-}
-
 // ONE STEP OF BEING ON A RAIL, run INSTEAD of gravity rather than after it.
 //
 // That ordering is the whole implementation. A railed ship is not a body being pushed
@@ -500,14 +636,8 @@ function railDirection(d) {
 // step every frame, which at 100,000x is thousands of seconds of it, and the result is a
 // fight between two authorities rather than one answer.
 function stepRail(dtYr, realDt) {
-  // Both animations run on the REAL clock. A slide the player watches happen has to
-  // take the same time at 1x and at 5,000,000x, or it is a teleport at speed.
-  if (rail.t < 1) rail.t = S.railJumpSeconds > 0 ? Math.min(1, rail.t + realDt / S.railJumpSeconds) : 1;
   if (rail.settle < 1) rail.settle = S.railAcquireSeconds > 0
     ? Math.min(1, rail.settle + realDt / S.railAcquireSeconds) : 1;
-
-  rail.level = rail.from + (rail.to - rail.from) * easeInOutCubic(rail.t);
-  const phiT = phiForLevel(rail.level);
 
   const [gx, gy] = gradient(ship.x, ship.y);
   const gl = Math.hypot(gx, gy);
@@ -521,25 +651,76 @@ function stepRail(dtYr, realDt) {
   rail.hold = holdSpeed(gl, rail.curv) * S.railSpeedMult;
   if (!(rail.hold > 0)) { releaseRail("LINE LOST: NO HOLD SPEED"); return; }
 
-  // EASED IN, BOTH POSITION AND VELOCITY. Teleporting the ship onto the line and setting
-  // its speed in one frame is correct arithmetic and reads as a glitch; this is a
-  // megaship and has to appear to be moved.
-  const k = rail.settle;
-  ship.vx += (tx * rail.hold - ship.vx) * k;
-  ship.vy += (ty * rail.hold - ship.vy) * k;
+  // ---- the throttle ----------------------------------------------------------
+  // W and S are thrust ALONG the line, as a fraction of that line's own hold speed per
+  // real second, so one throttle setting means the same thing at 0.3 AU and at 3 AU.
+  // The floor stops the ship being braked to a standstill: there is no reverse on a
+  // rail, and a ship at zero speed has no tangent to point along.
+  const input = (keys.w ? 1 : 0) - (keys.s ? 1 : 0);
+  rail.v += input * S.railThrust * rail.hold * realDt;
+  if (rail.v < 0.05 * rail.hold) rail.v = 0.05 * rail.hold;
 
-  const [lx, ly] = projectToLevel(ship.x, ship.y, phiT);
+  // FASTER THAN HOLD PUSHES YOU OUT, SLOWER FALLS IN, and that is not a rule anyone
+  // invented: the centripetal demand to follow the line is v^2*kappa and the only thing
+  // supplying it is gravity, magnitude |grad phi|. Above the hold speed the demand wins
+  // and you drift up the well; below it, gravity wins.
+  //
+  // Outward is a DECREASING level, because level rises inward.
+  rail.m = (rail.v - rail.hold) / rail.hold;
+  const m = Math.max(-1.5, Math.min(1.5, rail.m));
+
+  // THE CLIMB, AND IT PAYS FOR ITSELF: v1^2 = v0^2 + 2*(phi0 - phi1). Going out is a cost
+  // and going in is a gain, so the excess speed that drove the climb is spent by the
+  // climb and the ship settles exactly when its speed matches the new line's hold speed.
+  // The rail is doing a Hohmann transfer's second burn for you, and this is the whole of
+  // that assist.
+  const wanted = rail.level - S.railClimb * m * realDt;
+  const climbed = clampLevel(wanted);
+  rail.clamped = Math.abs(climbed - wanted) > 1e-9;
+  const v2 = rail.v * rail.v + 2 * (phiForLevel(rail.level) - phiForLevel(climbed));
+  rail.v = v2 > 1e-8 ? Math.sqrt(v2) : 1e-4;
+  rail.level = climbed;
+
+  // THE DETENT: a spring onto the nearest drawn line, and the reason the drawn lines are
+  // still the only places the ship comes to rest now that the level is a real number.
+  //
+  // IT IS OFF WHILE THE THROTTLE IS OPEN. Hand off the throttle, the rail sets the ship
+  // down on a line and hands it that line's speed; hand on, the rail does not interfere,
+  // because the mismatch IS the control and a spring pulling against it is the rail
+  // arguing with the hand. Measured, not reasoned: with the detent running through the
+  // sweep it took back over half of every climb, and the mismatch a wide-open throttle
+  // could reach fell from 64% to 15%.
+  //
+  // AND IT IS NOT CHARGED BY CONSERVATION, which is the fix for a bug worth recording.
+  // It was charged at first, and the detent's own climb then generated a mismatch, the
+  // mismatch pushed back, and the ship came to rest 0.3 levels off every rung running a
+  // permanent 11% under its hold speed. Nothing was ever on a line. The detent is the
+  // RAIL PLACING THE SHIP, not the ship flying, so it costs the ship nothing.
+  if (input === 0 || rail.clamped) {
+    const near = nearestLineIndex(rail.level);
+    if (near >= 0)
+      rail.level = clampLevel(rail.level + (railLines[near].level - rail.level) * S.railDetent * realDt);
+    rail.v += (rail.hold - rail.v) * Math.min(1, S.railDetent * realDt);
+  }
+
+  // ---- placement -------------------------------------------------------------
+  const phi1 = phiForLevel(rail.level);
+  const k = rail.settle;
+  const [lx, ly] = projectToLevel(ship.x, ship.y, phi1);
   const px = ship.x + (lx - ship.x) * k;
   const py = ship.y + (ly - ship.y) * k;
 
   // And then it MOVES ALONG THE LINE, which is what makes this a rail and not a parking
-  // brake. Advance along the tangent at the hold speed, then project back onto the line
-  // so the step's chord does not slowly cut the corner off a curve: a first-order
-  // integrator on a circle spirals outward, and over a few thousand steps at warp that
-  // is visible drift.
-  const adv = rail.hold * dtYr;
-  const [nx2, ny2] = projectToLevel(px + tx * adv, py + ty * adv, phiT);
+  // brake. Advance along the tangent, then project back onto the line so the step's chord
+  // does not slowly cut the corner off a curve: a first-order integrator on a circle
+  // spirals outward, and over a few thousand steps at warp that is visible drift.
+  const ox = ship.x, oy = ship.y;
+  const adv = rail.v * dtYr;
+  const [nx2, ny2] = projectToLevel(px + tx * adv, py + ty * adv, phi1);
   ship.x = nx2; ship.y = ny2;
+  // The reported velocity is the ship's ACTUAL motion, cross-line component included, so
+  // letting go hands free flight the velocity the ship really had rather than a tangent.
+  if (dtYr > 1e-12) { ship.vx = (ship.x - ox) / dtYr; ship.vy = (ship.y - oy) / dtYr; }
 }
 
 // ============================== PHYSICS =========================================
@@ -600,20 +781,34 @@ function warpNow() {
     : Math.pow(10, Math.log10(WARP_MID) + ((sliderT - 0.5) / 0.5) * Math.log10(WARP_MAX / WARP_MID));
 }
 
-// THE HAND AIMS, THE DRIVE MOVES, hyperwarp2's rule kept: the nose chases the CURSOR so
-// the cone can stay on a world while the rail carries the ship round it. That pairing is
-// better here than it was there - on a rail you have no control of the path at all, so
-// aiming being independent is the only reason the shot is takeable.
+// THE NOSE HAS TWO OWNERS AND ONE EASE.
+//
+// On a rail the ship points along the line, in the direction it is travelling: it is on
+// rails, and a hull that ignores the track it is welded to reads as a mistake. In free
+// flight the cursor owns it, which is hyperwarp2's twin-stick rule and the reason the
+// cone can be held on a world.
+//
+// Both go through the same per-second rate on the remaining angle, which is what makes
+// the handover smooth in BOTH directions without a special case: at the instant Shift
+// goes down or comes up the target changes, and the nose swings to it over about a fifth
+// of a second instead of jumping.
 function aimNose(realDt) {
-  const [mwx, mwy] = screenToWorld(mouse.sx, mouse.sy);
-  const adx = mwx - ship.x, ady = mwy - ship.y;
-  if (adx * adx + ady * ady > 1e-12) {
-    const want = Math.atan2(ady, adx);
-    let d = want - ship.nose;
-    while (d > Math.PI) d -= 2 * Math.PI;
-    while (d < -Math.PI) d += 2 * Math.PI;
-    ship.nose += d * Math.min(1, realDt * S.aimEase);
+  let want;
+  if (rail.on) {
+    const [gx, gy] = gradient(ship.x, ship.y);
+    const gl = Math.hypot(gx, gy);
+    if (!(gl > 1e-12)) return;
+    want = Math.atan2(gx / gl * rail.dir, -gy / gl * rail.dir);
+  } else {
+    const [mwx, mwy] = screenToWorld(mouse.sx, mouse.sy);
+    const adx = mwx - ship.x, ady = mwy - ship.y;
+    if (!(adx * adx + ady * ady > 1e-12)) return;
+    want = Math.atan2(ady, adx);
   }
+  let d = want - ship.nose;
+  while (d > Math.PI) d -= 2 * Math.PI;
+  while (d < -Math.PI) d += 2 * Math.PI;
+  ship.nose += d * Math.min(1, realDt * S.aimEase);
 }
 
 // Free flight only. On a rail the keys mean jump and direction instead, so there is
@@ -670,6 +865,19 @@ function burst(x, y, r, color) { flashes.push({ x, y, r, t: 0, color, kind: "fla
 // once you have hit it, it is on its way somewhere and the trip moves on. That is all
 // the framing needs to be, and it is what makes the line you pick a decision rather than
 // a scenic route.
+// ARE WE IN ORBIT ROUND A WORLD? True when the ship is inside that world's
+// neighbourhood and sitting on its ring, which is the deepest line the chart offers
+// there. That is the road trip arriving: the last line you can hold is the orbit itself.
+function inOrbitOf() {
+  if (!rail.on) return null;
+  for (const p of bodies) {
+    if (!p.alive || p.orbitLevel === null) continue;
+    if (dist(ship.x, ship.y, p.x, p.y) > S.orbitNearAU) continue;
+    if (Math.abs(rail.level - p.orbitLevel) < 0.25) return p;
+  }
+  return null;
+}
+
 function updateTarget() {
   let best = null, bd = Infinity;
   for (const b of bodies) {
@@ -692,6 +900,7 @@ function frame(now) {
   last = now;
 
   gatherWells();
+  computeOrbitLevels();
   // THE SURVEY RUNS FIRST, before the sim and before the draw, so the sim and the ink
   // are looking at the same list. Also runs while paused, so the chart is live under a
   // paused ship.
@@ -726,14 +935,11 @@ function frame(now) {
   if (!wantFree && !rail.on && !rail.bootstrap && S.railEnabled) {
     if (acquire(false)) note("RE-ACQUIRED", "#8cf0ff");
   }
-  // A line that has left the chart cannot be ridden, so the rail slides to the nearest
-  // one that is still on it. This is the rule biting in play rather than in a test: zoom
-  // far enough out and the ladder thins under you.
-  if (rail.on && rail.t >= 1 && lineIndex(rail.to) < 0) {
-    const i = nearestLineIndex(rail.level);
-    if (i >= 0) { rideLine(i, false, true); note("LINE LEFT THE CHART", "#e8b463"); }
-    else releaseRail("NO CHART: FLYING FREE");
-  }
+  // No chart, nothing to ride. The clamp in stepRail handles the ordinary case of the
+  // ladder thinning under you as you zoom: the level is pulled back inside whatever is
+  // still drawn, continuously, so it reads as the chart closing in rather than as the
+  // line you were on being taken away.
+  if (rail.on && railLines.length === 0) releaseRail("NO CHART: FLYING FREE");
 
   aimNose(realDt);
 
@@ -759,12 +965,12 @@ function frame(now) {
   pushTrail(ship.trail, ship.x, ship.y, 700);
   for (const b of bodies) if (b.alive) pushTrail(b.trail, b.x, b.y, 250);
 
-  // THE RELEASE PREVIEW. While railed this line is not where the ship is going, it is
-  // where the ship WOULD go if released this instant, which is exactly what a navigator
-  // about to let go wants. It is drawn yellow rather than blue for that reason: an
-  // instrument that silently changes what it is saying is worse than one that says
-  // nothing (gravity-surf-rail, ead840b).
-  if (S.projections && !charging) buildGhost();
+  // NO FORECAST WHILE RAILED. The rail carried a release preview at first, drawn yellow
+  // to say "this is where you go if you let go now", which is the decision Unity's
+  // gravity-surf-rail branch made in ead840b. The designer's call reverses it: you are on
+  // a rail, the line under the ship already says where you are going, and a second dashed
+  // curve is one instrument too many on a screen that is already 53 lines of chart.
+  if (S.projections && !charging && !rail.on) buildGhost();
   else { ghostPath = null; ghostBodies = []; }
 
   cam.x += (ship.x - cam.x) * Math.min(1, realDt * 4);
@@ -875,9 +1081,9 @@ function draw(realDt) {
   for (const b of bodies) if (b.alive) strokeTrail(b.trail, b.color, 0.35);
   strokeTrail(ship.trail, "#bcd6ee", 0.5);
 
-  // the forecast. Yellow while railed, because there it means "if you let go now".
+  // the forecast, free flight only
   if (ghostPath && ghostPath.length > 2) {
-    cx.strokeStyle = rail.on ? "rgba(240,205,120,0.55)" : "rgba(160,200,240,0.65)";
+    cx.strokeStyle = "rgba(160,200,240,0.65)";
     cx.lineWidth = 1.5; cx.setLineDash([6, 6]);
     cx.beginPath();
     ghostPath.forEach((p, i) => { const [sx, sy] = worldToScreen(p.x, p.y); i ? cx.lineTo(sx, sy) : cx.moveTo(sx, sy); });
@@ -1022,27 +1228,47 @@ function draw(realDt) {
 // The line being ridden is drawn brightest, its jump neighbours next, then majors, then
 // the rest. That ordering is the reading aid the density needs: at 140 lines a flat
 // chart is hatching, and the player is choosing between three of them at a time.
+function strokeSegs(segs) {
+  cx.beginPath();
+  for (let p = 0; p + 3 < segs.length; p += 4) {
+    const [x1, y1] = worldToScreen(segs[p], segs[p + 1]);
+    const [x2, y2] = worldToScreen(segs[p + 2], segs[p + 3]);
+    cx.moveTo(x1, y1); cx.lineTo(x2, y2);
+  }
+  cx.stroke();
+}
 function drawRailLines() {
   if (railLines.length === 0) return;
-  const at = rail.on ? lineIndex(rail.to) : -1;
-  const from = rail.on && rail.t < 1 ? lineIndex(rail.from) : -1;
+  const near = rail.on ? nearestLineIndex(rail.level) : -1;
   for (let i = 0; i < railLines.length; i++) {
     const e = railLines[i];
+    if (e.orbit) {
+      // A world's orbit ring, in that world's own colour. It is the floor of the chart
+      // there, so it is drawn as an object rather than as another contour.
+      cx.strokeStyle = e.orbit.color; cx.globalAlpha = 0.75; cx.lineWidth = 2;
+      strokeSegs(e.segs);
+      cx.globalAlpha = 1;
+      continue;
+    }
     const major = ((e.level / chartStride) % Math.max(1, Math.round(S.majorEvery))) === 0;
     let style = major ? "rgba(110,150,210,0.30)" : "rgba(110,150,210,0.13)";
     let width = 1;
-    if (i === at) { style = "rgba(140,240,255,0.85)"; width = 2; }
-    else if (i === from) { style = `rgba(140,240,255,${0.5 * (1 - rail.t)})`; width = 1.5; }
-    else if (rail.on && (i === at - 1 || i === at + 1)) { style = "rgba(140,200,240,0.40)"; width = 1; }
-    cx.strokeStyle = style; cx.lineWidth = width;
-    cx.beginPath();
-    const s = e.segs;
-    for (let p = 0; p + 3 < s.length; p += 4) {
-      const [x1, y1] = worldToScreen(s[p], s[p + 1]);
-      const [x2, y2] = worldToScreen(s[p + 2], s[p + 3]);
-      cx.moveTo(x1, y1); cx.lineTo(x2, y2);
+    // The two rungs either side of the ship are lifted, because on a throttle they are
+    // where it is about to be rather than a place it has to stop.
+    if (rail.on && (i === near || i === near - 1 || i === near + 1)) {
+      style = "rgba(140,200,240,0.42)"; width = 1;
     }
-    cx.stroke();
+    cx.strokeStyle = style; cx.lineWidth = width;
+    strokeSegs(e.segs);
+  }
+  // THE SHIP'S OWN LEVEL, marched live at its exact fractional value. This is the line
+  // the ship is actually on, and while the throttle is open it slides visibly across the
+  // ladder. It is a readout and never an entry in railLines: you do not ride it, you ARE
+  // on it, and the rungs are still the only places you come to rest.
+  if (ownLine && rail.on) {
+    cx.strokeStyle = `rgba(140,240,255,${0.35 + 0.5 * rail.settle})`;
+    cx.lineWidth = 2;
+    strokeSegs(ownLine);
   }
 }
 
@@ -1138,33 +1364,27 @@ function drawHud(W, H) {
   const speed = Math.hypot(ship.vx, ship.vy) * AUYR_KMS;
   cx.fillText(`YEAR ${simYears.toFixed(1)}   ENERGY ${energy.toFixed(0)}   ${speed.toFixed(1)} km/s`, 16 * px, 42 * px);
 
-  // The rail readout: which line, how fast it holds you, and what the next one costs.
-  // The arrow is the whole comparison the rail exists for.
+  // The rail readout: which line, how fast it holds you, and which way the throttle is
+  // taking you. The mismatch is the whole instrument now that W and S are a throttle.
   const y3 = 60 * px;
+  let y4 = 78 * px;
   if (rail.on) {
-    const at = lineIndex(rail.to);
-    const hold = rail.hold * AUYR_KMS;
-    let txt = `LINE ${rail.to}  HOLD ${hold.toFixed(1)} km/s`;
-    if (rail.t < 1) txt = `SLIDING ${rail.from} -> ${rail.to}  ${(rail.t * 100).toFixed(0)}%`;
-    else if (at >= 0) {
-      const out = at - 1 >= 0 ? railLines[at - 1] : null;
-      const inn = at + 1 < railLines.length ? railLines[at + 1] : null;
-      const v0 = Math.hypot(ship.vx, ship.vy), phi0 = potential(ship.x, ship.y);
-      const arr = e => {
-        if (!e) return "--";
-        const v2 = v0 * v0 + 2 * (phi0 - e.phi);
-        const v = v2 >= 0 ? Math.sqrt(v2) : -Math.sqrt(-v2);
-        return (v * AUYR_KMS).toFixed(1);
-      };
-      txt += `   W out ${arr(out)}   S in ${arr(inn)} km/s`;
-    }
+    const orbiting = inOrbitOf();
+    let txt = `LINE ${rail.level.toFixed(2)}  HOLD ${(rail.hold * AUYR_KMS).toFixed(1)} km/s`;
+    if (Math.abs(rail.m) > 0.03)
+      txt += `   ${rail.m > 0 ? "CLIMBING" : "DROPPING"} ${(Math.abs(rail.m) * 100).toFixed(0)}%`;
+    if (rail.clamped) txt += orbiting ? "   HELD AT THE ORBIT" : "   HELD AT THE EDGE";
     cx.fillStyle = "rgba(140,240,255,0.9)";
     cx.fillText(txt, 16 * px, y3);
+    if (orbiting) {
+      cx.fillStyle = orbiting.color;
+      cx.fillText(`IN ORBIT: ${orbiting.name}`, 16 * px, y3 + 18 * px);
+      y4 += 18 * px;
+    }
   } else {
     cx.fillStyle = "rgba(232,180,99,0.9)";
     cx.fillText("FREE FLIGHT", 16 * px, y3);
   }
-  let y4 = 78 * px;
   if (target && target.alive) {
     cx.fillStyle = "rgba(232,180,99,0.8)";
     cx.fillText(`NEXT STOP ${target.name}  ${dist(ship.x, ship.y, target.x, target.y).toFixed(2)} AU`, 16 * px, y4);
@@ -1173,10 +1393,9 @@ function drawHud(W, H) {
   if (paused) { cx.fillStyle = "#e8b463"; cx.fillText("PAUSED", 16 * px, y4); y4 += 18 * px; }
 
   const controls = [
-    ["MOUSE", "aim: the nose tracks the cursor"],
-    ["W / S", "jump one line OUT / IN"],
-    ["A / D", "run anticlockwise / clockwise"],
+    ["W / S", "throttle: climb OUT / drop IN"],
     ["SHIFT", "hold: let go, free flight"],
+    ["MOUSE", "aims only in free flight"],
     ["Q / E", "time slower / faster"],
     ["LMB hold", "charge the pool shot"],
     ["ESC", "cancel a held charge"],
@@ -1210,15 +1429,9 @@ addEventListener("keydown", e => {
   const k = KEYMAP[e.code];
   if (k) {
     e.preventDefault();
-    // On the rail W and S are the jump and A and D are the direction. Fired on the EDGE,
-    // not while held: a jump is a decision, and repeating it sixty times a second would
-    // make the ladder a slider.
-    if (!keys[k] && rail.on) {
-      if (k === "w") railJump(1);
-      if (k === "s") railJump(-1);
-      if (k === "a") railDirection(-1);
-      if (k === "d") railDirection(1);
-    }
+    // W and S are read as HELD state by stepRail, not on the edge. That is the whole
+    // difference between a throttle and a jump key: holding one sweeps the ship across
+    // the ladder in one motion instead of queueing a slide per press.
     keys[k] = true;
   }
   if (e.code === "KeyR") resetWorld();
@@ -1258,9 +1471,14 @@ const PANEL = [
   ["r", "gridNX", "chart grid across", 40, 220, 4],
   ["r", "majorEvery", "major every Nth", 1, 10, 1],
   ["-"],
-  ["r", "railJumpSeconds", "jump time s", 0.05, 3, 0.05],
+  ["r", "railThrust", "throttle (hold speed /s)", 0.05, 2, 0.05],
+  ["r", "railClimb", "climb (levels /s at 100%)", 1, 40, 0.5],
+  ["r", "railDetent", "detent onto a line /s", 0, 12, 0.25],
   ["r", "railAcquireSeconds", "re-acquire time s", 0.05, 3, 0.05],
   ["r", "railSpeedMult", "hold speed mult", 0.2, 3, 0.05],
+  ["-"],
+  ["r", "orbitRingAU", "orbit ring AU", 0.02, 0.3, 0.005],
+  ["r", "orbitNearAU", "orbit ring reach AU", 0.1, 1, 0.05],
   ["-"],
   ["r", "thrustAccel", "thrust AU/yr^2", 100, 24000, 100],
   ["r", "linearDamp", "settle /s (free flight)", 0, 4, 0.05],
@@ -1315,11 +1533,17 @@ window.RIG = {
     simYears, energy, paused,
     ship: { x: ship.x, y: ship.y, vx: ship.vx, vy: ship.vy, nose: ship.nose },
     speed: Math.hypot(ship.vx, ship.vy),
-    rail: { on: rail.on, from: rail.from, to: rail.to, t: rail.t, settle: rail.settle,
-            dir: rail.dir, level: rail.level, hold: rail.hold, index: lineIndex(rail.to) },
+    rail: { on: rail.on, level: rail.level, v: rail.v, m: rail.m, hold: rail.hold,
+            settle: rail.settle, dir: rail.dir, clamped: rail.clamped,
+            nearest: railLines.length && rail.on ? railLines[nearestLineIndex(rail.level)].level : null },
     shipLevel: levelAt(potential(ship.x, ship.y)),
     lineCount: railLines.length,
     stride: chartStride,
+    ghostPoints: ghostPath ? ghostPath.length : 0,
+    orbits: bodies.filter(b => b.alive).map(b => ({ name: b.name, level: b.orbitLevel,
+                                                    drawn: railLines.some(e => e.orbit === b),
+                                                    d: dist(ship.x, ship.y, b.x, b.y) })),
+    inOrbit: (() => { const p = inOrbitOf(); return p ? p.name : null; })(),
     target: target ? target.name : null,
     score: { ...score },
     notices: notices.map(n => n.text),
@@ -1330,15 +1554,32 @@ window.RIG = {
   // THE DRAWN SET, exactly as the ink has it. A test that wants to know where a line is
   // asks for its segments and measures against those, rather than recomputing the rig's
   // own level formula - which would pass even if that formula had a sign error.
-  lines: () => railLines.map(e => ({ level: e.level, ink: e.ink })),
+  lines: () => railLines.map(e => ({ level: e.level, ink: e.ink, orbit: e.orbit ? e.orbit.name : null })),
   segments: level => {
-    const i = lineIndex(level);
-    return i < 0 ? null : Array.from(railLines[i].segs);
+    let best = -1, bd = 1e-6;
+    for (let i = 0; i < railLines.length; i++) {
+      const d = Math.abs(railLines[i].level - level);
+      if (d < bd) { bd = d; best = i; }
+    }
+    return best < 0 ? null : Array.from(railLines[best].segs);
   },
-  // Goes through the same lineIndex search every player path uses, so a level that is
-  // not on the chart is refused here for exactly the reason it is refused in play.
-  acquire: level => rideLine(lineIndex(level), false, true),
+  // The ship's OWN line as drawn, at its exact fractional level. This is what a test
+  // measures the hull against, so "the ship is on its line" is checked against the ink
+  // rather than against the formula that put it there.
+  ownSegments: () => (ownLine ? Array.from(ownLine) : null),
+  // Where the level would be clamped to right now. The visibility rule made queryable:
+  // ask for a level off the chart and you get back the one you would actually reach.
+  clampLevel: L => clampLevel(L),
   park: (x, y, vx, vy) => { ship.x = x; ship.y = y; ship.vx = vx; ship.vy = vy; ship.trail.length = 0; },
+  parkNear: (i, dx, dy) => {
+    const b = bodies[i];
+    ship.x = b.x + dx; ship.y = b.y + dy; ship.vx = b.vx; ship.vy = b.vy;
+    ship.trail.length = 0;
+    return { name: b.name, x: b.x, y: b.y };
+  },
+  bodyAt: i => ({ name: bodies[i].name, x: bodies[i].x, y: bodies[i].y,
+                  orbitLevel: bodies[i].orbitLevel, alive: bodies[i].alive }),
+  release: () => releaseRail(null),
   holdSpeedAt: (x, y) => {
     gatherWells();
     const [gx, gy] = gradient(x, y);
