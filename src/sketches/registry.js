@@ -45,6 +45,17 @@ export const SKETCHES = [
       antigravity, charge shockwave, teleport. WASD, Q/E, Space, Shift, mouse.`,
     tags: ['drift flight', 'time control', 'antigravity', 'teleport'],
   },
+  {
+    id: '004',
+    name: '004 Hyperwarp 2',
+    href: '/hyperwarp2.html',
+    tagline: 'Aim with the mouse, strafe with the keys, and let a planet take you.',
+    description: `A variant of the hyperwarp rig. The ship always looks at the cursor so
+      aiming and movement are independent, A and D strafe rather than rotate, and an
+      orbit lock ported from 001 Ship Pool lets you loiter beside a world and ride its
+      orbit.`,
+    tags: ['variant', 'twin-stick', 'orbit lock'],
+  },
 ]
 
 /** @param {string} id */

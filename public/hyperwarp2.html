@@ -1,0 +1,1189 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Hyperwarp 2 feel rig</title>
+<!--
+  HYPERWARP 2 FEEL RIG. A VARIANT of hyperwarp.html, not a replacement: keep both, play
+  them back to back, that is what the variant is for. Three differences, all about where
+  aiming lives and what a planet is.
+
+    1. THE SHIP ALWAYS LOOKS AT THE CURSOR. In hyperwarp 1 the nose follows the
+       velocity, so the only way to aim the shockwave was to fly at the thing. Here the
+       hand aims and the drive moves, independently, twin-stick style. The shot is no
+       longer a consequence of the flight path.
+    2. A/D STRAFE. With the mouse owning the facing there is nothing for A/D to rotate,
+       so they push the hull sideways relative to where it is pointed. W/S still drive
+       along the nose. You can circle a target while keeping it under the cone.
+    3. ORBIT LOCK, ported from sketch 001 "Ship Pool" on the prototype site. Loiter
+       inside a planet's ring and the ship docks onto its orbit, eased in over a beat,
+       then rides the planet exactly. See THE ORBIT LOCK below for the port notes.
+
+  Everything else is hyperwarp 1 and is documented there.
+
+  The web-frame prototype for the hyperwarp branch, built from
+  Reference/hyperwarp-brief.md. Double-click to run, like every mockup in this folder.
+
+  THE CONTRACT: the brief is the spec, this file is the feel lab, the Unity branch is the
+  product. Sim conventions are the game's exactly, so the port is mechanical:
+  AU, solar masses, Julian years, G = 4*pi^2, +y DOWN (canvas y already grows down, so
+  nothing here flips), symplectic Euler, fixed substeps capped at MAX_SUBSTEP_YR.
+
+  OUT OF SCOPE ON PURPOSE (feel rig, not product): fog of war, surveys, levels as JSON,
+  sound. The test panel on the right is the tuning surface; every number the brief calls
+  feel-critical lives there and persists in localStorage.
+
+  FLARES: canvas QUOTES of the real flare, not the real flare. The true source is
+  flare-lab.html (GLSL) and its Unity port; a 2d canvas cannot run either, so drawFlare
+  below imitates the look the lab settled on - a small hard hot core, seven restrained
+  spikes, additive - and the star, the thrusters, the shot release and the teleport
+  ingress/egress all draw through it. If this rig ever graduates to WebGL, the lab's
+  materialise() drops in and drawFlare dies.
+
+  CONTROLS
+    MOUSE          aim: the nose tracks the cursor, always
+    W / S          drive forward / back along the nose
+    A / D          strafe left / right of the nose
+    Q / E hold     time slider, slow / fast, continuous 1x..5,000,000x
+    Space          hold: grow a time-stop bubble. Press again later: unpause, refund
+    Shift hold     antigravity (blocked while Q/E held)
+    LMB hold       charge the particle accelerator; release to fire; Esc cancels
+    RMB            teleport to cursor, momentum kept, works mid-charge, blocked near bodies
+    ESC            cancel a held charge, else release the orbit lock
+    Scroll         zoom    R  reset    P  pause
+
+  THE ORBIT LOCK, ported from 001 Ship Pool. Its numbers come over unchanged, because
+  the point of a port is to feel the same thing in a new context:
+
+    LOCK_RADIUS_AU 0.1     the ring you have to be inside (001: orbit.ringRadiusMult)
+    LOCK_DWELL_YR  0.008   sim-years you must stay inside it (001: CAPTURE_DWELL_YR)
+    CAPTURE_SEC    1.25    real seconds of eased approach (001: CAPTURE_DURATION_S)
+    dock radius    max(drawR * 2.8, 0.018) AU  (001: SLINGSHOT_ORBIT_R_MULT / _MIN_R)
+
+  The shape is 001's exactly: a dwell timer while you loiter, then an easeInOutCubic
+  blend from where your relative velocity was carrying you to a fixed slot on the
+  planet's dock ring, then a rigid weld - position and velocity both taken from the
+  planet every step, so you ride its orbit rather than fly a copy of it.
+
+  THE DWELL IS IN SIM YEARS, and that is worth knowing before tuning it: 0.008 yr is
+  about 2.5 real seconds at the opening 100,000x, and proportionally less as you slide
+  time right. Loitering is cheaper at speed. That is 001's rule, kept.
+
+  TWO DELIBERATE DEVIATIONS, both because this is a faster game than 001:
+    · 001 only ever docks a SCANNED planet. There is no survey here, so any planet locks.
+    · 001 holds you until Esc or the shot. Here thrust breaks the lock too, by default,
+      because a drift game that welds you in place with no way out but a modifier key
+      reads as a trap. The test panel can switch it back to 001's stricter behaviour.
+-->
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #04030a; }
+  canvas { display: block; }
+  #panel {
+    position: fixed; top: 10px; right: 10px; width: 240px; z-index: 10;
+    background: rgba(8, 10, 18, 0.92); border: 1px solid #2a3448; border-radius: 6px;
+    font: 11px/1.5 "Share Tech Mono", Menlo, monospace; color: #9fb4cc; padding: 10px 12px;
+    user-select: none;
+  }
+  #panel h1 { font-size: 11px; margin: 0 0 6px; color: #d8e4f2; letter-spacing: 1px; }
+  #panel label { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+  #panel .row { margin: 2px 0; }
+  #panel input[type=range] { width: 110px; accent-color: #5f88c9; }
+  #panel .val { color: #e8b463; min-width: 44px; text-align: right; }
+  #panel hr { border: 0; border-top: 1px solid #223048; margin: 7px 0; }
+  #panel button { background:#1a2334; color:#9fb4cc; border:1px solid #2a3448; border-radius:4px;
+                  font:inherit; padding:2px 8px; cursor:pointer; }
+  #collapse { float: right; cursor: pointer; color:#5f88c9; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="panel"></div>
+<script>
+"use strict";
+
+// ============================== UNITS AND CONSTANTS =============================
+const G = 4 * Math.PI * Math.PI;          // AU^3 / (Msun * yr^2), Kepler's third law
+const SPY = 31557600;                      // seconds per Julian year
+const MAX_SUBSTEP_YR = 1e-4;               // same rule as the game: fixed step ceiling
+const MAX_SUBSTEPS = 64;                   // frame backstop: degrade, never freeze
+const SOFT2 = 1e-6;                        // Plummer softening^2, matches SimUnits scale
+// The slider's scale is log-linear in two halves with 100,000x PINNED AT THE CENTRE:
+// the left half spans 1x..100K, the right half 100K..5M. The centre is both the
+// starting position and drift mode's home, so the resting state of the game is the
+// navigation warp the main game lives at.
+const WARP_MID = 1e5, WARP_MAX = 5e6;
+
+// ============================== TUNABLES (test panel) ===========================
+const DEFAULTS = {
+  lockEnabled: true,     // the orbit lock, ported from 001 Ship Pool
+  thrustBreaksLock: true,// off = 001's stricter hold (only Esc or a shot releases)
+  timeFree: false,       // the slider costs nothing
+  driftMode: true,       // centre free, slow end costs, spring back on release
+  coneMode: true,        // true: cone shockwave; false: nearest body on the aim line
+  teleNoCooldown: true,
+  projections: true,     // forecasts (ship + struck worlds), hidden during ability use
+  gravLines: true,       // equipotential contours of the field the ship flies
+  thrustAccel: 4000,     // AU/yr^2. Hohmann's tall ship is 120; this turns on a dime
+  shotPower: 8.0,        // AU/yr of delta-v at full charge, point blank
+  chargeSeconds: 1.5,    // real seconds from empty to full charge
+  coneWidthDeg: 28,      // feel-critical number one
+  coneRangeAU: 1.6,      // feel-critical number two
+  bubbleGrowAUs: 0.45,   // time-stop radius growth, AU per real second
+  bubbleCostPs: 9,       // max-energy reserved per real second of growth
+  timeCostPs: 4,         // energy per real second at full slider deflection
+  antigravCostPs: 7,     // energy per real second held
+  teleCostPerAU: 6,      // energy per AU jumped
+  shotCost: 25,          // energy at full charge
+  reactorPs: 3,          // passive generation per real second
+  solarPs: 14,           // solar charge per real second at the reference distance
+  solarRefAU: 0.35,      // the steeper-than-the-game curve pivots here
+  planetBoost: 10000,    // the game layer's boost, unchanged: wells you can grab
+  aimEase: 14,           // how fast the nose swings to the cursor, per second
+  lockRadiusAU: 0.1,     // 001's orbit.ringRadiusMult
+  lockDwellYr: 0.008,    // 001's CAPTURE_DWELL_YR
+  captureSeconds: 1.25,  // 001's CAPTURE_DURATION_S
+};
+let S = loadSettings();
+
+// ============================== WORLD ===========================================
+// A level-01-like table, authored as intent (radius + angle) and derived, the same
+// discipline as Sim.StableOrbit: never store raw state for an orbiting body.
+const STAR = { x: 0, y: 0, mass: 0.45, drawR: 0.045, color: "#ffd9a0" };
+const BH = { x: 3.4, y: -2.3, mass: 0.9, captureR: 0.10, influenceR: 1.3 };
+const PLANET_DEFS = [
+  { name: "TASTE",   r: 0.55, a: 0.6, mass: 4e-6,  drawR: 0.020, color: "#e0a86c" },
+  { name: "TOUCH",   r: 0.95, a: 2.7, mass: 6e-6,  drawR: 0.024, color: "#8fc3e8" },
+  { name: "SMELL",   r: 1.45, a: 4.4, mass: 1.0e-5, drawR: 0.027, color: "#c98fe8" },
+  { name: "HEARING", r: 2.10, a: 1.6, mass: 8e-6,  drawR: 0.025, color: "#8fe8b0" },
+  { name: "SIGHT",   r: 3.00, a: 5.5, mass: 1.2e-5, drawR: 0.029, color: "#e8e28f" },
+];
+let bodies, ship, score, simYears;
+
+function derivePlanet(d) {
+  const v = Math.sqrt(G * STAR.mass / d.r);
+  return { name: d.name, mass: d.mass, drawR: d.drawR, color: d.color, orbitR: d.r,
+           x: STAR.x + d.r * Math.cos(d.a), y: STAR.y + d.r * Math.sin(d.a),
+           vx: -v * Math.sin(d.a), vy: v * Math.cos(d.a),
+           struck: false, alive: true, trail: [], dwell: 0 };
+}
+function resetWorld() {
+  bodies = PLANET_DEFS.map(derivePlanet);
+  const r = 1.2, a = 0.2, v = Math.sqrt(G * STAR.mass / r);
+  ship = { x: STAR.x + r * Math.cos(a), y: STAR.y + r * Math.sin(a),
+           vx: -v * Math.sin(a), vy: v * Math.cos(a), nose: 0, trail: [] };
+  ship.nose = Math.atan2(ship.vy, ship.vx);
+  score = { potted: 0, burned: 0, deaths: 0 };
+  simYears = 0;
+  energy = 100; reserve = 0;
+  bubble = null; charging = false; charge = 0; teleCooldown = 0;
+  sliderT = 0.5; sliderShown = 0.5;   // open at the centre: 100,000x, the navigation warp
+  orbit = { mode: "free", planet: null };
+  lockCooldown = 0; lockReleased = null;
+  ghostPath = null;
+}
+
+// ============================== STATE ===========================================
+let energy = 100, reserve = 0;             // reserve: max-energy held by the bubble
+const MAX_ENERGY = 100;
+let bubble = null;                          // {x, y, r, growing}
+let charging = false, charge = 0;
+let teleCooldown = 0;
+let sliderT = 0, sliderShown = 0;           // 0..1 position, and its eased display twin
+let paused = false;
+// THE ORBIT LOCK's whole state, in 001's shape. mode is free | capturing | locked.
+// While capturing it also carries { age, simAge, startDx, startDy, startRelVx,
+// startRelVy, dockDx, dockDy }; while locked, just { offDx, offDy }.
+let orbit = { mode: "free", planet: null };
+let lockCooldown = 0;                       // real seconds before a re-lock is allowed
+let lockReleased = null;                    // the planet just left, until we clear its ring
+let flashes = [];                           // transient rings: shots, teleports, deaths
+let notices = [];                           // the ship log, four rows, 20 s
+const keys = {};
+let mouse = { x: 0, y: 0, sx: 0, sy: 0 };
+
+// camera, all eased: the brief says smooth everything
+let cam = { x: 0, y: 0, scale: 260, targetScale: 260 };
+
+function note(text, color) {
+  const existing = notices.find(n => n.text === text);
+  if (existing) { existing.t = 0; return; }
+  notices.push({ text, color: color || "#8fb8e0", t: 0 });
+  if (notices.length > 4) notices.shift();
+}
+
+// ============================== PHYSICS =========================================
+// One softened point-mass kick, the exact Pull() shape from Sim.cs.
+function pull(sx, sy, gm, b, h) {
+  const dx = sx - b.x, dy = sy - b.y;
+  const d2 = dx * dx + dy * dy + SOFT2;
+  const k = gm * h / (d2 * Math.sqrt(d2));
+  b.vx += dx * k; b.vy += dy * k;
+}
+function frozen(b) { return bubble && dist(b.x, b.y, bubble.x, bubble.y) <= bubble.r; }
+function dist(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return Math.sqrt(dx * dx + dy * dy); }
+
+function simStep(h, antigrav, realDt) {
+  // Planets: the real layer. A planet feels the star, and once struck the black hole
+  // too, so the table stays an authored set of rings until a shot breaks it.
+  for (const b of bodies) {
+    if (!b.alive || frozen(b)) continue;
+    pull(STAR.x, STAR.y, G * STAR.mass, b, h);
+    if (b.struck && dist(b.x, b.y, BH.x, BH.y) < BH.influenceR) pull(BH.x, BH.y, G * BH.mass, b, h);
+  }
+  // THE LOCK OWNS THE SHIP WHEN IT HAS IT. 001's rule: a docked ship is placed, not
+  // flown, so it neither feels gravity nor integrates - it simply is where the planet
+  // says it is. Everything else on the table steps normally underneath it.
+  const held = orbit.mode !== "free";
+  // The ship: always the game layer. Star, boosted worlds, the black hole inside its
+  // influence. Antigravity skips ALL of it and momentum does the flying.
+  if (!antigrav && !held) {
+    pull(STAR.x, STAR.y, G * STAR.mass, ship, h);
+    for (const b of bodies) if (b.alive) pull(b.x, b.y, G * b.mass * S.planetBoost, ship, h);
+    if (dist(ship.x, ship.y, BH.x, BH.y) < BH.influenceR) pull(BH.x, BH.y, G * BH.mass, ship, h);
+  }
+  for (const b of bodies) if (b.alive && !frozen(b)) { b.x += b.vx * h; b.y += b.vy * h; }
+  if (held) stepLock(h, realDt);
+  else { ship.x += ship.vx * h; ship.y += ship.vy * h; checkLock(h); }
+
+  // Endings. A planet into the black hole is the point of the game; into the star is
+  // the foul; the ship into either is a respawn, not a fail state - this is a feel rig.
+  for (const b of bodies) {
+    if (!b.alive) continue;
+    if (dist(b.x, b.y, BH.x, BH.y) < BH.captureR) {
+      b.alive = false; score.potted++; flash(b.x, b.y, 0.25, "#ff8c00"); burst(b.x, b.y, 0.1, "#ff8c00");
+      note("POTTED: " + b.name, "#ff8c00");
+    } else if (dist(b.x, b.y, STAR.x, STAR.y) < STAR.drawR + b.drawR) {
+      b.alive = false; score.burned++; flash(b.x, b.y, 0.2, "#ff5030"); burst(b.x, b.y, 0.08, "#ff5030");
+      note("BURNED: " + b.name, "#ff5030");
+    }
+  }
+  if (dist(ship.x, ship.y, BH.x, BH.y) < BH.captureR ||
+      dist(ship.x, ship.y, STAR.x, STAR.y) < STAR.drawR * 1.2) {
+    score.deaths++; flash(ship.x, ship.y, 0.3, "#ffffff");
+    note("SHIP LOST: RESPAWNING", "#ff5030");
+    const r = 1.2, a = Math.random() * 6.28, v = Math.sqrt(G * STAR.mass / r);
+    ship.x = STAR.x + r * Math.cos(a); ship.y = STAR.y + r * Math.sin(a);
+    ship.vx = -v * Math.sin(a); ship.vy = v * Math.cos(a);
+    ship.trail = [];
+  }
+}
+
+// ============================== ABILITIES =======================================
+function warpNow() {
+  return sliderT <= 0.5
+    ? Math.pow(10, (sliderT / 0.5) * Math.log10(WARP_MID))
+    : Math.pow(10, Math.log10(WARP_MID) + ((sliderT - 0.5) / 0.5) * Math.log10(WARP_MAX / WARP_MID));
+}
+function timeBusy() { return keys.q || keys.e; }
+
+// THE HAND AIMS, THE DRIVE MOVES, and they are independent. This is the variant's
+// whole reason to exist: in hyperwarp 1 the nose chases the velocity, so the cone
+// points wherever you happen to be going and lining up a shot means flying at the
+// target. Here the nose chases the CURSOR and the keys are pure translation, which is
+// what lets you circle a world with it under the cone the entire way round.
+//
+// Eased rather than snapped, because the ship is an object with a hull: aimEase is a
+// per-second rate on the remaining angle, high enough to feel immediate and low enough
+// that a flick of the mouse still reads as the ship turning rather than teleporting.
+function applyThrust(dtYr, realDt) {
+  const [mwx, mwy] = screenToWorld(mouse.sx, mouse.sy);
+  const adx = mwx - ship.x, ady = mwy - ship.y;
+  if (adx * adx + ady * ady > 1e-12) {
+    const want = Math.atan2(ady, adx);
+    let d = want - ship.nose;
+    while (d > Math.PI) d -= 2 * Math.PI;
+    while (d < -Math.PI) d += 2 * Math.PI;
+    ship.nose += d * Math.min(1, realDt * S.aimEase);
+  }
+
+  const nx = Math.cos(ship.nose), ny = Math.sin(ship.nose);
+  const lon = (keys.w ? 1 : 0) - (keys.s ? 1 : 0);
+  const lat = (keys.a ? 1 : 0) - (keys.d ? 1 : 0);
+  // Strafe is perpendicular to the nose, signed so A goes to the SCREEN's left: +y is
+  // down here, so the left-hand normal of (nx, ny) is (ny, -nx). Check it against the
+  // drawn hull rather than intuition if this is ever "fixed".
+  let fx = nx * lon + ny * lat;
+  let fy = ny * lon - nx * lat;
+  const mag = Math.hypot(fx, fy);
+  if (mag > 1e-9) {
+    fx /= mag; fy /= mag;
+    ship.vx += fx * S.thrustAccel * dtYr;
+    ship.vy += fy * S.thrustAccel * dtYr;
+  }
+  return mag > 1e-9 ? 1 : 0;   // thrust duty, for the energy ledger
+}
+
+// ---- THE ORBIT LOCK, ported from 001 Ship Pool -----------------------------------
+// See the port notes in the header. Three functions matching 001's three: checkLock is
+// its checkOrbitCapture, beginLock its beginOrbitCapture, stepLock its updateCapture
+// plus the slingshot branch of its simStep.
+function dockOffsetFor(planet, fromDx, fromDy) {
+  const d = Math.hypot(fromDx, fromDy);
+  const ang = d > 1e-6 ? Math.atan2(fromDy, fromDx) : 0;
+  const r = Math.max(planet.drawR * 2.8, 0.018);   // 001's SLINGSHOT_ORBIT_R_MULT / _MIN_R
+  return [Math.cos(ang) * r, Math.sin(ang) * r];
+}
+function easeInOutCubic(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+function checkLock(dtYr) {
+  if (!S.lockEnabled || orbit.mode !== "free" || lockCooldown > 0) return;
+  for (const b of bodies) {
+    if (!b.alive) continue;
+    const d = dist(ship.x, ship.y, b.x, b.y);
+    // 001's re-dock guard: the planet just released cannot re-take you until you have
+    // properly left its ring, or letting go would last a single frame.
+    if (b === lockReleased) { if (d > S.lockRadiusAU * 2.5) lockReleased = null; continue; }
+    if (d <= S.lockRadiusAU) {
+      b.dwell += dtYr;
+      if (b.dwell >= S.lockDwellYr) { beginLock(b); return; }
+    } else b.dwell = 0;
+  }
+}
+
+function beginLock(planet) {
+  const dx = ship.x - planet.x, dy = ship.y - planet.y;
+  const [ddx, ddy] = dockOffsetFor(planet, dx, dy);
+  orbit = { mode: "capturing", planet, age: 0, simAge: 0,
+            startDx: dx, startDy: dy,
+            startRelVx: ship.vx - planet.vx, startRelVy: ship.vy - planet.vy,
+            dockDx: ddx, dockDy: ddy, offDx: dx, offDy: dy };
+  note("ORBIT LOCK: " + planet.name, "#8cf0ff");
+}
+
+// One step of the lock. The ship is PLACED, never integrated, exactly as 001 does it:
+// while capturing it eases from where its own relative velocity was carrying it onto
+// the dock slot, and once locked it takes the planet's position and velocity outright.
+function stepLock(dtYr, realDt) {
+  const p = orbit.planet;
+  if (!p || !p.alive) { breakLock(false); return; }
+  if (orbit.mode === "capturing") {
+    orbit.age += realDt; orbit.simAge += dtYr;
+    const raw = Math.min(1, orbit.age / S.captureSeconds);
+    const t = easeInOutCubic(raw);
+    const driftX = orbit.startDx + orbit.startRelVx * orbit.simAge;
+    const driftY = orbit.startDy + orbit.startRelVy * orbit.simAge;
+    orbit.offDx = driftX + (orbit.dockDx - driftX) * t;
+    orbit.offDy = driftY + (orbit.dockDy - driftY) * t;
+    const px = ship.x, py = ship.y;
+    ship.x = p.x + orbit.offDx; ship.y = p.y + orbit.offDy;
+    if (dtYr > 0) { ship.vx = (ship.x - px) / dtYr; ship.vy = (ship.y - py) / dtYr; }
+    if (raw >= 1) {
+      orbit = { mode: "locked", planet: p, offDx: orbit.dockDx, offDy: orbit.dockDy };
+      ship.x = p.x + orbit.offDx; ship.y = p.y + orbit.offDy;
+      ship.vx = p.vx; ship.vy = p.vy;
+      note("RIDING " + p.name, "#8cf0ff");
+    }
+  } else {
+    ship.x = p.x + orbit.offDx; ship.y = p.y + orbit.offDy;
+    ship.vx = p.vx; ship.vy = p.vy;
+  }
+}
+
+// 001's breakOrbit: a random kick on a deliberate release, nothing when the planet
+// simply stopped existing. The kick is what stops you sitting in the ring you just
+// left and being taken straight back by it.
+function breakLock(kick) {
+  if (orbit.mode === "free") return;
+  const p = orbit.planet;
+  if (kick) {
+    const a = Math.random() * Math.PI * 2;
+    ship.vx += Math.cos(a) * 0.1; ship.vy += Math.sin(a) * 0.1;   // 001's 0.1 AU/yr
+  }
+  if (p) { p.dwell = 0; lockReleased = p; }
+  orbit = { mode: "free", planet: null };
+  lockCooldown = 0.25;                                            // 001's captureCooldown
+  note("ORBIT LOCK RELEASED", "#9fb4cc");
+}
+
+function fireShot() {
+  const cost = S.shotCost * charge;
+  const fraction = cost > 0 ? Math.min(1, energy / cost) : 1;   // underfunded = weak, never refused
+  energy = Math.max(0, energy - cost);
+  const power = charge * fraction * S.shotPower;
+  const nx = Math.cos(ship.nose), ny = Math.sin(ship.nose);
+  const halfRad = S.coneWidthDeg * Math.PI / 360;
+  let hitAny = false;
+  const targets = [];
+  for (const b of bodies) {
+    if (!b.alive) continue;
+    const dx = b.x - ship.x, dy = b.y - ship.y;
+    const d = Math.hypot(dx, dy);
+    if (d > S.coneRangeAU || d < 1e-9) continue;
+    const ang = Math.acos(Math.max(-1, Math.min(1, (dx * nx + dy * ny) / d)));
+    if (S.coneMode) { if (ang <= halfRad) targets.push({ b, d, dx, dy }); }
+    else if (ang <= 0.06) targets.push({ b, d, dx, dy });   // the narrow aim corridor
+  }
+  if (!S.coneMode && targets.length > 1) { targets.sort((p, q) => p.d - q.d); targets.length = 1; }
+  for (const t of targets) {
+    // 100% point blank, still 30% at the cone's lip: a long shot is weaker, never feeble
+    const falloff = 1 - 0.7 * (t.d / S.coneRangeAU);
+    const dv = power * falloff;
+    const ivx = (t.dx / t.d) * dv, ivy = (t.dy / t.d) * dv;
+    if (frozen(t.b)) {
+      // A world in stasis takes the hit but cannot move with it: the momentum BANKS,
+      // and lands the instant its time resumes. This is the trick the bubble exists
+      // for - freeze a world, load it up, release.
+      t.b.pendVx = (t.b.pendVx || 0) + ivx;
+      t.b.pendVy = (t.b.pendVy || 0) + ivy;
+    } else { t.b.vx += ivx; t.b.vy += ivy; }
+    t.b.struck = true; hitAny = true;
+  }
+  // A shove back, unassisted: the brief keeps the recoil and drops the stabiliser.
+  ship.vx -= nx * power * 0.15; ship.vy -= ny * power * 0.15;
+  flash(ship.x + nx * 0.05, ship.y + ny * 0.05, 0.12 + charge * 0.25, "#8fc3e8");
+  burst(ship.x + nx * 0.05, ship.y + ny * 0.05, 0.05 + charge * 0.08, "#8fc3e8");
+  note(hitAny ? "SHOCKWAVE FIRED" : "SHOCKWAVE FIRED: NO CONTACT", "#8fc3e8");
+}
+
+function tryTeleport() {
+  // A held charge does NOT block the jump: teleporting mid-charge is the trick-shot
+  // grammar (wind up, jump into position, release). Esc is the cancel now.
+  if (teleCooldown > 0 && !S.teleNoCooldown) { note("TELEPORT RECHARGING", "#e8b463"); return; }
+  const [wx, wy] = screenToWorld(mouse.sx, mouse.sy);
+  for (const b of [...bodies.filter(p => p.alive), { x: STAR.x, y: STAR.y, drawR: STAR.drawR }]) {
+    if (dist(wx, wy, b.x, b.y) < (b.drawR || 0.02) * 3 + 0.02) {
+      note("TELEPORT BLOCKED: TOO CLOSE TO A BODY", "#ff5030"); return;
+    }
+  }
+  if (dist(wx, wy, BH.x, BH.y) < BH.captureR * 2) {
+    note("TELEPORT BLOCKED: TOO CLOSE TO A BODY", "#ff5030"); return;
+  }
+  const d = dist(ship.x, ship.y, wx, wy);
+  const cost = d * S.teleCostPerAU;
+  if (cost > energy) { note("TELEPORT BLOCKED: INSUFFICIENT ENERGY", "#ff5030"); return; }
+  energy -= cost;
+  breakLock(false);                        // jumping off a world is leaving it
+  burst(ship.x, ship.y, 0.07, "#c98fe8");   // ingress flare: where the ship left
+  ship.x = wx; ship.y = wy;                 // momentum untouched: that is the whole move
+  ship.trail.push(null);                    // break the trail so the jump reads as a jump
+  burst(wx, wy, 0.09, "#e0c8ff");           // egress flare: brighter, where it arrived
+  teleCooldown = 1.0;
+  ghostPath = null;                         // any forecast is invalid now, redrawn next frame
+}
+
+function flash(x, y, r, color) { flashes.push({ x, y, r, t: 0, color, kind: "ring" }); }
+// A one-shot flare that swells and dies, the Burst of the real system. Teleport draws
+// two: ingress where the ship left, egress where it arrived.
+function burst(x, y, r, color) { flashes.push({ x, y, r, t: 0, color, kind: "flare", rot: Math.random() * 6.28 }); }
+
+// ============================== FRAME ===========================================
+let last = performance.now();
+function frame(now) {
+  requestAnimationFrame(frame);
+  const realDt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  if (paused) { draw(realDt); return; }
+
+  // ---- the time slider. Held keys slide it; drift mode springs it home. --------
+  const SLIDE_RATE = 0.45;                  // full travel in ~2.2 real seconds
+  if (keys.q) sliderT = Math.max(0, sliderT - SLIDE_RATE * realDt);
+  if (keys.e) sliderT = Math.min(1, sliderT + SLIDE_RATE * realDt);
+  if (S.driftMode && !keys.q && !keys.e)
+    sliderT += (0.5 - sliderT) * Math.min(1, realDt * 3);   // the spring home
+  sliderShown += (sliderT - sliderShown) * Math.min(1, realDt * 10);
+  const warp = warpNow();
+
+  // ---- energy, all on the real clock ------------------------------------------
+  const effMax = MAX_ENERGY - reserve;
+  const sunD = dist(ship.x, ship.y, STAR.x, STAR.y);
+  const solar = S.solarPs * Math.min(1, Math.pow(S.solarRefAU / Math.max(sunD, 0.05), 2.5));
+  let drain = 0;
+  const thrustDuty = (keys.w || keys.a || keys.s || keys.d) ? 1 : 0;
+  // Thrust never outdraws the reactor: while burning, the plant covers it and no more.
+  const reactor = S.reactorPs * (1 - thrustDuty);
+  if (!S.timeFree) {
+    // Drift mode: the centre is free and only the slow half costs, so slow motion is a
+    // spendable power. Plain mode: cost grows with deflection from the 100K centre
+    // either way, since the centre is the resting state now.
+    const deflection = S.driftMode ? Math.max(0, 0.5 - sliderT) * 2 : Math.abs(sliderT - 0.5) * 2;
+    drain += S.timeCostPs * deflection;
+  }
+  // Thrust takes the ship back off the lock, unless the panel is set to 001's stricter
+  // hold. Checked here rather than in applyThrust so it fires once a frame, not once
+  // per substep - the notice would otherwise print sixty times in a row.
+  if (S.thrustBreaksLock && orbit.mode !== "free" &&
+      (keys.w || keys.a || keys.s || keys.d)) breakLock(false);
+  if (lockCooldown > 0) lockCooldown -= realDt;
+
+  let antigrav = false;
+  if (keys.shift && !timeBusy()) { antigrav = true; drain += S.antigravCostPs; }
+  else if (keys.shift && timeBusy()) note("ANTIGRAV UNAVAILABLE DURING TIME CONTROL", "#e8b463");
+  if (charging) charge = Math.min(1, charge + realDt / S.chargeSeconds);
+  energy = Math.max(0, Math.min(effMax, energy + (reactor + solar - drain) * realDt));
+
+  // ---- the time-stop bubble ----------------------------------------------------
+  if (bubble && bubble.growing) {
+    if (keys.space && effMax > 12) {
+      bubble.r += S.bubbleGrowAUs * realDt;
+      reserve = Math.min(MAX_ENERGY - 12, reserve + S.bubbleCostPs * realDt);
+    } else bubble.growing = false;
+  }
+
+  if (teleCooldown > 0) teleCooldown -= realDt;
+
+  // ---- the sim, substepped exactly like the game -------------------------------
+  const dtYr = warp * realDt / SPY;
+  const steps = dtYr > MAX_SUBSTEP_YR ? Math.min(MAX_SUBSTEPS, Math.ceil(dtYr / MAX_SUBSTEP_YR)) : 1;
+  const h = dtYr / steps;
+  for (let i = 0; i < steps; i++) {
+    applyThrustSub(h, realDt / steps);
+    simStep(h, antigrav, realDt / steps);
+  }
+  simYears += dtYr;
+
+  // trails, pushed on the sim clock so a drift line is a line through space
+  pushTrail(ship.trail, ship.x, ship.y, 700);
+  for (const b of bodies) if (b.alive && !frozen(b)) pushTrail(b.trail, b.x, b.y, 250);
+
+  // ---- forecast: valid only while no ability is bending the rules --------------
+  // Rebuilt EVERY frame it is visible: the whole line breathes with the table instead
+  // of snapping every third of a second. ~50k force evaluations, well under a
+  // millisecond, and smoothness is the entire point of this rig.
+  const busy = timeBusy() || charging || antigrav || (bubble && bubble.growing) || teleCooldown > 0.6;
+  if (S.projections && !busy) buildGhost();
+  if (busy) { ghostPath = null; ghostBodies = []; }
+
+  // camera glides after the ship
+  cam.x += (ship.x - cam.x) * Math.min(1, realDt * 4);
+  cam.y += (ship.y - cam.y) * Math.min(1, realDt * 4);
+  cam.scale += (cam.targetScale - cam.scale) * Math.min(1, realDt * 6);
+
+  for (const f of flashes) f.t += realDt;
+  flashes = flashes.filter(f => f.t < 0.8);
+  for (const n of notices) n.t += realDt;
+  notices = notices.filter(n => n.t < 20);
+
+  draw(realDt);
+}
+let thrustCarry = 0;
+function applyThrustSub(h, realSlice) { thrustCarry = applyThrust(h, realSlice); }
+
+function pushTrail(trail, x, y, cap) {
+  const lastPt = trail[trail.length - 1];
+  if (lastPt && dist(lastPt.x, lastPt.y, x, y) < 0.004) return;
+  trail.push({ x, y });
+  while (trail.length > cap) trail.shift();
+}
+
+// The forecasts: clone everything, integrate a while at a fixed step (the branch
+// lesson: never a state-dependent step), frozen worlds stay put in the ghost too.
+// The ship's line, and one line per STRUCK world - an unstruck world's future IS its
+// authored ring, already on screen, so drawing it again would be ink for nothing.
+let ghostPath = null, ghostBodies = [];
+function buildGhost() {
+  const gb = bodies.filter(b => b.alive).map(b => ({ ...b }));
+  const gs = { x: ship.x, y: ship.y, vx: ship.vx, vy: ship.vy };
+  const path = [{ x: gs.x, y: gs.y }];
+  // Struck worlds get a line, and so does the world you are RIDING even if untouched:
+  // while locked its future is your future, which is the one thing you most want drawn.
+  const tracked = gb.filter(b => (b.struck || (orbit.planet && b.name === orbit.planet.name)) && !frozen(b))
+                    .map(b => ({ b, color: b.color, pts: [{ x: b.x, y: b.y }], dead: false }));
+  const H = 2e-4, N = 4000;                  // 0.8 yr of future
+  let shipDead = false;
+  for (let i = 0; i < N; i++) {
+    for (const b of gb) {
+      if (frozen(b) || b.ghostDead) continue;
+      pull(STAR.x, STAR.y, G * STAR.mass, b, H);
+      // same forces the real step gives a struck world, or the forecast lies near the hole
+      if (b.struck && dist(b.x, b.y, BH.x, BH.y) < BH.influenceR) pull(BH.x, BH.y, G * BH.mass, b, H);
+    }
+    if (!shipDead) {
+      pull(STAR.x, STAR.y, G * STAR.mass, gs, H);
+      for (const b of gb) if (!b.ghostDead) pull(b.x, b.y, G * b.mass * S.planetBoost, gs, H);
+      if (dist(gs.x, gs.y, BH.x, BH.y) < BH.influenceR) pull(BH.x, BH.y, G * BH.mass, gs, H);
+    }
+    for (const b of gb) if (!frozen(b) && !b.ghostDead) { b.x += b.vx * H; b.y += b.vy * H; }
+    if (!shipDead) { gs.x += gs.vx * H; gs.y += gs.vy * H; }
+    if (i % 8 === 0) {
+      if (!shipDead) path.push({ x: gs.x, y: gs.y });
+      for (const t of tracked) if (!t.dead) t.pts.push({ x: t.b.x, y: t.b.y });
+    }
+    if (!shipDead && (dist(gs.x, gs.y, BH.x, BH.y) < BH.captureR ||
+                      dist(gs.x, gs.y, STAR.x, STAR.y) < STAR.drawR)) shipDead = true;
+    // a tracked world's line ends where the world would: the hole or the star. It also
+    // stops moving and pulling in the ghost, the way the real sim removes it.
+    for (const t of tracked)
+      if (!t.dead && (dist(t.b.x, t.b.y, BH.x, BH.y) < BH.captureR ||
+                      dist(t.b.x, t.b.y, STAR.x, STAR.y) < STAR.drawR + t.b.drawR))
+      { t.dead = true; t.b.ghostDead = true; }
+  }
+  ghostPath = path;
+  ghostBodies = tracked.map(t => ({ color: t.color, pts: t.pts }));
+}
+
+// ============================== DRAWING =========================================
+const cv = document.getElementById("cv");
+const cx = cv.getContext("2d");
+// The buffer is in device pixels, the element in CSS pixels; without the style sizes a
+// retina screen shows only the top-left quarter and the ship sits bottom-right.
+function resize() {
+  cv.width = innerWidth * devicePixelRatio; cv.height = innerHeight * devicePixelRatio;
+  cv.style.width = innerWidth + "px"; cv.style.height = innerHeight + "px";
+}
+addEventListener("resize", resize); resize();
+
+function worldToScreen(x, y) {
+  return [(x - cam.x) * cam.scale + cv.width / 2, (y - cam.y) * cam.scale + cv.height / 2];
+}
+function screenToWorld(sx, sy) {
+  const px = sx * devicePixelRatio, py = sy * devicePixelRatio;
+  return [(px - cv.width / 2) / cam.scale + cam.x, (py - cv.height / 2) / cam.scale + cam.y];
+}
+
+// a deterministic starfield, cheap and stable under camera motion
+const stars = [];
+for (let i = 0; i < 500; i++) {
+  const s = Math.sin(i * 127.1) * 43758.5453, t = Math.sin(i * 269.5) * 24634.6345;
+  stars.push({ x: (s - Math.floor(s)) * 16 - 8, y: (t - Math.floor(t)) * 16 - 8,
+               a: 0.15 + (i % 7) * 0.09 });
+}
+
+function draw(realDt) {
+  const W = cv.width, H = cv.height;
+  cx.fillStyle = "#04030a"; cx.fillRect(0, 0, W, H);
+
+  for (const s of stars) {
+    const [sx, sy] = worldToScreen(s.x, s.y);
+    if (sx < 0 || sy < 0 || sx > W || sy > H) continue;
+    cx.fillStyle = `rgba(210,220,240,${s.a})`;
+    cx.fillRect(sx, sy, 2, 2);
+  }
+
+  drawGravityLines(W, H);
+
+  // authored rings: the table the game is played on, bright enough to plan against
+  cx.strokeStyle = "rgba(120,155,210,0.40)"; cx.lineWidth = 1;
+  for (const d of PLANET_DEFS) {
+    const [sx, sy] = worldToScreen(STAR.x, STAR.y);
+    cx.beginPath(); cx.arc(sx, sy, d.r * cam.scale, 0, 6.284); cx.stroke();
+  }
+
+  // trails
+  for (const b of bodies) if (b.alive) strokeTrail(b.trail, b.color, 0.35);
+  strokeTrail(ship.trail, "#bcd6ee", 0.5);
+
+  // forecasts: the ship's line, then one per struck world in its own colour
+  if (ghostPath && ghostPath.length > 2) {
+    cx.strokeStyle = "rgba(160,200,240,0.65)"; cx.lineWidth = 1.5;
+    cx.setLineDash([6, 6]);
+    cx.beginPath();
+    ghostPath.forEach((p, i) => { const [sx, sy] = worldToScreen(p.x, p.y); i ? cx.lineTo(sx, sy) : cx.moveTo(sx, sy); });
+    cx.stroke(); cx.setLineDash([]);
+  }
+  for (const g of ghostBodies) {
+    if (g.pts.length < 2) continue;
+    cx.strokeStyle = g.color; cx.globalAlpha = 0.55; cx.lineWidth = 1.5;
+    cx.setLineDash([5, 5]);
+    cx.beginPath();
+    g.pts.forEach((p, i) => { const [sx, sy] = worldToScreen(p.x, p.y); i ? cx.lineTo(sx, sy) : cx.moveTo(sx, sy); });
+    cx.stroke(); cx.setLineDash([]); cx.globalAlpha = 1;
+  }
+
+  // the star, through the flare quote: slow spike rotation, a breath of flicker
+  {
+    const [sx, sy] = worldToScreen(STAR.x, STAR.y);
+    const r = STAR.drawR * cam.scale;
+    const breathe = 0.92 + 0.08 * Math.sin(performance.now() * 0.0021);
+    drawFlare(sx, sy, r * 2.4, "#ffb46e", breathe, performance.now() * 0.00006);
+    cx.fillStyle = STAR.color; cx.beginPath(); cx.arc(sx, sy, r, 0, 6.284); cx.fill();
+  }
+
+  // the black hole: a hole with an amber rim
+  {
+    const [sx, sy] = worldToScreen(BH.x, BH.y);
+    const r = BH.captureR * cam.scale;
+    cx.strokeStyle = "rgba(255,140,0,0.6)"; cx.lineWidth = 2;
+    cx.beginPath(); cx.arc(sx, sy, r, 0, 6.284); cx.stroke();
+    cx.fillStyle = "#000"; cx.beginPath(); cx.arc(sx, sy, r * 0.85, 0, 6.284); cx.fill();
+    cx.strokeStyle = "rgba(255,140,0,0.12)";
+    cx.beginPath(); cx.arc(sx, sy, BH.influenceR * cam.scale, 0, 6.284); cx.stroke();
+  }
+
+  // planets
+  for (const b of bodies) {
+    if (!b.alive) continue;
+    const [sx, sy] = worldToScreen(b.x, b.y);
+    const r = Math.max(3, b.drawR * cam.scale);
+    cx.fillStyle = b.color;
+    cx.beginPath(); cx.arc(sx, sy, r, 0, 6.284); cx.fill();
+    if (frozen(b)) {   // a frozen world is ringed in the bubble's cyan
+      cx.strokeStyle = "rgba(140,240,255,0.8)"; cx.lineWidth = 1.5;
+      cx.beginPath(); cx.arc(sx, sy, r + 4, 0, 6.284); cx.stroke();
+      if (b.pendVx || b.pendVy) {
+        // banked momentum shows as a loaded amber ring and an arrow of what is coming
+        const pd = Math.hypot(b.pendVx, b.pendVy);
+        cx.strokeStyle = "rgba(255,180,80,0.9)"; cx.lineWidth = 2;
+        cx.beginPath(); cx.arc(sx, sy, r + 8, 0, 6.284); cx.stroke();
+        const ax = b.pendVx / pd, ay = b.pendVy / pd, len = 18 + Math.min(40, pd * 8);
+        cx.beginPath(); cx.moveTo(sx + ax * (r + 8), sy + ay * (r + 8));
+        cx.lineTo(sx + ax * (r + 8 + len), sy + ay * (r + 8 + len)); cx.stroke();
+      }
+    }
+  }
+
+  // THE LOCK, drawn as 001 draws it: a ring at the capture radius that fills as the
+  // dwell timer runs, and a tether from the ship to the world that has it.
+  {
+    const cand = orbit.planet || bodies.find(b => b.alive && b.dwell > 0);
+    if (cand && cand.alive && S.lockEnabled) {
+      const [sx, sy] = worldToScreen(cand.x, cand.y);
+      const r = S.lockRadiusAU * cam.scale;
+      const held = orbit.mode !== "free";
+      const frac = held ? 1 : Math.min(1, cand.dwell / S.lockDwellYr);
+      const pulse = 0.4 + 0.25 * Math.sin(performance.now() / (held ? 180 : 400));
+      cx.strokeStyle = `rgba(140,240,255,${(held ? 0.75 : 0.25 + frac * 0.4) * pulse + 0.15})`;
+      cx.lineWidth = held ? 2 : 1.5;
+      cx.beginPath(); cx.arc(sx, sy, r, 0, 6.284); cx.stroke();
+      // the dwell arc: how much of the loiter is done, drawn from the top clockwise
+      if (!held && frac > 0) {
+        cx.strokeStyle = "rgba(140,240,255,0.9)"; cx.lineWidth = 3;
+        cx.beginPath(); cx.arc(sx, sy, r, -Math.PI / 2, -Math.PI / 2 + 6.283 * frac); cx.stroke();
+      }
+      const [shx, shy] = worldToScreen(ship.x, ship.y);
+      const g = cx.createLinearGradient(shx, shy, sx, sy);
+      g.addColorStop(0, `rgba(140,240,255,${held ? 0.5 : 0.15 + frac * 0.3})`);
+      g.addColorStop(1, "rgba(140,240,255,0.05)");
+      cx.strokeStyle = g; cx.lineWidth = held ? 2 : 1;
+      cx.beginPath(); cx.moveTo(shx, shy); cx.lineTo(sx, sy); cx.stroke();
+    }
+  }
+
+  // the bubble
+  if (bubble) {
+    const [sx, sy] = worldToScreen(bubble.x, bubble.y);
+    const r = bubble.r * cam.scale;
+    cx.strokeStyle = bubble.growing ? "rgba(140,240,255,0.9)" : "rgba(140,240,255,0.5)";
+    cx.lineWidth = 2;
+    cx.beginPath(); cx.arc(sx, sy, r, 0, 6.284); cx.stroke();
+    cx.fillStyle = "rgba(140,240,255,0.05)";
+    cx.beginPath(); cx.arc(sx, sy, r, 0, 6.284); cx.fill();
+  }
+
+  // the charge cone, while aiming
+  if (charging) {
+    const [sx, sy] = worldToScreen(ship.x, ship.y);
+    const range = S.coneRangeAU * cam.scale;
+    cx.fillStyle = `rgba(143,195,232,${0.06 + charge * 0.12})`;
+    if (S.coneMode) {
+      const half = S.coneWidthDeg * Math.PI / 360;
+      cx.beginPath(); cx.moveTo(sx, sy);
+      cx.arc(sx, sy, range, ship.nose - half, ship.nose + half);
+      cx.closePath(); cx.fill();
+    } else {
+      cx.strokeStyle = `rgba(143,195,232,${0.3 + charge * 0.5})`; cx.lineWidth = 2;
+      cx.beginPath(); cx.moveTo(sx, sy);
+      cx.lineTo(sx + Math.cos(ship.nose) * range, sy + Math.sin(ship.nose) * range);
+      cx.stroke();
+    }
+  }
+
+  // the ship: a sliver aligned to the nose, plus a thrust glow
+  {
+    const [sx, sy] = worldToScreen(ship.x, ship.y);
+    // the drive flare at the tail mount, fired from the same state as the plume
+    if (keys.w || keys.a || keys.s || keys.d) {
+      const tx = sx - Math.cos(ship.nose) * 10, ty = sy - Math.sin(ship.nose) * 10;
+      drawFlare(tx, ty, 7 + Math.random() * 3, "#78b4ff", 0.8, ship.nose);
+    }
+    cx.save(); cx.translate(sx, sy); cx.rotate(ship.nose);
+    if (keys.w || keys.a || keys.s || keys.d) {
+      cx.fillStyle = "rgba(120,180,255,0.5)";
+      cx.beginPath(); cx.moveTo(-8, 0); cx.lineTo(-22 - Math.random() * 8, 0); cx.lineTo(-8, 3); cx.fill();
+    }
+    cx.fillStyle = keys.shift && !timeBusy() ? "#d8b0ff" : "#e8f0fa";
+    cx.beginPath(); cx.moveTo(12, 0); cx.lineTo(-8, -5); cx.lineTo(-4, 0); cx.lineTo(-8, 5); cx.closePath(); cx.fill();
+    cx.restore();
+
+    // the energy arc, wrapped around the ship: the readout the eye never leaves.
+    // A full battery is a CLOSED ring - the eye reads "sealed" without counting.
+    const frac = energy / MAX_ENERGY, resFrac = (MAX_ENERGY - reserve) / MAX_ENERGY;
+    cx.lineWidth = 4.5;
+    cx.strokeStyle = "rgba(255,255,255,0.16)";
+    cx.beginPath(); cx.arc(sx, sy, 28, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * resFrac); cx.stroke();
+    cx.strokeStyle = frac > 0.3 ? "rgba(150,245,160,0.95)" : "rgba(255,120,80,0.95)";
+    cx.beginPath(); cx.arc(sx, sy, 28, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * frac); cx.stroke();
+    if (charging) {
+      cx.strokeStyle = "rgba(143,195,232,0.9)"; cx.lineWidth = 2;
+      cx.beginPath(); cx.arc(sx, sy, 35, -Math.PI / 2, -Math.PI / 2 + 6.283 * charge); cx.stroke();
+    }
+  }
+
+  for (const f of flashes) {
+    const [sx, sy] = worldToScreen(f.x, f.y);
+    const k = f.t / 0.8;
+    if (f.kind === "flare") {
+      // swell fast, die slow: intensity peaks at 15% of the life
+      const i = k < 0.15 ? k / 0.15 : 1 - (k - 0.15) / 0.85;
+      drawFlare(sx, sy, f.r * cam.scale * (0.8 + k * 0.6), f.color, i, f.rot + k * 0.5);
+      continue;
+    }
+    cx.strokeStyle = f.color; cx.globalAlpha = 1 - k; cx.lineWidth = 2;
+    cx.beginPath(); cx.arc(sx, sy, f.r * cam.scale * (0.3 + k), 0, 6.284); cx.stroke();
+    cx.globalAlpha = 1;
+  }
+
+  drawTimeBand(W, H);
+  drawHud(W, H);
+}
+
+// The canvas quote of the lab's flare: hot core, halo, seven spikes with prismatic
+// restraint. Additive, like the real stack; intensity drives every dimension at once,
+// the way FlareProgression's one value does.
+function drawFlare(sx, sy, radius, color, intensity, rot) {
+  if (intensity <= 0.01 || radius < 1) return;
+  cx.save();
+  cx.globalCompositeOperation = "lighter";
+  const halo = cx.createRadialGradient(sx, sy, 0, sx, sy, radius * 3);
+  halo.addColorStop(0, colA(color, 0.30 * intensity));
+  halo.addColorStop(0.3, colA(color, 0.10 * intensity));
+  halo.addColorStop(1, colA(color, 0));
+  cx.fillStyle = halo;
+  cx.beginPath(); cx.arc(sx, sy, radius * 3, 0, 6.284); cx.fill();
+  const SPIKES = 7;
+  cx.lineWidth = Math.max(1, radius * 0.06);
+  for (let i = 0; i < SPIKES; i++) {
+    const a = rot + i * (Math.PI * 2 / SPIKES);
+    const len = radius * (1.6 + 0.5 * Math.sin(i * 12.9898 + rot * 3)) * intensity;
+    const g = cx.createLinearGradient(sx, sy, sx + Math.cos(a) * len, sy + Math.sin(a) * len);
+    g.addColorStop(0, colA(color, 0.55 * intensity));
+    g.addColorStop(1, colA(color, 0));
+    cx.strokeStyle = g;
+    cx.beginPath(); cx.moveTo(sx, sy);
+    cx.lineTo(sx + Math.cos(a) * len, sy + Math.sin(a) * len); cx.stroke();
+  }
+  const core = cx.createRadialGradient(sx, sy, 0, sx, sy, radius * 0.5);
+  core.addColorStop(0, colA("#ffffff", 0.9 * intensity));
+  core.addColorStop(0.5, colA(color, 0.7 * intensity));
+  core.addColorStop(1, colA(color, 0));
+  cx.fillStyle = core;
+  cx.beginPath(); cx.arc(sx, sy, radius * 0.5, 0, 6.284); cx.fill();
+  cx.restore();
+}
+const colCache = {};
+function colA(hex, a) {
+  let c = colCache[hex];
+  if (!c) {
+    c = [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
+    colCache[hex] = c;
+  }
+  return `rgba(${c[0]},${c[1]},${c[2]},${Math.max(0, Math.min(1, a))})`;
+}
+
+// THE GRAVITY LINES: equipotential contours of the field the ship actually flies -
+// star plus every world at its boosted game-layer mass plus the black hole - drawn by
+// marching squares over a viewport grid. The levels are the potentials of a fixed
+// geometric ladder of radii around the bare star, so the picture is stable under
+// camera motion and a boosted world's well shows up as the same levels wrapping it.
+const GRAV_LADDER = [];
+for (let k = 0; k < 14; k++) GRAV_LADDER.push(0.10 * Math.pow(1.45, k));
+function drawGravityLines(W, H) {
+  if (!S.gravLines) return;
+  const NX = 88, NY = Math.max(24, Math.round(NX * H / W));
+  const wxs = W / cam.scale, wys = H / cam.scale;
+  const x0 = cam.x - wxs / 2, y0 = cam.y - wys / 2;
+  const dx = wxs / NX, dy = wys / NY;
+  const wells = [{ x: STAR.x, y: STAR.y, gm: G * STAR.mass }];
+  for (const b of bodies) if (b.alive) wells.push({ x: b.x, y: b.y, gm: G * b.mass * S.planetBoost });
+  wells.push({ x: BH.x, y: BH.y, gm: G * BH.mass });
+  const SOFT = 2e-3;   // fatter than the sim's, so the lines stay curves near a core
+  const grid = new Float64Array((NX + 1) * (NY + 1));
+  for (let j = 0; j <= NY; j++)
+    for (let i = 0; i <= NX; i++) {
+      const wx = x0 + i * dx, wy = y0 + j * dy;
+      let phi = 0;
+      for (const w of wells) {
+        const ax = wx - w.x, ay = wy - w.y;
+        phi -= w.gm / Math.sqrt(ax * ax + ay * ay + SOFT);
+      }
+      grid[j * (NX + 1) + i] = phi;
+    }
+  cx.strokeStyle = "rgba(110,150,210,0.16)"; cx.lineWidth = 1;
+  cx.beginPath();
+  const toS = (wx, wy) => [(wx - cam.x) * cam.scale + W / 2, (wy - cam.y) * cam.scale + H / 2];
+  for (const r of GRAV_LADDER) {
+    const lv = -G * STAR.mass / r;
+    for (let j = 0; j < NY; j++)
+      for (let i = 0; i < NX; i++) {
+        const a = grid[j * (NX + 1) + i] - lv, b = grid[j * (NX + 1) + i + 1] - lv,
+              c = grid[(j + 1) * (NX + 1) + i + 1] - lv, d = grid[(j + 1) * (NX + 1) + i] - lv;
+        const code = (a > 0 ? 8 : 0) | (b > 0 ? 4 : 0) | (c > 0 ? 2 : 0) | (d > 0 ? 1 : 0);
+        if (code === 0 || code === 15) continue;
+        const X = x0 + i * dx, Y = y0 + j * dy;
+        // edge crossings by linear interpolation: top, right, bottom, left
+        const pts = [];
+        if ((a > 0) !== (b > 0)) pts.push([X + dx * a / (a - b), Y]);
+        if ((b > 0) !== (c > 0)) pts.push([X + dx, Y + dy * b / (b - c)]);
+        if ((d > 0) !== (c > 0)) pts.push([X + dx * d / (d - c), Y + dy]);
+        if ((a > 0) !== (d > 0)) pts.push([X, Y + dy * a / (a - d)]);
+        // two crossings is a segment; four (the saddle cases) joins them pairwise,
+        // which is wrong half the time and invisible at this alpha
+        for (let p = 0; p + 1 < pts.length; p += 2) {
+          const [s1x, s1y] = toS(pts[p][0], pts[p][1]);
+          const [s2x, s2y] = toS(pts[p + 1][0], pts[p + 1][1]);
+          cx.moveTo(s1x, s1y); cx.lineTo(s2x, s2y);
+        }
+      }
+  }
+  cx.stroke();
+}
+
+function strokeTrail(trail, color, alpha) {
+  if (trail.length < 2) return;
+  cx.strokeStyle = color; cx.lineWidth = 1;
+  cx.beginPath();
+  let pen = false;
+  for (let i = 0; i < trail.length; i++) {
+    const p = trail[i];
+    if (!p) { pen = false; continue; }             // a null is a teleport: lift the pen
+    cx.globalAlpha = alpha * (i / trail.length);
+    const [sx, sy] = worldToScreen(p.x, p.y);
+    if (pen) { cx.lineTo(sx, sy); cx.stroke(); cx.beginPath(); }
+    cx.moveTo(sx, sy); pen = true;
+  }
+  cx.globalAlpha = 1;
+}
+
+// The big curved band: slow at the left, fast at the right, one glowing bead. The
+// curve is an arc of a huge circle ABOVE the screen, so the band sags like a hammock:
+// its lowest point is the centre, which is where the bead rests and where 100K lives.
+function drawTimeBand(W, H) {
+  const R = W * 1.1, cxp = W / 2, cyp = H - R - 90 * devicePixelRatio;
+  const span = 0.38;                                     // radians of visible arc
+  cx.strokeStyle = "rgba(120,150,200,0.25)"; cx.lineWidth = 5 * devicePixelRatio;
+  cx.beginPath(); cx.arc(cxp, cyp, R, Math.PI / 2 - span / 2, Math.PI / 2 + span / 2); cx.stroke();
+  // centre notch: the 100K home position
+  const na = Math.PI / 2;
+  cx.strokeStyle = "rgba(160,190,240,0.5)"; cx.lineWidth = 2 * devicePixelRatio;
+  cx.beginPath();
+  cx.moveTo(cxp + Math.cos(na) * (R - 10 * devicePixelRatio), cyp + Math.sin(na) * (R - 10 * devicePixelRatio));
+  cx.lineTo(cxp + Math.cos(na) * (R + 10 * devicePixelRatio), cyp + Math.sin(na) * (R + 10 * devicePixelRatio));
+  cx.stroke();
+  // x grows with t, so the angle DECREASES from the left end: cos falls through pi/2
+  const a = Math.PI / 2 + span / 2 - span * sliderShown;
+  const bx = cxp + Math.cos(a) * R, by = cyp + Math.sin(a) * R;
+  const g = cx.createRadialGradient(bx, by, 0, bx, by, 16 * devicePixelRatio);
+  g.addColorStop(0, "rgba(190,220,255,0.95)"); g.addColorStop(1, "rgba(120,170,255,0)");
+  cx.fillStyle = g; cx.beginPath(); cx.arc(bx, by, 16 * devicePixelRatio, 0, 6.284); cx.fill();
+  cx.fillStyle = "#e8f0fa"; cx.beginPath(); cx.arc(bx, by, 4 * devicePixelRatio, 0, 6.284); cx.fill();
+
+  cx.fillStyle = "rgba(160,185,215,0.8)";
+  cx.font = `${12 * devicePixelRatio}px "Share Tech Mono", monospace`;
+  cx.textAlign = "center";
+  const w = warpNow();
+  const label = w < 1000 ? w.toFixed(0) + "x" : w < 1e6 ? (w / 1000).toFixed(0) + "K" : (w / 1e6).toFixed(1) + "M";
+  cx.fillText(label, W / 2, H - 64 * devicePixelRatio);
+  cx.textAlign = "left";
+}
+
+function drawHud(W, H) {
+  const px = devicePixelRatio;
+  cx.font = `${12 * px}px "Share Tech Mono", monospace`;
+  cx.fillStyle = "rgba(160,185,215,0.9)";
+  cx.fillText(`POTTED ${score.potted}   BURNED ${score.burned}   DEATHS ${score.deaths}`, 16 * px, 24 * px);
+  cx.fillText(`YEAR ${simYears.toFixed(1)}   ENERGY ${energy.toFixed(0)}/${(MAX_ENERGY - reserve).toFixed(0)}`, 16 * px, 42 * px);
+  if (paused) { cx.fillStyle = "#e8b463"; cx.fillText("PAUSED", 16 * px, 60 * px); }
+
+  // the controls, always on screen: a feel rig is handed to people cold
+  const controls = [
+    ["MOUSE", "aim: the nose tracks the cursor"],
+    ["W / S", "drive forward / back"],
+    ["A / D", "strafe left / right"],
+    ["Q / E", "time slower / faster"],
+    ["SPACE", "time-stop bubble, again to resume"],
+    ["SHIFT", "antigravity"],
+    ["LMB hold", "charge shockwave"],
+    ["RMB", "teleport"],
+    ["ESC", "cancel charge, else drop orbit lock"],
+    ["SCROLL / R / P", "zoom / reset / pause"],
+  ];
+  cx.font = `${11 * px}px "Share Tech Mono", monospace`;
+  for (let i = 0; i < controls.length; i++) {
+    const y = (76 + i * 16) * px;
+    cx.fillStyle = "rgba(200,215,235,0.75)";
+    cx.fillText(controls[i][0], 16 * px, y);
+    cx.fillStyle = "rgba(140,160,190,0.6)";
+    cx.fillText(controls[i][1], 96 * px, y);
+  }
+  cx.font = `${12 * px}px "Share Tech Mono", monospace`;
+  // the ship log, four rows above the band, newest at the bottom
+  cx.textAlign = "center";
+  const n = notices.length;
+  for (let i = 0; i < n; i++) {
+    const notice = notices[i];
+    const a = Math.min(1, (20 - notice.t) / 1.5);
+    cx.fillStyle = notice.color;
+    cx.globalAlpha = a;
+    cx.fillText(notice.text, W / 2, H - (96 + (n - 1 - i) * 17) * px);
+  }
+  cx.globalAlpha = 1; cx.textAlign = "left";
+}
+
+// ============================== INPUT ===========================================
+const KEYMAP = { KeyW: "w", KeyA: "a", KeyS: "s", KeyD: "d", KeyQ: "q", KeyE: "e",
+                 Space: "space", ShiftLeft: "shift", ShiftRight: "shift" };
+addEventListener("keydown", e => {
+  const k = KEYMAP[e.code];
+  if (k) {
+    e.preventDefault();
+    if (k === "space" && !keys.space) {
+      // Space is a toggle-and-hold: no bubble -> start growing one at the ship;
+      // a standing bubble -> unpause it and hand the reserved capacity back.
+      if (bubble && !bubble.growing) {
+        bubble = null; reserve = 0; note("TIME RESUMED", "#8cf0ff");
+        // banked blasts land now: every impulse taken in stasis arrives at once
+        for (const b of bodies) {
+          if (!b.pendVx && !b.pendVy) continue;
+          b.vx += b.pendVx || 0; b.vy += b.pendVy || 0;
+          b.pendVx = 0; b.pendVy = 0;
+          flash(b.x, b.y, 0.1, "#8fc3e8"); burst(b.x, b.y, 0.05, "#8fc3e8");
+        }
+      }
+      else if (!bubble) { bubble = { x: ship.x, y: ship.y, r: 0.05, growing: true }; note("TIME STOP GROWING", "#8cf0ff"); }
+    }
+    keys[k] = true;
+  }
+  if (e.code === "KeyR") resetWorld();
+  if (e.code === "KeyP") paused = !paused;
+  // Esc has two jobs and a priority between them: a held charge is the more urgent
+  // thing to call off, and only when there is none does Esc mean "let go of the world".
+  if (e.code === "Escape") {
+    if (charging) { charging = false; charge = 0; note("SHOT CANCELLED", "#9fb4cc"); }
+    else breakLock(true);
+  }
+});
+addEventListener("keyup", e => {
+  const k = KEYMAP[e.code];
+  if (k) {
+    keys[k] = false;
+    if (k === "space" && bubble && bubble.growing) { bubble.growing = false; note("TIME STOPPED", "#8cf0ff"); }
+  }
+});
+cv.addEventListener("mousedown", e => {
+  if (e.button === 0) { charging = true; charge = 0; }
+  if (e.button === 2) tryTeleport();
+});
+addEventListener("mouseup", e => {
+  if (e.button === 0 && charging) { charging = false; fireShot(); charge = 0; }
+});
+addEventListener("mousemove", e => { mouse.sx = e.clientX; mouse.sy = e.clientY; });
+cv.addEventListener("contextmenu", e => e.preventDefault());
+cv.addEventListener("wheel", e => {
+  e.preventDefault();
+  cam.targetScale = Math.max(30, Math.min(3000, cam.targetScale * (e.deltaY > 0 ? 0.85 : 1.18)));
+}, { passive: false });
+
+// ============================== TEST PANEL ======================================
+// The storage key carries a version: saved settings hold EVERY value, so a retune of
+// the defaults would otherwise be invisible to anyone who ever touched a slider.
+const STORE_KEY = "hyperwarp2.v1";   // its own key: the variant tunes independently
+function loadSettings() {
+  try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
+  catch { return { ...DEFAULTS }; }
+}
+function saveSettings() { localStorage.setItem(STORE_KEY, JSON.stringify(S)); }
+
+const PANEL = [
+  ["h", "HYPERWARP 2 TEST PANEL"],
+  ["b", "lockEnabled", "orbit lock (001)"],
+  ["b", "thrustBreaksLock", "thrust breaks the lock"],
+  ["b", "timeFree", "time slider free"],
+  ["b", "driftMode", "drift mode (spring)"],
+  ["b", "coneMode", "shot: cone (off = aim line)"],
+  ["b", "teleNoCooldown", "teleport: no cooldown"],
+  ["b", "projections", "projections (outside abilities)"],
+  ["b", "gravLines", "gravity lines"],
+  ["-"],
+  ["r", "thrustAccel", "thrust AU/yr^2", 100, 12000, 50],
+  ["r", "shotPower", "shot power AU/yr", 0.5, 8, 0.1],
+  ["r", "chargeSeconds", "charge time s", 0.4, 4, 0.1],
+  ["r", "coneWidthDeg", "cone width deg", 6, 90, 1],
+  ["r", "coneRangeAU", "cone range AU", 0.3, 4, 0.1],
+  ["r", "bubbleGrowAUs", "bubble grow AU/s", 0.1, 2, 0.05],
+  ["-"],
+  ["r", "aimEase", "aim ease /s", 3, 40, 1],
+  ["r", "lockRadiusAU", "lock radius AU", 0.02, 0.5, 0.01],
+  ["r", "lockDwellYr", "lock dwell yr", 0.001, 0.05, 0.001],
+  ["r", "captureSeconds", "capture ease s", 0.2, 4, 0.05],
+  ["-"],
+  ["r", "timeCostPs", "time cost /s", 0, 20, 0.5],
+  ["r", "antigravCostPs", "antigrav cost /s", 0, 20, 0.5],
+  ["r", "bubbleCostPs", "bubble cost /s", 0, 30, 0.5],
+  ["r", "teleCostPerAU", "teleport cost /AU", 0, 30, 0.5],
+  ["r", "shotCost", "shot cost full", 0, 60, 1],
+  ["r", "reactorPs", "reactor /s", 0, 10, 0.5],
+  ["r", "solarPs", "solar /s at ref", 0, 40, 1],
+  ["r", "planetBoost", "planet boost", 100, 30000, 100],
+];
+function buildPanel() {
+  const el = document.getElementById("panel");
+  let html = "";
+  for (const row of PANEL) {
+    if (row[0] === "h") { html += `<h1>${row[1]} <span id="collapse">[-]</span></h1><div id="panelBody">`; continue; }
+    if (row[0] === "-") { html += "<hr>"; continue; }
+    const [kind, key, label, min, max, step] = row;
+    if (kind === "b")
+      html += `<div class="row"><label><span>${label}</span><input type="checkbox" data-k="${key}" ${S[key] ? "checked" : ""}></label></div>`;
+    else
+      html += `<div class="row"><label><span>${label}</span><input type="range" data-k="${key}" min="${min}" max="${max}" step="${step}" value="${S[key]}"><span class="val" id="v_${key}">${S[key]}</span></label></div>`;
+  }
+  html += `<hr><button id="resetBtn">reset to defaults</button></div>`;
+  el.innerHTML = html;
+  el.querySelectorAll("input").forEach(inp => {
+    inp.addEventListener("input", () => {
+      const k = inp.dataset.k;
+      S[k] = inp.type === "checkbox" ? inp.checked : parseFloat(inp.value);
+      const v = document.getElementById("v_" + k);
+      if (v) v.textContent = inp.value;
+      saveSettings();
+    });
+  });
+  document.getElementById("resetBtn").addEventListener("click", () => {
+    localStorage.removeItem(STORE_KEY); S = { ...DEFAULTS }; buildPanel();
+  });
+  document.getElementById("collapse").addEventListener("click", () => {
+    const b = document.getElementById("panelBody");
+    b.style.display = b.style.display === "none" ? "" : "none";
+  });
+}
+buildPanel();
+
+// The headless-test handle: top-level let/const never reach window, so Playwright
+// (tools/rig-test) reads and pokes the rig through this. Not for play.
+window.RIG = {
+  state: () => ({ simYears, energy, reserve, sliderT, warp: warpNow(),
+                  ship: { x: ship.x, y: ship.y, vx: ship.vx, vy: ship.vy, nose: ship.nose },
+                  bodies: bodies.map(b => ({ name: b.name, x: b.x, y: b.y, vx: b.vx, vy: b.vy,
+                                             alive: b.alive, struck: b.struck,
+                                             pendVx: b.pendVx || 0, pendVy: b.pendVy || 0 })),
+                  bubble: bubble ? { x: bubble.x, y: bubble.y, r: bubble.r, growing: bubble.growing } : null,
+                  score: { ...score }, notices: notices.map(n => n.text),
+                  ghostPoints: ghostPath ? ghostPath.length : 0,
+                  ghostBodyLines: ghostBodies.length,
+                  nose: ship.nose,
+                  lock: { mode: orbit.mode, planet: orbit.planet ? orbit.planet.name : null },
+                  dwell: bodies.map(b => b.dwell || 0) }),
+  settings: () => S,
+  set: (k, v) => { S[k] = v; },
+  reset: resetWorld,
+  // test rigging only: place a standing bubble, point the nose, park the ship
+  makeBubble: (x, y, r) => { bubble = { x, y, r, growing: false }; },
+  setNose: a => { ship.nose = a; },
+  parkAt: i => {   // sit the ship on a planet's shoulder, matching its velocity
+    const b = bodies[i];
+    ship.x = b.x + 0.04; ship.y = b.y; ship.vx = b.vx; ship.vy = b.vy;
+    ship.trail.length = 0;
+  },
+  breakLock: () => breakLock(true),
+  // where the ship is on screen, in device pixels. The harness checks the nose against
+  // the bearing from here to the cursor, which is a geometric test rather than a second
+  // copy of the aiming formula.
+  shipScreen: () => worldToScreen(ship.x, ship.y),
+};
+
+resetWorld();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
