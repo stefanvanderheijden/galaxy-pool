@@ -116,6 +116,10 @@
   <div class="hdr">shot</div>
   <div class="row"><label>shot power</label><input id="sPow" type="range" min="0.5" max="12" step="0.1" value="4"><span class="val" id="vPow">4.00</span></div>
   <div class="row"><label>full pull at</label><input id="sPul" type="range" min="0.3" max="4" step="0.05" value="1.5"><span class="val" id="vPul">1.50</span></div>
+  <div class="row"><label>watch time</label><input id="sPlay" type="range" min="0" max="8" step="0.1" value="2.6"><span class="val" id="vPlay">2.60</span></div>
+  <div class="row"><label>handover</label><input id="sHand" type="range" min="0" max="0.95" step="0.01" value="0.45"><span class="val" id="vHand">0.45</span></div>
+  <div class="row"><label>watch speed</label><input id="sPlyW" type="range" min="0.02" max="1.5" step="0.01" value="0.30"><span class="val" id="vPlyW">0.30</span></div>
+  <div class="row"><label>pot cooldown</label><input id="sCool" type="range" min="0" max="8" step="0.1" value="2.2"><span class="val" id="vCool">2.20</span></div>
   <div class="row"><label>world boost</label><input id="sBst" type="range" min="0" max="40000" step="500" value="10000"><span class="val" id="vBst">10000</span></div>
   <div class="hdr">prediction</div>
   <div class="row"><label>look-ahead</label><input id="sHrz" type="range" min="1" max="20" step="0.5" value="6"><span class="val" id="vHrz">6.0</span></div>
@@ -695,6 +699,7 @@ const BODY_EXTENT = (function () {
   return m;
 })();
 const FLY_FRAME = 2.4, POOL_FRAME = BODY_EXTENT * 1.28;
+const CAM_EASE = 2.4;      // one rate for every camera transition, per second
 const cam = { yaw:0.62, pitch:0.55, frame:FLY_FRAME, tgt:[CX, -0.18, CZ] };
 // Set on a dock/undock so the camera eases to a canonical pose instead of
 // keeping whatever bearing you happened to be flying on. Cleared by the wheel or
@@ -1103,6 +1108,7 @@ function resetShip() {
   ship.face = ship.head; ship.course = ship.head;
   ship.bank = 0; ship.thr = 0; ship.revThr = 0;
   ship.prevFace = undefined; trail = [];
+  shipCool = 0; shotPlay = 0; shotAnchor = null; returning = false;
 }
 
 // ===========================================================================
@@ -1115,6 +1121,28 @@ function resetShip() {
 // ===========================================================================
 const WARPS = [0, 0.02, 0.08, 0.30, 1.20];   // sim-years per real second
 const SHOT  = { power:4.0, maxDrag:1.5 };    // AU/yr at full pull, and the pull that reaches it
+
+// THE FOLLOW-THROUGH. Striking a world used to hand control straight back with
+// the clock still frozen, so the shot did not visibly happen - the planet simply
+// was somewhere else next time you let time run. Now the release plays out: the
+// clock opens at `warp`, EASES TO A STOP over `seconds`, and only then is the
+// ship yours again. The ship stays put at the point of contact while it watches,
+// which is what makes the departure legible - something left, and it was not you.
+// `handover` is the fraction of the watch still remaining when the CAMERA starts
+// coming home. It overlaps the two transitions on purpose: running them one
+// after the other reads as two separate events - the clock stops, then a beat,
+// then the camera moves - where overlapped they read as a single settle.
+const PLAY = { seconds: 2.6, warp: 0.30, handover: 0.45 };
+let shotPlay = 0;            // seconds of follow-through remaining
+let shotAnchor = null;       // where the ship waits it out
+let returning = false;       // camera already on its way back to flight
+
+// Released at the end of the follow-through, the ship is sitting next to a world
+// it just gave 4 AU/yr to - and an unmoored world pulls with GAME.boost behind
+// it. Gravity is switched off for this long so the first thing that happens to
+// you is not being dragged after your own shot.
+const COOL = { seconds: 2.2 };
+let shipCool = 0;
 let simTime = 0, warpIdx = 1, potted = 0, lost = 0, hits = 0;
 let lastShot = null;
 
@@ -1229,9 +1257,10 @@ function orbitVel(b) {
 // it is the physics, run ahead. Because time is frozen while you fly, the field
 // this integrates through is static, so the only thing that can make the drawn
 // path wrong is you touching the controls.
-function advance(st, dt, tx, tz) {
+function advance(st, dt, tx, tz, gScale) {
   const g = gradAt(st.x, st.z);
-  let ax = -DRV.grav * g[0], az = -DRV.grav * g[1];
+  const gs = gScale === undefined ? 1 : gScale;    // 0 while the post-shot cooldown runs
+  let ax = -DRV.grav * gs * g[0], az = -DRV.grav * gs * g[1];
   ax += DRV.burn * tx; az += DRV.burn * tz;
   st.vx += ax * dt; st.vz += az * dt;
   // NO DRAG. Nothing bleeds speed, so momentum is yours until you spend it
@@ -1258,7 +1287,11 @@ function predict(burnSeconds, dirx, dirz) {
   const out = [];
   for (let i = 0; i < steps; i++) {
     const on = i < burnSteps;
-    advance(st, dt, on ? dirx : 0, on ? dirz : 0);
+    // The ribbon models the cooldown as well: a straight run while gravity is
+    // off, then the curve resuming. Otherwise the line promises a fall that is
+    // not going to happen yet.
+    const gs = (i * dt) < shipCool ? 0 : 1;
+    advance(st, dt, on ? dirx : 0, on ? dirz : 0, gs);
     if ((i & 1) === 0) out.push([st.x, heightAt(st.x, st.z), st.z]);
   }
   return out;
@@ -1282,6 +1315,30 @@ function dockCandidate() {
   }
   return best;
 }
+
+// The follow-through is over, or the world under the ship has gone into the
+// pocket. Either way the ship cannot stay docked to it: released on the spot,
+// with no velocity of its own and no gravity for a beat.
+// Step one: the camera leaves the pool view. Time may still be running down.
+function beginReturn() {
+  DOCK.on = false; DOCK.body = null; dockedTarget = 0;
+  camGoal = { yaw: cam.yaw, frame: FLY_FRAME };
+  returning = true;
+}
+
+// Step two: the ship is actually handed back.
+function finishFollowThrough() {
+  if (!returning) beginReturn();          // handover 0 - it all lands here
+  returning = false;
+  shotPlay = 0; shotAnchor = null;
+  ship.vx = 0; ship.vz = 0; ship.spd = 0;
+  shipCool = COOL.seconds;
+  trail = [];
+}
+
+// Both at once, for when the world under the ship is pocketed and there is no
+// follow-through left to run.
+function castOff() { shotPlay = 0; finishFollowThrough(); }
 
 function toggleDock() {
   if (DOCK.on) {
@@ -1321,7 +1378,10 @@ function releaseShot() {
   // OPPOSITE the aim, which is the side the impulse came from. Anchored to the
   // world it hit, so it rides away with it.
   boom = { body: b, dx: dx/d, dz: dz/d, power: power, t0: performance.now() };
-  if (warpIdx === 0) warpIdx = 1;
+  // Watch it go. The ship lets go of the world here and stays at the contact
+  // point rather than riding it, so the thing that moves is the planet.
+  shotAnchor = [b.p[0], b.p[1]];
+  shotPlay = PLAY.seconds;
 }
 
 // Where the struck world would go. The attractors do not move, so this is very
@@ -1356,6 +1416,19 @@ function predictShot(dirx, dirz, power) {
 
 function stepDrive(dt) {
   DOCK.near = DOCK.on ? null : dockCandidate();
+
+  // Following through: the ship holds station at the point of contact and takes
+  // no input at all. It is the one moment in the loop where the player is only a
+  // spectator, and that is the point - you are watching what you just did.
+  if (shotPlay > 0 && shotAnchor) {
+    ship.x = shotAnchor[0]; ship.z = shotAnchor[1];
+    ship.vx = 0; ship.vz = 0; ship.spd = 0;
+    aimPt = null;
+    ship.thr += (0 - ship.thr) * Math.min(1, 9*dt);
+    ship.revThr += (0 - ship.revThr) * Math.min(1, 9*dt);
+    ship.bank += (0 - ship.bank) * Math.min(1, 7*dt);
+    return;
+  }
 
   // Docked: the ship is luggage. The mouse aims the shot instead of the hull,
   // and the only thing the player is spending is time.
@@ -1412,7 +1485,8 @@ function stepDrive(dt) {
 
 
 
-  ship.spd = advance(ship, dt, tx, tz);
+  ship.spd = advance(ship, dt, tx, tz, shipCool > 0 ? 0 : 1);
+  if (shipCool > 0) shipCool = Math.max(0, shipCool - dt);
 
   // COURSE: the bearing the ship is actually moving along, held through
   // near-stops so it does not spin when the velocity direction stops meaning
@@ -1519,10 +1593,28 @@ function frame(now) {
   lastT = now || 0;
 
   // THE CLOCK. Nonzero only while docked - that is the rule the design turns on.
-  const warp = DOCK.on ? WARPS[warpIdx] : 0;
+  // During a follow-through it is driven by the shot instead of by the warp keys,
+  // opening at PLAY.warp and easing to a full stop. smoothstep gives it a flat
+  // top and a soft landing, so the run reads as deliberate rather than as a
+  // slider being dragged down.
+  let warp;
+  if (shotPlay > 0) {
+    const q = shotPlay / PLAY.seconds;
+    warp = PLAY.warp * (q * q * (3 - 2 * q));
+  } else {
+    warp = DOCK.on ? WARPS[warpIdx] : 0;
+  }
   if (warp > 0) {
     advanceWorld(warp * dt);
     worldDirty = true;
+  }
+  if (shotPlay > 0) {
+    shotPlay = Math.max(0, shotPlay - dt);
+    // Camera first, while the clock is still easing down behind it.
+    if (!returning && shotPlay <= PLAY.seconds * PLAY.handover) beginReturn();
+    if (shotPlay === 0) finishFollowThrough();
+  } else if (DOCK.on && DOCK.body.potted) {
+    castOff();                              // the world under you was pocketed
   }
   stepDrive(dt);
 
@@ -1545,7 +1637,7 @@ function frame(now) {
   // turns, and the ship turns slowly because nothing but gravity and your own
   // burns can turn it.
   if (camGoal) {
-    const kc = Math.min(1, 3.2*dt);
+    const kc = Math.min(1, CAM_EASE * dt);
     cam.yaw   += angWrap(camGoal.yaw - cam.yaw) * kc;
     cam.frame += (camGoal.frame - cam.frame) * kc;
     if (Math.abs(angWrap(camGoal.yaw - cam.yaw)) < 0.004 &&
@@ -1559,14 +1651,21 @@ function frame(now) {
     if (Math.abs(yawOffset) < 1e-4) yawOffset = 0;
   }
   // Docked, hold the whole table rather than following the ship around it.
-  const fol = Math.min(1, 6*dt);
+  // The follow softens during a follow-through: the target is sliding from the
+  // table centre back to the ship at the same time as everything else is moving,
+  // and at the flying rate that slide arrives well ahead of the rest.
+  const fol = Math.min(1, (shotPlay > 0 || returning ? 2.6 : 6) * dt);
   const fx = DOCK.on ? CX : ship.x, fz = DOCK.on ? CZ : ship.z;
   const fy = DOCK.on ? 0 : heightAt(ship.x, ship.z)*curHS + DRV.hover;
   cam.tgt[0] += (fx - cam.tgt[0]) * fol;
   cam.tgt[2] += (fz - cam.tgt[2]) * fol;
   cam.tgt[1] += (fy - cam.tgt[1]) * fol;
 
-  docked += (dockedTarget - docked) * 0.085;
+  // Was a fixed 0.085 per FRAME, so the dolly ran at whatever speed the machine
+  // happened to render at. Time-based now, and at the same rate as the yaw and
+  // frame eases below, so the pitch, the field of view, the bearing and the zoom
+  // all arrive together instead of finishing at four different moments.
+  docked += (dockedTarget - docked) * Math.min(1, CAM_EASE * dt);
   modeEl.textContent = DOCK.on ? ('DOCKED \u00b7 ' + DOCK.body.name) : 'FLYING';
   modeEl.className = DOCK.on ? 'docked' : 'flying';
   clkEl.textContent = DOCK.on
@@ -1574,8 +1673,12 @@ function frame(now) {
     : 'time frozen \u2014 dock to start the clock';
   potEl.textContent = 'potted ' + potted + (lost ? '  \u00b7  lost ' + lost : '') +
                       (hits ? '  \u00b7  ' + hits + ' contact' + (hits>1?'s':'') : '');
-  promptEl.textContent = DOCK.on ? 'SPACE to undock \u00b7 drag from the world and release to strike it'
-                       : (DOCK.near ? 'in range of ' + DOCK.near.name + ' \u2014 SPACE to dock' : '');
+  promptEl.textContent =
+      shotPlay > 0 ? ('follow-through \u2014 time easing to a stop, ' + shotPlay.toFixed(1) + ' s')
+    : shipCool > 0 ? ('cast off \u2014 free of gravity for ' + shipCool.toFixed(1) + ' s')
+    : DOCK.on      ? 'SPACE to undock \u00b7 drag from the world and release to strike it'
+    : DOCK.near    ? 'in range of ' + DOCK.near.name + ' \u2014 SPACE to dock'
+    : '';
 
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const w = Math.floor(innerWidth * dpr), h = Math.floor(innerHeight * dpr);
@@ -1865,7 +1968,9 @@ objSlider(DRV,'sLat','vLat','lateral');
 objSlider(DRV,'sHov','vHov','hover');
 objSlider(PRED,'sHrz','vHrz','horizon',1);
 objSlider(SHOT,'sPow','vPow','power');     objSlider(SHOT,'sPul','vPul','maxDrag');
-objSlider(GAME,'sBst','vBst','boost',0);
+objSlider(GAME,'sBst','vBst','boost',0); objSlider(COOL,'sCool','vCool','seconds');
+objSlider(PLAY,'sPlay','vPlay','seconds',1); objSlider(PLAY,'sPlyW','vPlyW','warp');
+objSlider(PLAY,'sHand','vHand','handover');
 
 rebuild();
 showScheme();
