@@ -1,0 +1,1863 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Gravity sheet — 3D surface + overview toggle</title>
+<!--
+  GRAVITY SHEET - converged prototype.
+
+  Level 1 as a 3D landscape you fly over, with the camera move between FLYING
+  (angled, 3D) and DOCKED (top-down overview).
+
+  ONE height function and ONE control scheme, both chosen by measurement against
+  alternatives that have now been removed: PLUMMER for the surface (see the note
+  above buildHeight for the numbers that killed the other five) and BURN for the
+  ship - mouse aims, click burns, gravity does the rest. Five other drive schemes
+  were built and driven; this is the one that shares its grammar with the pool
+  shot itself, which is the argument for it over the ones that felt smoother.
+
+  There is still no shot and no time in here. That is the next milestone.
+
+  THE FINDING THAT SHAPES ALL OF IT. Level 1's masses span eight orders of
+  magnitude: sun 0.45 Msun, Taste 9e-9. The sun is 110,000x Smell and 50 million
+  x Taste. So in the TRUE potential the planets are not "hard to see", they are
+  a part in 1e-4 of the height - and the log2 remap GalaxyPoolContours.shader
+  uses (which is exactly right for iso-LINES, because it is monotone in phi and
+  so every line stays a true equipotential) lifts Touch by 0.0005 of an octave.
+  Also invisible. Press 1, 2 and 3 to see all three failures directly; they are
+  in the lineup as evidence, not as options.
+
+  What works is compressing PER BODY and then summing, which makes each well an
+  authored depth rather than a derived one. That is the same move GalaxyPool
+  already made when energyYield was decoupled from mass in pool mode: rank stays
+  honest, magnitude becomes art direction.
+
+  Bodies, masses, radii, colours and the Flinch curtain are lifted verbatim from
+  Assets/Levels/level-01.json. Data is INLINE because file:// forbids fetch.
+
+  Axes: the sim is 2D with +y DOWN (screen convention). Here sim x -> world X and
+  sim y -> world Z, negated once so the rig is right-handed. The flip happens in
+  exactly one place, at BODIES below, which is the same discipline the renderers
+  in Assets/Scripts/GalaxyPool follow.
+
+  Self-contained, no dependencies, like every other file in this folder.
+  WebGL2, for fwidth() and 32-bit indices.
+-->
+<style>
+  :root { color-scheme: dark; }
+  html,body { margin:0; height:100%; background:#05060b; overflow:hidden;
+              font:13px/1.5 ui-monospace,"SF Mono",Menlo,Consolas,monospace; color:#c8d4e0; }
+  canvas { display:block; width:100%; height:100%; }
+  .panel { position:fixed; background:rgba(8,11,20,.82); border:1px solid #1e2a3d;
+           border-radius:6px; padding:10px 12px; backdrop-filter:blur(6px); }
+  #hud   { top:12px; left:12px; max-width:400px; }
+  #drive { bottom:12px; right:12px; max-width:330px; }
+  #drive .big { font-size:13px; font-weight:700; color:#ffd9a0; letter-spacing:.04em; }
+  #ctl   { bottom:12px; left:12px; }
+  #mode  { top:12px; right:12px; text-align:right; }
+  h1     { margin:0 0 6px; font-size:12px; letter-spacing:.12em;
+           text-transform:uppercase; color:#7fd4c8; }
+  .fn    { color:#ffd9a0; font-weight:700; }
+  .note  { color:#8a99ab; margin-top:5px; font-size:12px; }
+  .bad   { color:#ff8c7a; }
+  .good  { color:#8ee6a8; }
+  kbd    { background:#182236; border:1px solid #2c3a52; border-radius:3px;
+           padding:0 4px; color:#a8bdd4; font-size:11px; }
+  .row   { display:flex; align-items:center; gap:8px; margin-top:5px; }
+  .row label { width:92px; color:#7d8ea1; font-size:11px; }
+  input[type=range] { width:150px; accent-color:#7fd4c8; }
+  .val   { width:42px; color:#b9c9d9; font-size:11px; text-align:right; }
+  .hdr   { margin-top:9px; color:#5f7182; font-size:10px; letter-spacing:.15em;
+           text-transform:uppercase; }
+  #mode .big { font-size:15px; font-weight:700; letter-spacing:.06em; }
+  .flying { color:#8ec8ff; } .docked { color:#ffd9a0; }
+</style>
+
+<canvas id="c"></canvas>
+
+<div class="panel" id="hud">
+  <h1>Gravity sheet &middot; level 1</h1>
+  <div class="fn">Plummer wells &nbsp; &minus;&Sigma;&nbsp;d&#7522;&nbsp;/&nbsp;&radic;(1+(r/R&#7522;)&sup2;)</div>
+  <div class="note" id="fnNote">&mdash;</div>
+</div>
+
+<div class="panel" id="mode">
+  <div class="big"><span id="modeName" class="flying">FLYING</span></div>
+  <div class="note" id="clock">&mdash;</div>
+  <div class="note" id="potted">potted 0</div>
+  <div class="note" style="color:#8ee6a8" id="prompt">&nbsp;</div>
+</div>
+
+<div class="panel" id="drive">
+  <div class="big"><span id="drvName">&mdash;</span></div>
+  <div class="note" id="drvNote">&mdash;</div>
+  <div class="note" id="drvKeys">&mdash;</div>
+  <div class="note">speed <span id="drvSpd">0.00</span> AU/s &nbsp; slope <span id="drvSlp">0&deg;</span></div>
+</div>
+
+<div class="panel" id="ctl">
+  <div><kbd>R</kbd> reset &nbsp; <kbd>space</kbd> dock &nbsp; <kbd>tab</kbd> control &nbsp; <kbd>1</kbd>&ndash;<kbd>5</kbd> time warp &nbsp; <kbd>P</kbd> paths <span id="pathState">on</span></div>
+  <div><kbd>right-drag</kbd> height / look &nbsp; <kbd>wheel</kbd> zoom &nbsp; <kbd>C</kbd> chase cam <span id="chaseState">off</span></div>
+  <div class="hdr">surface</div>
+  <div class="row"><label>well radius</label><input id="sRad" type="range" min="0.35" max="3" step="0.01" value="1"><span class="val" id="vRad">1.00</span></div>
+  <div class="row"><label>well depth</label><input id="sDep" type="range" min="0.2" max="2.2" step="0.01" value="1"><span class="val" id="vDep">1.00</span></div>
+  <div class="row"><label>relief</label><input id="sHgt" type="range" min="0.1" max="2.5" step="0.01" value="1"><span class="val" id="vHgt">1.00</span></div>
+  <div class="row"><label>stars</label><input id="sStr" type="range" min="0" max="2.5" step="0.01" value="0.55"><span class="val" id="vStr">0.55</span></div>
+  <div class="row"><label>opacity</label><input id="sAlp" type="range" min="0.1" max="1" step="0.01" value="0.74"><span class="val" id="vAlp">0.74</span></div>
+  <div class="row"><label>contours</label><input id="sBnd" type="range" min="0" max="60" step="1" value="26"><span class="val" id="vBnd">26</span></div>
+  <div class="hdr">control</div>
+  <div class="row"><label>gravity</label><input id="sGrv" type="range" min="0" max="1.6" step="0.01" value="0.38"><span class="val" id="vGrv">0.38</span></div>
+  <div class="row"><label>burn</label><input id="sThr" type="range" min="0" max="2.5" step="0.01" value="0.78"><span class="val" id="vThr">0.78</span></div>
+  <div class="row"><label>top speed</label><input id="sVmx" type="range" min="0.3" max="5" step="0.05" value="2.2"><span class="val" id="vVmx">2.20</span></div>
+  <div class="row"><label>aim slew</label><input id="sSlw" type="range" min="2" max="60" step="0.5" value="26"><span class="val" id="vSlw">26.0</span></div>
+  <div class="row"><label>reverse</label><input id="sRev" type="range" min="0" max="1.5" step="0.01" value="0.6"><span class="val" id="vRev">0.60</span></div>
+  <div class="row"><label>lateral</label><input id="sLat" type="range" min="0" max="1.5" step="0.01" value="0.55"><span class="val" id="vLat">0.55</span></div>
+  <div class="row"><label>chase rate</label><input id="sChs" type="range" min="0.2" max="10" step="0.1" value="2.4"><span class="val" id="vChs">2.40</span></div>
+  <div class="row"><label>bank</label><input id="sBnk" type="range" min="0" max="0.6" step="0.005" value="0.16"><span class="val" id="vBnk">0.16</span></div>
+  <div class="row"><label>hover</label><input id="sHov" type="range" min="0.01" max="0.30" step="0.005" value="0.06"><span class="val" id="vHov">0.06</span></div>
+  <div class="hdr">shot</div>
+  <div class="row"><label>shot power</label><input id="sPow" type="range" min="0.5" max="12" step="0.1" value="4"><span class="val" id="vPow">4.00</span></div>
+  <div class="row"><label>full pull at</label><input id="sPul" type="range" min="0.3" max="4" step="0.05" value="1.5"><span class="val" id="vPul">1.50</span></div>
+  <div class="row"><label>world boost</label><input id="sBst" type="range" min="0" max="40000" step="500" value="10000"><span class="val" id="vBst">10000</span></div>
+  <div class="hdr">prediction</div>
+  <div class="row"><label>look-ahead</label><input id="sHrz" type="range" min="1" max="20" step="0.5" value="6"><span class="val" id="vHrz">6.0</span></div>
+</div>
+
+<script>
+'use strict';
+
+// ---------------------------------------------------------------------------
+// LEVEL DATA - verbatim from Assets/Levels/level-01.json.
+// Sim +y is DOWN; the negation below is the one and only place it is flipped.
+// ---------------------------------------------------------------------------
+// The sim's own gravitational constant. It came back for this milestone: the
+// HEIGHT of the sheet is authored (see buildHeight), but the MOTION on it is
+// real Kepler. That split is deliberate - what you see is art-directed, what
+// happens is physics.
+const G = 4 * Math.PI * Math.PI;   // AU^3 / (Msun yr^2) - SimUnits.G_SIM
+
+const BODIES = [
+  { id:'sun',     name:'Vision',  mass:0.45,    drawR:0.012,  col:'#ff4b2b', p:[0,0],
+    fixed:true, attractor:true, star:true },
+  { id:'smell',   name:'Smell',   mass:4.1e-6,  drawR:0.0068, col:'#d98c4a', orbR:0.55, ang:2.35 },
+  { id:'hearing', name:'Hearing', mass:1.55e-6, drawR:0.0052, col:'#7fa8a0', orbR:0.92, ang:0.62 },
+  { id:'touch',   name:'Touch',   mass:4.2e-7,  drawR:0.0038, col:'#cfd8e3', orbR:1.45, ang:5.583 },
+  { id:'taste',   name:'Taste',   mass:9e-9,    drawR:0.0026, col:'#5f5b76', p:[-3.195,-1.163],
+    fixed:true, rogue:true },
+  { id:'hole',    name:'Balance', mass:0.6,     drawR:0.035,  col:'#b48cff', p:[2.55,-1.75],
+    fixed:true, attractor:true, hole:true, captureR:0.09 }
+];
+
+// Circular-orbit rates straight from Kepler: omega = sqrt(GM/r^3) about the
+// star. Screen convention is +y DOWN, which is why the z term is negated - the
+// same single flip the renderers in Assets/Scripts/GalaxyPool make.
+BODIES.forEach(function (b) {
+  if (b.orbR === undefined) return;
+  b.om = Math.sqrt(G * 0.45 / (b.orbR*b.orbR*b.orbR));
+  b.ang0 = b.ang;
+  b.p = [0, 0];
+});
+function syncOrbits() {
+  for (let i = 0; i < BODIES.length; i++) {
+    const b = BODIES[i];
+    if (b.orbR === undefined || b.unmoored || b.potted) continue;
+    b.p[0] =  b.orbR * Math.cos(b.ang);
+    b.p[1] = -b.orbR * Math.sin(b.ang);
+  }
+}
+syncOrbits();
+const CURTAIN = { x1:1.059, z1:-1.818, x2:2.077, z2:-0.332, col:'#8ec8ff' };
+
+// Per-body well shape for the compressed height functions. Depth is ranked by
+// LOG mass, so Balance > Vision > Smell > Hearing > Touch > Taste stays honest
+// across eight decades while the magnitude becomes something a designer picks.
+// Radius likewise: a gentle power, so the star and the hole read as basins and
+// the planets as dimples sitting inside them.
+const lgAll = BODIES.map(function (b) { return Math.log10(b.mass); });
+const lgMin = Math.min.apply(null, lgAll), lgMax = Math.max.apply(null, lgAll);
+BODIES.forEach(function (b) {
+  const t = (Math.log10(b.mass) - lgMin) / (lgMax - lgMin);
+  b.baseDepth = 0.10 + 0.90 * t;
+  b.baseR     = 0.050 + 0.62 * Math.pow(b.mass / 0.6, 0.20);
+  b.worldR = 0.042 + 0.095 * b.baseDepth;   // sphere radius, AU
+  b.rgb = [parseInt(b.col.slice(1,3),16)/255,
+           parseInt(b.col.slice(3,5),16)/255,
+           parseInt(b.col.slice(5,7),16)/255];
+});
+
+// ---------------------------------------------------------------------------
+// THE FIELD. One source of truth, on the CPU, so the ship in milestone 2 can be
+// driven by exactly the function the surface was built from - there is no
+// second copy in GLSL to drift out of step. 384x384 rebuilds in a few ms, which
+// is what makes switching functions live possible at all.
+// ---------------------------------------------------------------------------
+const N = 560;
+// World bounds, AU. Wide enough to hold both extremes of the level - Balance at
+// x=+2.55 and Taste'''s ARRIVAL at x=-3.195 - with room around them, because the
+// wall is a hard dissipative bounce and a ship slung by the pocket was reaching
+// it far too easily at the old 3.60.
+//
+// The grid only has to be fine enough to LOOK right: heightAt and gradAt are
+// analytic now, so the physics does not sample it at all. That is what makes a
+// wider table nearly free - 560 cells over 13 AU is 0.0232 AU each, still around
+// four across the tightest planet dimple, and the funnel keeps falling all the
+// way out because the Plummer tail is a true 1/r.
+const CX = -0.25, CZ = 0.0, HALF = 6.50;
+
+
+
+// Per-body compression, then sum. The kernel is PLUMMER - 1/sqrt(1 + r^2/R^2) -
+// chosen for its tail, not its centre: far from a body it is exactly R/r, the
+// true Newtonian falloff, so the star still pulls the sheet down out at the
+// edges and the whole map reads as one funnel. The first cut used 1/(1 + r^2/R^2),
+// which decays as 1/r^2 and left the outskirts dead flat.
+//
+// Each term is a real softened point mass, so this sum IS a potential - just one
+// whose depths and softening lengths are authored rather than derived from mass.
+function wells(x, z, kR, kD) {
+  let h = 0;
+  for (let i = 0; i < BODIES.length; i++) {
+    const b = BODIES[i];
+    if (b.potted) continue;                 // pocketed worlds stop shaping the table
+    const R = b.baseR * kR;
+    const dx = x - b.p[0], dz = z - b.p[1];
+    h -= b.baseDepth * kD / Math.sqrt(1 + (dx*dx + dz*dz) / (R*R));
+  }
+  return h;
+}
+
+function sample(f) {
+  const g = new Float32Array(N*N), s = (2*HALF)/(N-1);
+  for (let j = 0; j < N; j++) {
+    const z = CZ - HALF + j*s;
+    for (let i = 0; i < N; i++) g[j*N+i] = f(CX - HALF + i*s, z);
+  }
+  return g;
+}
+function norm(g) {
+  if (!NRM.locked) {                      // only the first build has to scan
+    let lo = Infinity, hi = -Infinity;
+    for (let i = 0; i < g.length; i++) { const v = g[i]; if (v < lo) lo = v; if (v > hi) hi = v; }
+    NRM.hi = hi; NRM.span = Math.max(1e-9, hi - lo); NRM.locked = true;
+  }
+  const hi = NRM.hi, r = NRM.span;
+  for (let i = 0; i < g.length; i++) g[i] = (g[i] - hi) / r;   // in place
+  return g;
+}
+
+
+const K = { rad:1, dep:1, hgt:1, bands:26, alpha:0.74, stars:0.55 };
+// The affine map norm() applies to the grid. heightAt reproduces it analytically
+// so the ship flies through the EXACT field the mesh is sampled from.
+const NRM = { hi: 0, span: 1, locked: false };
+
+// Closed-form gradient of the Plummer sum. h = -sum d/sqrt(1+u), u = r^2/R^2, so
+//   dh/dx = d * (x - bx) / (R^2 * (1+u)^{3/2})
+// Having this analytically is not a micro-optimisation. The force used to be a
+// finite difference of the SAMPLED grid while the potential was the interpolated
+// one, so the two disagreed and energy drifted badly - measured 438% over a
+// minute of flight. Same function, differentiated rather than sampled, and the
+// drift becomes integrator error alone.
+function wellsGrad(x, z, kR, kD) {
+  let gx = 0, gz = 0;
+  for (let i = 0; i < BODIES.length; i++) {
+    const b = BODIES[i];
+    if (b.potted) continue;
+    const R = b.baseR * kR, R2 = R * R;
+    const dx = x - b.p[0], dz = z - b.p[1];
+    const u = (dx*dx + dz*dz) / R2;
+    const f = b.baseDepth * kD / (R2 * Math.pow(1 + u, 1.5));
+    gx += dx * f; gz += dz * f;
+  }
+  return [gx, gz];
+}
+
+// THE HEIGHT FUNCTION. A sum of PLUMMER wells, one per body: each is a real
+// softened point mass, finite at the centre and falling as R/r far away, so the
+// star drags the whole outskirts down and the sheet reads as ONE FUNNEL with
+// dimples in it. Depths are ranked by log mass, which keeps
+// Balance > Vision > Smell > Hearing > Touch > Taste honest across eight decades
+// while the magnitudes stay art direction.
+//
+// WHY NOT THE REAL POTENTIAL. Five other functions were built and measured
+// before this one was chosen, and four of them fail outright. Level 1's masses
+// span 1e8 - the star is 110,000x Smell and 50,000,000x Taste - so in the true
+// field the worlds you actually shoot are a part in 1e-4 of the height. Dimple
+// depth as a percentage of the total height range, measured:
+//
+//     function          Smell  Hearing   Touch   Taste   outer slope
+//     raw potential     0.59%    0.47%   0.07%  0.002%        -0.1%
+//     log2 (contours)   5.38%    1.44%   0.24%   0.01%         3.5%
+//     escape velocity   2.23%    1.04%   0.18%  0.005%         0.6%
+//     local relief      0.97%    0.17%   0.02%  0.006%        -0.1%
+//     PLUMMER          47.75%   28.65%  21.65%   7.88%         8.7%
+//     hybrid           29.73%   15.60%  12.20%   4.49%         6.5%
+//
+// Under about 1% a body is invisible; under about 3% outer slope the outskirts
+// are dead flat. Only the bottom two pass, and Plummer wins on both axes.
+// GalaxyPoolContours.shader's log2 remap stays exactly right for iso-LINES - it
+// is monotone in phi, so every line is a true equipotential - it just cannot
+// carry a height. THE CONSEQUENCE: this sheet is AUTHORED, not derived. The real
+// masses now only set the ranking.
+// Reused across rebuilds. At 560^2 these are 1.2 MB and 2.5 MB; allocating them
+// fresh every rebuild was handing the collector 3.7 MB several times a second.
+const FIELD = new Float32Array(N * N);
+const GRAD  = new Float32Array(N * N * 2);
+
+function buildHeight() {
+  // BODY-OUTER, cell-inner. The first cut ran cell-outer through a closure that
+  // re-read b.baseR, b.baseDepth and b.p on every one of the 314k cells for every
+  // body - 2M property lookups per rebuild. Hoisting the per-body constants and
+  // walking a flat typed array instead is the whole of the speed-up.
+  FIELD.fill(0);
+  const st = (2 * HALF) / (N - 1);
+  for (let bi = 0; bi < BODIES.length; bi++) {
+    const b = BODIES[bi];
+    if (b.potted) continue;
+    const R = b.baseR * K.rad;
+    const invR2 = 1 / (R * R), depth = b.baseDepth * K.dep;
+    const bx = b.p[0], bz = b.p[1];
+    for (let j = 0; j < N; j++) {
+      const dz = (CZ - HALF + j * st) - bz;
+      const dz2 = dz * dz, row = j * N;
+      for (let i2 = 0; i2 < N; i2++) {
+        const dx = (CX - HALF + i2 * st) - bx;
+        FIELD[row + i2] -= depth / Math.sqrt(1 + (dx * dx + dz2) * invR2);
+      }
+    }
+  }
+  return FIELD;
+}
+
+
+// ---------------------------------------------------------------------------
+// WebGL2
+// ---------------------------------------------------------------------------
+const cv = document.getElementById('c');
+const gl = cv.getContext('webgl2', { antialias:true, alpha:false });
+if (!gl) document.body.innerHTML = '<p style="padding:2em;font:14px monospace;color:#ccc">WebGL2 unavailable in this browser.</p>';
+
+function sh(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+function prog(vs, fs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, sh(gl.VERTEX_SHADER, vs));
+  gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  return p;
+}
+
+// Height arrives as a UNIT value and is scaled in the vertex shader, so
+// flattening for the overview is a uniform and never a rebuild. The GRADIENT
+// rides along as an attribute for the same reason: a normal derived from it
+// stays exact under any height scale, where a baked normal would not.
+const SURF_VS = [
+'#version 300 es',
+'in vec2 aXZ; in float aH; in vec2 aGrad;',
+'uniform mat4 uVP; uniform float uHScale;',
+'out vec3 vW; out float vH; out vec3 vN;',
+'void main(){',
+'  vec3 w = vec3(aXZ.x, aH * uHScale, aXZ.y);',
+'  vW = w; vH = aH;',
+'  vN = normalize(vec3(-aGrad.x * uHScale, 1.0, -aGrad.y * uHScale));',
+'  gl_Position = uVP * vec4(w, 1.0);',
+'}'].join('\n');
+
+const SURF_FS = [
+'#version 300 es',
+'precision highp float;',
+'in vec3 vW; in float vH; in vec3 vN;',
+'uniform vec3 uCam; uniform float uBands; uniform float uFlat;',
+'uniform float uAlpha; uniform vec3 uFade;',   // xy = table centre, z = half-width
+'uniform int uCount; uniform vec3 uBPos[6]; uniform vec3 uBCol[6]; uniform float uBR[6];',
+'uniform vec4 uCurtain;',
+'out vec4 frag;',
+'float lineAA(float v, float w){',
+'  float f = fract(v); float d = min(f, 1.0 - f);',
+'  float fw = fwidth(v);',
+'  float line = 1.0 - smoothstep(0.0, fw * w, d);',
+// Once a cell is thinner than a pixel the line covers everything and the grid
+// becomes a flat wash. Fade it out instead - the same reason mip-mapping exists.
+'  return line * (1.0 - smoothstep(0.30, 0.75, fw));',
+'}',
+'void main(){',
+'  float d = clamp(-vH, 0.0, 1.0);',
+'  vec3 hi   = vec3(0.30, 0.48, 0.54);',
+'  vec3 mid  = vec3(0.09, 0.17, 0.30);',
+'  vec3 deep = vec3(0.05, 0.03, 0.10);',
+'  vec3 base = d < 0.5 ? mix(hi, mid, d * 2.0) : mix(mid, deep, (d - 0.5) * 2.0);',
+'  vec3 n = normalize(vN);',
+'  vec3 L = normalize(vec3(-0.45, 0.80, 0.40));',
+'  float lam = 0.35 + 0.65 * max(0.0, dot(n, L));',
+'  vec3 V = normalize(uCam - vW);',
+'  float fres = pow(1.0 - max(0.0, dot(n, V)), 3.0);',
+'  vec3 c = base * lam;',
+// Bands on the height itself, so they read as the same instrument the 2D game
+// already draws - and under the compressed functions they are iso-height
+// rather than iso-potential, which is exactly the trade being made visible.
+'  if (uBands > 0.5) {',
+'    float band = lineAA(vH * uBands, 1.1);',
+'    c += vec3(0.24, 0.52, 0.50) * band * (0.30 + 0.55 * d);',
+'  }',
+'  c += vec3(0.10, 0.16, 0.24) * lineAA(vW.x * 4.0, 1.0) * 0.30;',
+'  c += vec3(0.10, 0.16, 0.24) * lineAA(vW.z * 4.0, 1.0) * 0.30;',
+'  c += vec3(0.16, 0.26, 0.36) * lineAA(vW.x, 1.0) * 0.55;',
+'  c += vec3(0.16, 0.26, 0.36) * lineAA(vW.z, 1.0) * 0.55;',
+'  for (int i = 0; i < 6; i++) {',
+'    if (i >= uCount) break;',
+'    float r = length(vW.xz - uBPos[i].xz);',
+'    float g = exp(-r / max(0.05, uBR[i] * 1.60));',
+'    c += uBCol[i] * g * 0.55;',
+'  }',
+'  vec2 a = uCurtain.xy, b = uCurtain.zw, pw = vW.xz;',
+'  vec2 ab = b - a;',
+'  float t = clamp(dot(pw - a, ab) / dot(ab, ab), 0.0, 1.0);',
+'  float dc = length(pw - (a + t * ab));',
+'  c += vec3(0.30, 0.62, 1.00) * smoothstep(0.22, 0.0, dc) * 0.30;',
+'  c += vec3(0.20, 0.42, 0.55) * fres * (0.55 - 0.40 * uFlat);',
+// The sheet is a readout laid over the sky, not a floor: it is translucent, and
+// it DISSOLVES at the rim rather than ending in a hard square edge. The fade is
+// radial so it reads as the field thinning out rather than as a cropped map.
+'  float rim = length(vW.xz - uFade.xy) / uFade.z;',
+'  float e = 1.0 - smoothstep(0.60, 0.99, rim);',
+'  frag = vec4(c, uAlpha * e);',
+'}'].join('\n');
+
+const PT_VS = [
+'#version 300 es',
+'in vec3 aP; in vec3 aC; in float aS; in vec4 aL;',
+'uniform mat4 uVP; uniform float uHScale; uniform float uPx;',
+'out vec3 vC; out vec4 vL;',
+'void main(){',
+// aS is a real radius in AU. The lift is applied AFTER the height scale so the
+// spheres stay clear of the surface at every flattening, instead of sinking into
+// it as the camera rises to the docked view.
+'  float y = aP.y * uHScale + aS * 1.25;',
+'  vec4 clip = uVP * vec4(aP.x, y, aP.z, 1.0);',
+'  gl_Position = clip;',
+'  gl_PointSize = clamp(aS * uPx / max(0.001, clip.w), 6.0, 130.0);',
+'  vC = aC; vL = aL;',
+'}'].join('\n');
+
+const PT_FS = [
+'#version 300 es',
+'precision highp float;',
+'in vec3 vC; in vec4 vL; out vec4 frag;',
+'void main(){',
+'  vec2 q = gl_PointCoord * 2.0 - 1.0;',
+'  q.y = -q.y;',
+'  float r2 = dot(q, q);',
+'  if (r2 > 1.0) discard;',
+'  vec3 n = vec3(q, sqrt(max(0.0, 1.0 - r2)));',
+// vL.xyz is the direction from THIS body to the star, already rotated into view
+// space on the CPU - which is the space the impostor normal is built in, since a
+// point sprite is always screen-aligned. So the terminator lands on the far side
+// of the star with no matrix work in here at all. vL.w flags the star itself,
+// which emits rather than receives.
+'  vec3 c;',
+'  if (vL.w > 0.5) {',
+'    c = vC * (1.22 + 0.60 * smoothstep(1.0, 0.0, r2));',
+'  } else {',
+'    vec3 L = normalize(vL.xyz);',
+'    float lam = max(0.0, dot(n, L));',
+'    float ambient = 0.11;',
+'    c = vC * (ambient + (1.0 - ambient) * lam);',
+'    c += vC * 0.35 * pow(max(0.0, dot(n, L)), 6.0);',   // a little starward sheen
+'  }',
+// Hard silhouette. The rim darkening that used to fade the outer third of the
+// disc read as a soft, out-of-focus edge; the only feather left is one pixel
+// wide via fwidth, which is antialiasing rather than shading.
+'  float aa = fwidth(r2);',
+'  float a = 1.0 - smoothstep(1.0 - aa, 1.0, r2);',
+'  frag = vec4(c, a);',
+'}'].join('\n');
+
+// THE SKY. A fullscreen triangle with no attributes at all: the fragment
+// reconstructs its own view ray from the camera basis and hashes it into stars,
+// so the field is infinitely far away and parallax-free by construction - it
+// rotates with the camera and never translates with it, which is what makes it
+// read as a dome around the table rather than a wall behind it.
+const SKY_VS = [
+'#version 300 es',
+'out vec2 vNdc;',
+'void main(){',
+'  vec2 p = vec2(gl_VertexID == 1 ? 3.0 : -1.0, gl_VertexID == 2 ? 3.0 : -1.0);',
+'  vNdc = p;',
+'  gl_Position = vec4(p, 0.999999, 1.0);',
+'}'].join('\n');
+
+const SKY_FS = [
+'#version 300 es',
+'precision highp float;',
+'in vec2 vNdc;',
+'uniform vec3 uF, uR, uU;',
+'uniform float uTh, uAsp;',
+'uniform float uPixAng;',        // angular size of one pixel, radians
+'uniform float uStars;',         // overall level, on a slider
+'out vec4 frag;',
+// Cheap hash - no sin(). This runs 81 times per pixel and sin was the single
+// most expensive thing in the shader.
+'float h21(vec2 p){',
+'  vec3 p3 = fract(vec3(p.xyx) * 0.1031);',
+'  p3 += dot(p3, p3.yzx + 33.33);',
+'  return fract((p3.x + p3.y) * p3.z);',
+'}',
+//
+// A STAR FIELD THAT IS NOT SECRETLY A CUBE.
+//
+// Three things were making the old one read as a square box:
+//
+// 1. DENSITY CLUMPING. The cube-face projection is gnomonic, so a cell's solid
+//    angle scales as (1 + u^2 + v^2)^-1.5 - a corner cell covers 19% of the sky a
+//    centre cell does. With a constant per-cell probability that is 5x the stars
+//    per steradian piled into the eight cube corners, which is exactly what a
+//    "square sky" looks like. Fixed by scaling the keep-probability BY THAT
+//    JACOBIAN, which makes stars-per-steradian constant by construction.
+//
+// 2. THE SEAM. fwidth() spikes across the quads where the dominant axis changes,
+//    so the star radius blew up and lit whole cells along each cube edge. There is
+//    no fwidth here at all now - the radius comes from uPixAng, a uniform.
+//
+// 3. SQUARE STARS. Distance was measured in the distorted uv plane, so stars
+//    stretched toward the corners. It is measured as a 3D chord between unit
+//    vectors now, so every star is round wherever it lands.
+//
+// The layers are also each sampled through a different ROTATION of the cube, so
+// whatever grid structure survives in one octave does not line up with the others.
+'float layer(vec3 d, float scale, float dens, float size, float seed) {',
+'  vec3 ad = abs(d);',
+'  int face; float sgn; vec2 uv;',
+'  if (ad.x >= ad.y && ad.x >= ad.z) { face = 0; sgn = d.x < 0.0 ? -1.0 : 1.0; uv = vec2(d.y, d.z) / ad.x; }',
+'  else if (ad.y >= ad.z)            { face = 1; sgn = d.y < 0.0 ? -1.0 : 1.0; uv = vec2(d.x, d.z) / ad.y; }',
+'  else                              { face = 2; sgn = d.z < 0.0 ? -1.0 : 1.0; uv = vec2(d.x, d.y) / ad.z; }',
+'  vec2 g = uv * scale;',
+'  vec2 id = floor(g);',
+'  float rad = uPixAng * size;',
+'  float best = 0.0;',
+'  for (int y = -1; y <= 1; y++) {',
+'    for (int x = -1; x <= 1; x++) {',
+'      vec2 c = id + vec2(float(x), float(y));',
+'      vec2 key = c + vec2(float(face) * 37.0 + seed, sgn * 53.0 + seed);',
+'      float r3 = h21(key + 43.7);',
+'      vec2 suv = (c + vec2(h21(key), h21(key + 17.3))) / scale;',
+'      float jac = pow(1.0 + dot(suv, suv), -1.5);',
+'      float keep = dens * jac;',
+'      if (r3 < keep) {',
+'        vec3 sd;',
+'        if (face == 0)      sd = vec3(sgn, suv.x, suv.y);',
+'        else if (face == 1) sd = vec3(suv.x, sgn, suv.y);',
+'        else                sd = vec3(suv.x, suv.y, sgn);',
+'        sd = normalize(sd);',
+'        float dist = length(d - sd);',
+'        float core = smoothstep(rad, 0.0, dist);',
+'        float halo = smoothstep(rad * 6.0, 0.0, dist) * 0.16;',
+'        best = max(best, (core + halo) * (0.40 + 0.80 * r3 / max(1e-5, keep)));',
+'      }',
+'    }',
+'  }',
+'  return best;',
+'}',
+// Two arbitrary rotations, near enough orthonormal, to decorrelate the octaves.
+'const mat3 R2 = mat3( 0.36,  0.48, -0.80,',
+'                     -0.80,  0.60,  0.00,',
+'                      0.48,  0.64,  0.60);',
+'const mat3 R3 = mat3( 0.55, -0.62,  0.56,',
+'                      0.83,  0.42, -0.36,',
+'                     -0.04,  0.66,  0.75);',
+'void main(){',
+'  vec3 d = normalize(uF + uR * vNdc.x * uTh * uAsp + uU * vNdc.y * uTh);',
+'  float sIt = layer(d,      22.0, 0.70, 1.9,  0.0) * 0.95',
+'            + layer(R2 * d, 46.0, 0.45, 1.45, 7.0) * 0.62',
+'            + layer(R3 * d, 92.0, 0.28, 1.15, 19.0) * 0.40;',
+'  float band = 0.5 + 0.5 * d.y;',
+'  vec3 sky = mix(vec3(0.012, 0.015, 0.032), vec3(0.026, 0.030, 0.055), band);',
+'  vec3 tint = mix(vec3(0.80, 0.90, 1.00), vec3(1.00, 0.93, 0.80), h21(floor(d.xz * 19.0) + 3.3));',
+'  frag = vec4(sky + tint * sIt * uStars, 1.0);',
+'}'].join('\n');
+
+const pSurf = prog(SURF_VS, SURF_FS), pPt = prog(PT_VS, PT_FS), pSky = prog(SKY_VS, SKY_FS);
+const vaoSky = gl.createVertexArray();
+const USky = {};
+['uF','uR','uU','uTh','uAsp','uPixAng','uStars']
+  .forEach(function (k) { USky[k] = gl.getUniformLocation(pSky, k); });
+
+// --- surface buffers -------------------------------------------------------
+const vaoS = gl.createVertexArray();
+const bXZ = gl.createBuffer(), bH = gl.createBuffer(), bGr = gl.createBuffer(), bIx = gl.createBuffer();
+gl.bindVertexArray(vaoS);
+{
+  const xz = new Float32Array(N*N*2), s = (2*HALF)/(N-1);
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const k = (j*N + i) * 2;
+    xz[k] = CX - HALF + i*s; xz[k+1] = CZ - HALF + j*s;
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, bXZ);
+  gl.bufferData(gl.ARRAY_BUFFER, xz, gl.STATIC_DRAW);
+  const L = gl.getAttribLocation(pSurf, 'aXZ');
+  gl.enableVertexAttribArray(L); gl.vertexAttribPointer(L, 2, gl.FLOAT, false, 0, 0);
+
+  const idx = new Uint32Array((N-1)*(N-1)*6); let k = 0;
+  for (let j = 0; j < N-1; j++) for (let i = 0; i < N-1; i++) {
+    const a = j*N + i, b = a + 1, c = a + N, dd = c + 1;
+    idx[k++] = a; idx[k++] = c; idx[k++] = b;
+    idx[k++] = b; idx[k++] = c; idx[k++] = dd;
+  }
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, bIx);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, bH);
+  const LH = gl.getAttribLocation(pSurf, 'aH');
+  gl.enableVertexAttribArray(LH); gl.vertexAttribPointer(LH, 1, gl.FLOAT, false, 0, 0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, bGr);
+  const LG = gl.getAttribLocation(pSurf, 'aGrad');
+  gl.enableVertexAttribArray(LG); gl.vertexAttribPointer(LG, 2, gl.FLOAT, false, 0, 0);
+}
+gl.bindVertexArray(null);
+
+const vaoP = gl.createVertexArray();
+const bPP = gl.createBuffer(), bPC = gl.createBuffer(), bPS = gl.createBuffer(),
+      bPL = gl.createBuffer();
+gl.bindVertexArray(vaoP);
+[[bPP,'aP',3],[bPC,'aC',3],[bPS,'aS',1],[bPL,'aL',4]].forEach(function (e) {
+  gl.bindBuffer(gl.ARRAY_BUFFER, e[0]);
+  const L = gl.getAttribLocation(pPt, e[1]);
+  gl.enableVertexAttribArray(L); gl.vertexAttribPointer(L, e[2], gl.FLOAT, false, 0, 0);
+});
+gl.bindVertexArray(null);
+
+// --- rebuild ---------------------------------------------------------------
+let HEIGHT = null;
+
+// The field itself, in the same units the mesh was normalised into - so a body
+// sits exactly on the surface its own mass made, with no interpolation error.
+function heightAt(x, z) {
+  return (wells(x, z, K.rad, K.dep) - NRM.hi) / NRM.span;
+}
+
+function rebuild() {
+  const t0 = performance.now();
+  HEIGHT = norm(buildHeight());
+
+  const s = (2*HALF)/(N-1), inv2 = 1/(2*s), inv1 = 1/s;
+  for (let j = 0; j < N; j++) {
+    const j0 = j > 0 ? j-1 : 0, j1 = j < N-1 ? j+1 : N-1;
+    const kz = (j1 - j0) === 2 ? inv2 : inv1;
+    const row = j*N, r0 = j0*N, r1 = j1*N;
+    for (let i = 0; i < N; i++) {
+      const i0 = i > 0 ? i-1 : 0, i1 = i < N-1 ? i+1 : N-1;
+      const kx = (i1 - i0) === 2 ? inv2 : inv1;
+      const o = (row+i)*2;
+      GRAD[o  ] = (HEIGHT[row+i1] - HEIGHT[row+i0]) * kx;
+      GRAD[o+1] = (HEIGHT[r1+i]   - HEIGHT[r0+i])   * kz;
+    }
+  }
+  const gr = GRAD;
+  gl.bindBuffer(gl.ARRAY_BUFFER, bH);  gl.bufferData(gl.ARRAY_BUFFER, HEIGHT, gl.DYNAMIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER, bGr); gl.bufferData(gl.ARRAY_BUFFER, gr, gl.DYNAMIC_DRAW);
+
+  const n = BODIES.length;
+  const pp = new Float32Array(n*3), pc = new Float32Array(n*3), ps = new Float32Array(n);
+  BODIES.forEach(function (b, i) {
+    pp[i*3] = b.p[0]; pp[i*3+1] = heightAt(b.p[0], b.p[1]); pp[i*3+2] = b.p[1];
+    pc[i*3] = b.rgb[0]; pc[i*3+1] = b.rgb[1]; pc[i*3+2] = b.rgb[2];
+    ps[i] = b.worldR;
+  });
+  gl.bindBuffer(gl.ARRAY_BUFFER, bPP); gl.bufferData(gl.ARRAY_BUFFER, pp, gl.DYNAMIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER, bPC); gl.bufferData(gl.ARRAY_BUFFER, pc, gl.DYNAMIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER, bPS); gl.bufferData(gl.ARRAY_BUFFER, ps, gl.DYNAMIC_DRAW);
+
+  markBuilt();
+  document.getElementById('fnNote').textContent =
+    'depths ranked by log mass, softening authored  ·  rebuilt in ' +
+    (performance.now() - t0).toFixed(0) + ' ms';
+}
+
+// ---------------------------------------------------------------------------
+// CAMERA. One camera, two poses. Flying is a low angled view; docking rises to
+// straight down. The move is a DOLLY ZOOM - the field of view narrows from 50
+// to 6 degrees while the camera pulls back to hold the framing - so perspective
+// drains out of the picture continuously and the overview arrives very nearly
+// orthographic. That is what makes the 2D view honest: it is the same surface
+// seen from directly above with the relief flattened out from under it, and not
+// a second renderer that could quietly disagree with the first.
+// ---------------------------------------------------------------------------
+// The docked view frames the WORLDS, not the whole sheet. The sheet is now much
+// larger than the table so a slung ship has room before it meets a wall, but
+// framing all of it would put the game in the middle of a lot of empty funnel.
+const BODY_EXTENT = (function () {
+  let m = 0;
+  for (let i = 0; i < BODIES.length; i++)
+    m = Math.max(m, Math.abs(BODIES[i].p[0] - CX), Math.abs(BODIES[i].p[1] - CZ));
+  return m;
+})();
+const FLY_FRAME = 2.4, POOL_FRAME = BODY_EXTENT * 1.28;
+const cam = { yaw:0.62, pitch:0.55, frame:FLY_FRAME, tgt:[CX, -0.18, CZ] };
+// Set on a dock/undock so the camera eases to a canonical pose instead of
+// keeping whatever bearing you happened to be flying on. Cleared by the wheel or
+// a right-drag, because the moment you touch the camera it is yours again.
+let camGoal = null;
+let docked = 0, dockedTarget = 0;
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smooth(t) { return t * t * (3 - 2 * t); }
+
+function persp(f, a, n, fa) {
+  const t = 1 / Math.tan(f / 2);
+  return [t/a,0,0,0, 0,t,0,0, 0,0,(fa+n)/(n-fa),-1, 0,0,2*fa*n/(n-fa),0];
+}
+function cross(a, b) { return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]]; }
+function dot(a, b) { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
+function nrm(a) { const l = Math.hypot(a[0],a[1],a[2]) || 1; return [a[0]/l, a[1]/l, a[2]/l]; }
+function look(e, c, u) {
+  const f = nrm([c[0]-e[0], c[1]-e[1], c[2]-e[2]]);
+  const s = nrm(cross(f, u)), v = cross(s, f);
+  return [s[0],v[0],-f[0],0, s[1],v[1],-f[1],0, s[2],v[2],-f[2],0,
+          -dot(s,e), -dot(v,e), dot(f,e), 1];
+}
+function mul(a, b) {
+  const o = new Array(16);
+  for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
+    let s = 0;
+    for (let k = 0; k < 4; k++) s += a[k*4+j] * b[i*4+k];
+    o[i*4+j] = s;
+  }
+  return o;
+}
+function viewProj(aspect) {
+  const e = smooth(docked);
+  const pitch = lerp(cam.pitch, Math.PI/2 - 0.012, e);
+  const fov   = lerp(50, 6, e) * Math.PI / 180;
+  const dist  = cam.frame / Math.tan(fov / 2);
+  const cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const sy = Math.sin(cam.yaw), cy = Math.cos(cam.yaw);
+  const eye = [cam.tgt[0] + dist*cp*sy, cam.tgt[1] + dist*sp, cam.tgt[2] + dist*cp*cy];
+  // Up is the sphere's own tangent along pitch, so it never goes degenerate at
+  // the pole - which is exactly where the docked pose parks the camera.
+  const up = [-sp*sy, cp, -sp*cy];
+  const f = nrm([cam.tgt[0]-eye[0], cam.tgt[1]-eye[1], cam.tgt[2]-eye[2]]);
+  const r = nrm(cross(f, up)), u = cross(r, f);
+  return { m: mul(persp(fov, aspect, 0.05, 400), look(eye, cam.tgt, up)),
+           eye:eye, e:e, tanHalf: Math.tan(fov / 2),
+           f:f, r:r, u:u, th: Math.tan(fov / 2), asp: aspect };
+}
+
+// ---------------------------------------------------------------------------
+// Input
+// ---------------------------------------------------------------------------
+let drag = null;
+// Orbit moved to the RIGHT button: GLIDER and SEEK steer with the cursor, so the
+// left button and the pointer position both belong to the ship now.
+cv.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+cv.addEventListener('mousedown', function (e) {
+  if (e.button === 2) { drag = [e.clientX, e.clientY]; camGoal = null; }
+  if (e.button === 0) firing = true;
+});
+addEventListener('mouseup', function (e) {
+  if (e.button === 0 && DOCK.on) releaseShot();
+});
+addEventListener('mouseup', function (e) { drag = null; if (!e || e.button === 0) firing = false; });
+addEventListener('mousemove', function (e) {
+  mouse.x = e.clientX; mouse.y = e.clientY;
+  if (!drag) return;
+  const ddx = e.clientX - drag[0], ddy = e.clientY - drag[1];
+  // Vertical drag is the camera's HEIGHT in both modes - it raises and lowers
+  // the eye over the sheet, and it sticks, because how high you want to sit is
+  // a preference and not a glance.
+  cam.pitch = Math.max(0.10, Math.min(1.45, cam.pitch + ddy * 0.005));
+  if (chase) {
+    // Horizontal drag only BORROWS the bearing. Chasing means the camera has an
+    // opinion about where it belongs, so let go and it takes it back.
+    yawOffset = Math.max(-2.2, Math.min(2.2, yawOffset - ddx * 0.006));
+  } else {
+    cam.yaw -= ddx * 0.006;
+  }
+  drag = [e.clientX, e.clientY];
+});
+cv.addEventListener('wheel', function (e) {
+  e.preventDefault();
+  camGoal = null;
+  cam.frame = Math.max(0.35, Math.min(9.0, cam.frame * Math.exp(e.deltaY * 0.0011)));
+}, { passive:false });
+addEventListener('keydown', function (e) {
+  const k = e.key.toLowerCase();
+  keys[k] = true;
+  if (e.code === 'Space') { e.preventDefault(); toggleDock(); return; }
+  if (k >= '1' && k <= '5') { warpIdx = k.charCodeAt(0) - 49; return; }
+  if (e.code === 'Tab') { e.preventDefault(); scheme = (scheme + 1) % SCHEMES.length; showScheme(); return; }
+  if (k === 'r') { resetShip(); return; }
+  if (k === 'c') { chase = !chase; chaseEl.textContent = chase ? 'ON' : 'off'; return; }
+  if (k === 'p') {
+    PRED.show = (PRED.show + 1) % 2;
+    pathEl.textContent = ['off', 'on'][PRED.show];
+    return;
+  }
+});
+addEventListener('keyup', function (e) { keys[e.key.toLowerCase()] = false; });
+addEventListener('blur', function () { for (const k in keys) keys[k] = false; });
+function slider(id, vid, key) {
+  const s = document.getElementById(id), v = document.getElementById(vid);
+  s.addEventListener('input', function () {
+    K[key] = parseFloat(s.value);
+    v.textContent = key === 'bands' ? K[key].toFixed(0) : K[key].toFixed(2);
+    if (key === 'rad' || key === 'dep') rebuild();
+  });
+}
+slider('sRad','vRad','rad'); slider('sDep','vDep','dep');
+slider('sHgt','vHgt','hgt'); slider('sBnd','vBnd','bands'); slider('sAlp','vAlp','alpha'); slider('sStr','vStr','stars');
+
+function objSlider(obj, id, vid, key, dp) {
+  const el = document.getElementById(id), v = document.getElementById(vid);
+  el.addEventListener('input', function () {
+    obj[key] = parseFloat(el.value); v.textContent = obj[key].toFixed(dp === undefined ? 2 : dp);
+  });
+}
+// The objSlider CALLS live at the bottom of the file, not here: they take the
+// tunable object as an argument, and DRV / PRED / SHOT / GAME are all declared
+// further down. Passing them from up here read fine and threw a temporal dead
+// zone error the moment the page loaded.
+
+
+// ===========================================================================
+// THE ROCKET, AND FIVE WAYS TO DRIVE IT
+//
+// Every scheme below shares one contract, which is the part worth keeping
+// whichever one wins: THE SHIP IS CONSTRAINED TO THE SHEET. Its height is the
+// surface height plus a fixed hover, its velocity lives in the tangent plane,
+// and the only gravity it ever feels is the downhill component of the slope it
+// is standing on - a = -g * grad(h). So the terrain is never scenery. It is the
+// entire physics, and a scheme that ignores the slope has nothing left to be.
+//
+// The five differ along ONE axis: how much of the motion the LANDSCAPE authors
+// versus how much the PLAYER does. Marble is all landscape, Seek is all player,
+// and the interesting arguments are in the middle three.
+// ===========================================================================
+
+// CONTROL TUNABLES. Everything the ship's feel is made of, in one object, all
+// of it live on the sliders. `burn` is the thrust the button applies; there is
+// no hidden multiplier on top of it any more, so the number on the slider is
+// the acceleration in AU/s^2.
+const DRV = { grav:0.38, burn:0.78, reverse:0.60, lateral:0.55, hover:0.06, vmax:2.2,
+              aimSlew:26, bank:0.16, chaseRate:2.4, scale:0.105 };
+
+// PREDICTION. horizon = how many seconds ahead to draw. show: 1 on, 0 off.
+// There is ONE line: where you go if you do nothing. The burn-preview ghost that
+// used to sit beside it was answering a question the cruise path already
+// answers the moment you touch the throttle, and two ribbons argued.
+const PRED = { horizon:6.0, show:1 };
+
+// head = the STEERING axis, face = what the model points along. They are the
+// same thing for ROVER and GLIDER and deliberately are not for CARVER, where
+// the edge you are carving on is not the direction you are travelling in.
+// head = where the cursor is, face = where the hull points (it follows head),
+// course = where the ship is actually TRAVELLING. All three differ in this
+// scheme, which is the point of it: you can drift sideways while aiming behind
+// you, and the camera needs the third one.
+const ship = { x:-1.75, z:1.35, vx:0, vz:0, head:2.2, face:2.2, course:2.2,
+               bank:0, thr:0, revThr:0, spd:0, aimx:0, aimz:0 };
+let trail = [];
+
+// VECTOR first: it is the common mode. BURN is kept on Tab because its grammar
+// is the pool shot's own - point, commit, live with it - and that is worth being
+// able to compare against directly rather than from memory.
+//
+// Branching is on `id`, never on the index. Reordering this array used to mean
+// silently swapping two control schemes, which is the kind of coupling that
+// breaks the next time someone adds a third.
+const SCHEMES = [
+  { id:'vector', key:'VECTOR',
+    keys:'W prograde  \u00b7  S retrograde  \u00b7  A/D lateral  \u00b7  no mouse',
+    note:'THRUST RELATIVE TO YOUR OWN MOTION. The hull always points along the COURSE and the thrusters are bolted to it - W and S add or remove speed along the way you are already going, A and D push you sideways out of it. The orbital-manoeuvre grammar: prograde, retrograde, normal. The only scheme here where you never aim at anything.' },
+  { id:'burn', key:'BURN',
+    keys:'mouse aims  \u00b7  LEFT CLICK or W burns toward it  \u00b7  S reverses',
+    note:'AIM AND BURN. The nose tracks the cursor whether or not you are thrusting, and the button fires along it. NO GRIP and no damping, so once the burn stops you keep what you were given. Shares its grammar with the pool shot itself: point, commit, live with it.' }
+];
+let scheme = 0;
+
+// ---- geometry: a small flat-shaded rocket, nose along local +Z --------------
+function buildRocket() {
+  const P = [], NN = [], TT = [];
+  function tri(a, b, c, part) {
+    const u = [b[0]-a[0], b[1]-a[1], b[2]-a[2]], v = [c[0]-a[0], c[1]-a[1], c[2]-a[2]];
+    const q = nrm(cross(u, v));
+    [a,b,c].forEach(function (pt) { P.push(pt[0],pt[1],pt[2]); NN.push(q[0],q[1],q[2]); TT.push(part); });
+  }
+  const SEG = 10, R = 0.16;
+  function ring(z, r) {
+    const o = [];
+    for (let i = 0; i < SEG; i++) { const a = i/SEG*2*Math.PI; o.push([Math.cos(a)*r, Math.sin(a)*r, z]); }
+    return o;
+  }
+  const bF = ring(0.26, R), bB = ring(-0.34, R), tB = ring(-0.46, R*0.72), tip = [0,0,0.60];
+  for (let i = 0; i < SEG; i++) {
+    const j = (i+1)%SEG;
+    tri(tip, bF[i], bF[j], 0);
+    tri(bF[i], bB[i], bB[j], 0); tri(bF[i], bB[j], bF[j], 0);
+    tri(bB[i], tB[i], tB[j], 0); tri(bB[i], tB[j], bB[j], 0);
+  }
+  for (let f = 0; f < 3; f++) {                 // three fins, drawn double sided
+    const a = f/3*2*Math.PI, c = Math.cos(a), sn = Math.sin(a);
+    const p1 = [c*R*0.85, sn*R*0.85, -0.08], p2 = [c*R*0.85, sn*R*0.85, -0.46], p3 = [c*0.40, sn*0.40, -0.46];
+    tri(p1, p2, p3, 1); tri(p1, p3, p2, 1);
+  }
+  const fB = ring(-0.46, R*0.60), fT = [0,0,-1.15];   // exhaust, length scaled in the VS
+  for (let i = 0; i < SEG; i++) tri(fB[i], fT, fB[(i+1)%SEG], 2);
+  return { P:new Float32Array(P), N:new Float32Array(NN), T:new Float32Array(TT), n:P.length/3 };
+}
+
+const RK_VS = [
+'#version 300 es',
+'in vec3 aP; in vec3 aN; in float aT;',
+'uniform mat4 uVP; uniform mat4 uM; uniform float uThr; uniform float uRev;',
+'out vec3 vN; out float vT; out float vR;',
+'void main(){',
+'  vec3 p = aP;',
+'  if (aT > 1.5) {',
+'    if (uRev > 0.5) { p.z = 0.60 - (p.z + 0.46) * uThr; p.xy *= 0.55; }',
+'    else            { p.z = -0.46 + (p.z + 0.46) * uThr; }',
+'  }',
+'  vN = mat3(uM) * aN; vT = aT; vR = uRev;',
+'  gl_Position = uVP * uM * vec4(p, 1.0);',
+'}'].join('\n');
+
+const RK_FS = [
+'#version 300 es',
+'precision highp float;',
+'in vec3 vN; in float vT; in float vR; out vec4 frag;',
+'uniform vec3 uL;',   // world-space direction from the ship to the star
+'void main(){',
+'  vec3 n = normalize(vN);',
+// Lit by the STAR, like everything else on the table - vN is already in world
+// space (uM carries no view transform), so the direction can be used raw. A small
+// sky fill from above keeps the dark side readable against the sheet instead of
+// going flat black.
+'  vec3 L = normalize(uL);',
+'  float fill = 0.14 + 0.12 * max(0.0, n.y);',
+'  float lam = fill + 0.92 * max(0.0, dot(n, L));',
+'  vec3 c;',
+'  if (vT > 1.5)      c = (vR > 0.5 ? vec3(0.55, 0.82, 1.00) : vec3(1.00, 0.62, 0.22)) * 1.35;',
+'  else if (vT > 0.5) c = vec3(0.86, 0.26, 0.21) * lam;',
+'  else               c = vec3(0.90, 0.92, 0.96) * lam;',
+'  frag = vec4(c, 1.0);',
+'}'].join('\n');
+
+const LN_VS = [
+'#version 300 es',
+'in vec3 aP; in float aA;',
+'uniform mat4 uVP; uniform float uHScale; uniform float uLift;',
+'out float vA;',
+'void main(){ vA = aA; gl_Position = uVP * vec4(aP.x, aP.y * uHScale + uLift, aP.z, 1.0); }'].join('\n');
+
+const LN_FS = [
+'#version 300 es',
+'precision highp float;',
+'in float vA; uniform vec3 uCol; out vec4 frag;',
+'void main(){ frag = vec4(uCol, vA); }'].join('\n');
+
+const pRk = prog(RK_VS, RK_FS), pLn = prog(LN_VS, LN_FS);
+const RK = buildRocket();
+
+const vaoR = gl.createVertexArray();
+gl.bindVertexArray(vaoR);
+[[RK.P,'aP',3],[RK.N,'aN',3],[RK.T,'aT',1]].forEach(function (e) {
+  const b = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, b);
+  gl.bufferData(gl.ARRAY_BUFFER, e[0], gl.STATIC_DRAW);
+  const L = gl.getAttribLocation(pRk, e[1]);
+  gl.enableVertexAttribArray(L);
+  gl.vertexAttribPointer(L, e[2], gl.FLOAT, false, 0, 0);
+});
+gl.bindVertexArray(null);
+
+const vaoL = gl.createVertexArray();
+const bLP = gl.createBuffer(), bLA = gl.createBuffer();
+gl.bindVertexArray(vaoL);
+gl.bindBuffer(gl.ARRAY_BUFFER, bLP);
+gl.enableVertexAttribArray(gl.getAttribLocation(pLn,'aP'));
+gl.vertexAttribPointer(gl.getAttribLocation(pLn,'aP'), 3, gl.FLOAT, false, 0, 0);
+gl.bindBuffer(gl.ARRAY_BUFFER, bLA);
+gl.enableVertexAttribArray(gl.getAttribLocation(pLn,'aA'));
+gl.vertexAttribPointer(gl.getAttribLocation(pLn,'aA'), 1, gl.FLOAT, false, 0, 0);
+gl.bindVertexArray(null);
+
+const URk = {}; ['uVP','uM','uThr','uRev','uL'].forEach(function (k) { URk[k] = gl.getUniformLocation(pRk, k); });
+const ULn = {}; ['uVP','uCol','uHScale','uLift'].forEach(function (k) { ULn[k] = gl.getUniformLocation(pLn, k); });
+
+// ---- the field, as the driver feels it -------------------------------------
+// The exact slope of the same field the mesh is sampled from, so what drags the
+// ship downhill IS what you can see doing it - not a finite difference of it.
+function gradAt(x, z) {
+  const g = wellsGrad(x, z, K.rad, K.dep);
+  return [g[0] / NRM.span, g[1] / NRM.span];
+}
+
+const keys = {};
+const mouse = { x:null, y:null };
+// Chase is OFF by default. Following the COURSE rather than the aim already made
+// it far calmer - it only turns when the trajectory does - but rotating the whole
+// world around a ship that looks stationary is the thing that makes people sick,
+// and a fixed bearing is the safer default. C turns it on.
+let chase = false, lastVP = null, curHS = 1;
+
+// A temporary swing off the chase bearing, from right-dragging horizontally.
+// It EASES BACK TO ZERO the moment you let go, so looking around never leaves
+// the camera parked off-centre - you always end up square behind the ship again.
+let yawOffset = 0;
+let firing = false;      // left button held - BURN fires along its aim
+let boom = null;         // the strike flash: { body, dx, dz, power, t0 }
+let aimPt = null;        // last cursor-on-sheet point, reused by the aim line
+
+function camFwd()   { return [-Math.sin(cam.yaw), -Math.cos(cam.yaw)]; }
+function camRight() { return [ Math.cos(cam.yaw), -Math.sin(cam.yaw)]; }
+function angWrap(a) { while (a > Math.PI) a -= 2*Math.PI; while (a < -Math.PI) a += 2*Math.PI; return a; }
+
+// Mouse -> a point on the sheet, by marching the eye ray until it crosses the
+// surface. GLIDER and SEEK need it; projecting onto a flat plane instead would
+// lie worst inside a well, which is exactly where the steering matters most.
+function pickSurface() {
+  if (!lastVP || mouse.x === null) return null;
+  const v = lastVP;
+  const ndx = (mouse.x / innerWidth) * 2 - 1, ndy = 1 - (mouse.y / innerHeight) * 2;
+  const d = nrm([ v.f[0] + v.r[0]*ndx*v.th*v.asp + v.u[0]*ndy*v.th,
+                  v.f[1] + v.r[1]*ndx*v.th*v.asp + v.u[1]*ndy*v.th,
+                  v.f[2] + v.r[2]*ndx*v.th*v.asp + v.u[2]*ndy*v.th ]);
+  // Unit heights live in [-1, 0], so the whole sheet is inside the horizontal
+  // slab [-curHS, 0]. Clip the ray to that slab and march only the part that can
+  // possibly hit anything, which works at any camera distance.
+  if (Math.abs(d[1]) < 1e-7) return null;
+  let t0 = (0.02 - v.eye[1]) / d[1];
+  let t1 = (-curHS - 0.02 - v.eye[1]) / d[1];
+  if (t0 > t1) { const sw = t0; t0 = t1; t1 = sw; }
+  t0 = Math.max(t0, 0.02);
+  if (!(t1 > t0)) return null;
+  const STEPS = 256, step = (t1 - t0) / STEPS;
+  let prev = null, pt = t0;
+  for (let i = 0; i <= STEPS; i++) {
+    const t = t0 + i * step;
+    const px = v.eye[0]+d[0]*t, py = v.eye[1]+d[1]*t, pz = v.eye[2]+d[2]*t;
+    const gap = py - heightAt(px, pz) * curHS;
+    if (prev !== null && prev > 0 && gap <= 0) {
+      const f = prev / (prev - gap), tt = pt + (t - pt) * f;
+      return { x: v.eye[0]+d[0]*tt, z: v.eye[2]+d[2]*tt };
+    }
+    prev = gap; pt = t;
+  }
+  return null;
+}
+
+// Launch speed for a circular orbit in the SHEET's field - not the real gravity
+// of the system but the authored Plummer sum the ship actually flies through, so
+// it comes from that field rather than from Kepler: balance the inward
+// acceleration against the curvature, v = sqrt(a_radial * r), perpendicular to
+// the radius.
+//
+// IT WILL NOT STAY CIRCULAR, and nothing here pretends otherwise. Measured, this
+// table has no clean orbit at any radius. Balance is authored 1.000 deep against
+// Vision's 0.986 at nearly the same softening, so at r = 1.8 on the near side THE
+// POCKET OUT-PULLS THE STAR - 0.279 against 0.162 - and anything orbiting out
+// there is eventually captured and slung. Anything orbiting inside r ~ 1.5
+// crosses the planet dimples instead, and those are eight times steeper than the
+// background they sit in.
+//
+// So this is angular velocity, not an ellipse. The ship begins already moving and
+// already being pulled, and doing nothing is itself a choice.
+function orbitalStart(x, z) {
+  const g = gradAt(x, z);
+  const ax = -DRV.grav * g[0], az = -DRV.grav * g[1];
+  const r = Math.hypot(x, z);
+  if (r < 1e-6) return [0, 0];
+  const rx = x / r, rz = z / r;
+  const aRad = -(ax * rx + az * rz);         // the part pulling straight inward
+  if (aRad <= 0) return [0, 0];              // outward here: no circular orbit exists
+  const v = Math.sqrt(aRad * r);
+  return [-rz * v, rx * v];
+}
+
+function resetShip() {
+  simTime = 0; potted = 0; lost = 0; hits = 0; warpIdx = 1; lastShot = null;
+  DOCK.on = false; DOCK.body = null; dockedTarget = 0;
+  for (let i = 0; i < BODIES.length; i++) {
+    const b = BODIES[i];
+    b.potted = false; b.unmoored = false; b.vx = 0; b.vz = 0;
+    if (b.ang0 !== undefined) b.ang = b.ang0;
+  }
+  syncOrbits(); worldDirty = true; boom = null;
+  ship.x = -1.75; ship.z = 1.35;
+  const v0 = orbitalStart(ship.x, ship.z);
+  ship.vx = v0[0]; ship.vz = v0[1];
+  ship.head = Math.atan2(ship.vx, ship.vz);
+  ship.face = ship.head; ship.course = ship.head;
+  ship.bank = 0; ship.thr = 0; ship.revThr = 0;
+  ship.prevFace = undefined; trail = [];
+}
+
+// ===========================================================================
+// TIME, AND THE TABLE
+//
+// The rule the whole design turns on: TIME ONLY RUNS WHILE YOU ARE DOCKED. Flying
+// happens in a frozen field, which is what makes the sheet a solvable landscape
+// and the projected path exact. Dock, and the clock starts: the worlds resume
+// their orbits, the terrain heaves under them, and anything you have struck flies.
+// ===========================================================================
+const WARPS = [0, 0.02, 0.08, 0.30, 1.20];   // sim-years per real second
+const SHOT  = { power:4.0, maxDrag:1.5 };    // AU/yr at full pull, and the pull that reaches it
+let simTime = 0, warpIdx = 1, potted = 0, lost = 0, hits = 0;
+let lastShot = null;
+
+// Newtonian acceleration from the massive bodies only - the star and the hole.
+// Planet-on-planet is skipped for the same reason Sim.GravityStep skips it: at
+// 1e-6 solar masses they do not perturb each other at any scale that matters.
+// TWO GRAVITY LAYERS, the same split Sim.cs makes.
+//
+// REAL: a MOORED world's position comes from Kepler analytically. It feels the
+// star and nothing else, so its orbit is stable by construction - which is why
+// a level can be authored and will still be sitting where the designer put it
+// after a minute of time warp. Sim.GravityStep buys the same guarantee by
+// skipping planet-planet entirely.
+//
+// GAME: the instant a world is struck it is UNMOORED, and from then on it feels
+// the star, the pocket AND every other world - the last multiplied by
+// GAME.boost, because at 1e-6 solar masses a planet is otherwise invisible to
+// another planet. That is Body.unmoored and planetGameGravityBoost.
+//
+// The coupling is deliberately ONE-WAY: an unmoored world is deflected by a
+// moored one and not the reverse. Mutual attraction would drag the untouched
+// worlds off their rails and quietly undo the stable-by-construction property
+// the whole level format depends on.
+const GAME = { boost: 10000 };
+
+function gravAccel(x, z, self) {
+  let ax = 0, az = 0;
+  for (let i = 0; i < BODIES.length; i++) {
+    const b = BODIES[i];
+    if (b.potted || b === self) continue;
+    const m = b.attractor ? b.mass : b.mass * GAME.boost;
+    if (m <= 0) continue;
+    const dx = b.p[0] - x, dz = b.p[1] - z;
+    const r2 = dx*dx + dz*dz + 1e-6, inv = G * m / (r2 * Math.sqrt(r2));
+    ax += dx * inv; az += dz * inv;
+  }
+  return [ax, az];
+}
+
+// Contact between worlds, against the radius you can SEE rather than the true
+// physical one - at 0.004 AU a planet is unhittable, and the drawn disc is what
+// the player is aiming at. The game keeps physR and drawR apart for this exact
+// reason. An elastic exchange at real masses, so Smell shrugging off Touch is
+// something you feel in the shot, which is what the mass ladder is authored for.
+function collide(a, b) {
+  const dx = a.p[0]-b.p[0], dz = a.p[1]-b.p[1];
+  const d = Math.hypot(dx, dz), rr = a.worldR + b.worldR;
+  if (d < 1e-9 || d >= rr) return false;
+  const nx = dx/d, nz = dz/d;
+  if (!b.unmoored && b.orbR !== undefined) {      // struck: it joins the game layer
+    const v0 = orbitVel(b);
+    b.vx = v0[0]; b.vz = v0[1]; b.unmoored = true;
+  }
+  if (b.vx === undefined) { b.vx = 0; b.vz = 0; }
+  const rvx = a.vx - b.vx, rvz = a.vz - b.vz;
+  const vn = rvx*nx + rvz*nz;
+  if (vn < 0) {                                   // already separating: leave it
+    const ma = a.mass, mb = b.mass, tot = ma + mb;
+    a.vx -= (2*mb/tot) * vn * nx; a.vz -= (2*mb/tot) * vn * nz;
+    b.vx += (2*ma/tot) * vn * nx; b.vz += (2*ma/tot) * vn * nz;
+  }
+  const push = (rr - d) * 0.5 + 1e-4;             // separate so they cannot weld
+  a.p[0] += nx*push; a.p[1] += nz*push;
+  b.p[0] -= nx*push; b.p[1] -= nz*push;
+  return true;
+}
+
+// Advance a struck world. Substepped against a fixed ceiling so a hard warp
+// cannot tunnel a planet straight through the pocket.
+function stepUnmoored(b, dtY) {
+  const MAXSTEP = 0.0015;
+  const steps = Math.max(1, Math.min(400, Math.ceil(dtY / MAXSTEP)));
+  const h = dtY / steps;
+  for (let k = 0; k < steps; k++) {
+    const a = gravAccel(b.p[0], b.p[1], b);
+    b.vx += a[0]*h; b.vz += a[1]*h;
+    b.p[0] += b.vx*h; b.p[1] += b.vz*h;
+    for (let j = 0; j < BODIES.length; j++) {
+      const t = BODIES[j];
+      if (t === b || t.potted) continue;
+      if (t.attractor) {
+        const d = Math.hypot(b.p[0]-t.p[0], b.p[1]-t.p[1]);
+        if (t.hole && d < t.captureR) { b.potted = true; potted++; return; }
+        if (t.star && d < 0.05)       { b.potted = true; lost++;   return; }
+      } else if (collide(b, t)) {
+        hits++;
+      }
+    }
+    if (Math.abs(b.p[0]-CX) > HALF*1.6 || Math.abs(b.p[1]-CZ) > HALF*1.6) { b.potted = true; lost++; return; }
+  }
+}
+
+function advanceWorld(dtY) {
+  simTime += dtY;
+  for (let i = 0; i < BODIES.length; i++) {
+    const b = BODIES[i];
+    if (b.potted) continue;
+    if (b.unmoored) stepUnmoored(b, dtY);
+    else if (b.orbR !== undefined) b.ang += b.om * dtY;
+  }
+  syncOrbits();
+}
+
+// Orbital velocity of a body still on its rail - needed the moment you strike it.
+function orbitVel(b) {
+  if (b.orbR === undefined) return [0, 0];
+  return [-b.om * b.orbR * Math.sin(b.ang), -b.om * b.orbR * Math.cos(b.ang)];
+}
+
+// ONE INTEGRATOR, used by the live step AND by the prediction. That is the
+// whole reason the drawn path can be trusted: it is not a model of the physics,
+// it is the physics, run ahead. Because time is frozen while you fly, the field
+// this integrates through is static, so the only thing that can make the drawn
+// path wrong is you touching the controls.
+function advance(st, dt, tx, tz) {
+  const g = gradAt(st.x, st.z);
+  let ax = -DRV.grav * g[0], az = -DRV.grav * g[1];
+  ax += DRV.burn * tx; az += DRV.burn * tz;
+  st.vx += ax * dt; st.vz += az * dt;
+  // NO DRAG. Nothing bleeds speed, so momentum is yours until you spend it
+  // burning it off - which is the whole grammar of the scheme, and makes
+  //   E = v^2/2 + grav*h
+  // an exactly conserved quantity in the frozen field.
+  const sp = Math.hypot(st.vx, st.vz);
+  if (sp > DRV.vmax) { st.vx *= DRV.vmax/sp; st.vz *= DRV.vmax/sp; }
+  st.x += st.vx * dt; st.z += st.vz * dt;
+  const M = 0.18, X0 = CX-HALF+M, X1 = CX+HALF-M, Z0 = CZ-HALF+M, Z1 = CZ+HALF-M;
+  if (st.x < X0) { st.x = X0; st.vx =  Math.abs(st.vx)*0.35; }
+  if (st.x > X1) { st.x = X1; st.vx = -Math.abs(st.vx)*0.35; }
+  if (st.z < Z0) { st.z = Z0; st.vz =  Math.abs(st.vz)*0.35; }
+  if (st.z > Z1) { st.z = Z1; st.vz = -Math.abs(st.vz)*0.35; }
+  return Math.min(sp, DRV.vmax);
+}
+
+// Run the ship forward from where it is now. burnSeconds > 0 assumes you hold
+// the burn along (dirx, dirz) for that long and then let go.
+function predict(burnSeconds, dirx, dirz) {
+  const st = { x:ship.x, z:ship.z, vx:ship.vx, vz:ship.vz };
+  const dt = 1/60, steps = Math.round(PRED.horizon / dt);
+  const burnSteps = Math.round(burnSeconds / dt);
+  const out = [];
+  for (let i = 0; i < steps; i++) {
+    const on = i < burnSteps;
+    advance(st, dt, on ? dirx : 0, on ? dirz : 0);
+    if ((i & 1) === 0) out.push([st.x, heightAt(st.x, st.z), st.z]);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// DOCKING. You may dock to any world you can reach, not the star and not the
+// pocket. Docking is what starts the clock, so it is also what turns the game
+// from navigation into pool.
+// ---------------------------------------------------------------------------
+const DOCK = { on:false, body:null, near:null };
+
+function dockCandidate() {
+  let best = null, bd = 1e9;
+  for (let i = 0; i < BODIES.length; i++) {
+    const b = BODIES[i];
+    if (b.star || b.hole || b.potted) continue;
+    const d = Math.hypot(ship.x - b.p[0], ship.z - b.p[1]);
+    const range = b.worldR * 3.0 + 0.16;
+    if (d < range && d < bd) { bd = d; best = b; }
+  }
+  return best;
+}
+
+function toggleDock() {
+  if (DOCK.on) {
+    DOCK.on = false; DOCK.body = null;
+    ship.vx = 0; ship.vz = 0;               // time stops; velocity has no meaning frozen
+    dockedTarget = 0;
+    camGoal = { yaw: cam.yaw, frame: FLY_FRAME };
+    return;
+  }
+  const b = dockCandidate();
+  if (!b) return;
+  DOCK.on = true; DOCK.body = b; dockedTarget = 1;
+  // Square the table up: north-up and far enough back to hold the whole system.
+  // A pool shot is read off a fixed, unrotated board; arriving on whatever
+  // bearing you happened to be flying makes every shot look different.
+  camGoal = { yaw: 0, frame: POOL_FRAME };
+  if (warpIdx === 0) warpIdx = 1;           // docking is what starts the clock
+}
+
+// THE SHOT. Docked, the mouse stops steering the ship and starts aiming the
+// world you are standing on: pull toward where you want it to go, release to
+// strike. The ship rides it, which is why the clock has to be running for the
+// shot to mean anything.
+function releaseShot() {
+  const b = DOCK.body;
+  if (!b || !aimPt) return;
+  const dx = aimPt.x - b.p[0], dz = aimPt.z - b.p[1], d = Math.hypot(dx, dz);
+  if (d < 1e-3) return;
+  const power = Math.min(1, d / SHOT.maxDrag);
+  if (power < 0.02) return;
+  const v0 = b.unmoored ? [b.vx, b.vz] : orbitVel(b);
+  b.vx = v0[0] + (dx/d) * power * SHOT.power;
+  b.vz = v0[1] + (dz/d) * power * SHOT.power;
+  b.unmoored = true;      // Body.unmoored: from here it is on the game layer
+  lastShot = { t: simTime, power: power, name: b.name };
+  // The strike, as a thing you can see: a hard flash and a plume firing
+  // OPPOSITE the aim, which is the side the impulse came from. Anchored to the
+  // world it hit, so it rides away with it.
+  boom = { body: b, dx: dx/d, dz: dz/d, power: power, t0: performance.now() };
+  if (warpIdx === 0) warpIdx = 1;
+}
+
+// Where the struck world would go. The attractors do not move, so this is very
+// nearly exact - the same argument as the flight prediction, one step weaker.
+function predictShot(dirx, dirz, power) {
+  const b = DOCK.body;
+  if (!b) return [];
+  const v0 = b.unmoored ? [b.vx, b.vz] : orbitVel(b);
+  const st = { p:[b.p[0], b.p[1]], vx:v0[0] + dirx*power*SHOT.power, vz:v0[1] + dirz*power*SHOT.power };
+  const out = [];
+  const H = 0.0025, steps = 900;
+  for (let i = 0; i < steps; i++) {
+    const a = gravAccel(st.p[0], st.p[1], b);
+    st.vx += a[0]*H; st.vz += a[1]*H;
+    st.p[0] += st.vx*H; st.p[1] += st.vz*H;
+    if (Math.abs(st.p[0]-CX) > HALF || Math.abs(st.p[1]-CZ) > HALF) break;
+    // The line ends where the shot would MEET something - the pocket, the star,
+    // or another world. In pool that contact point is the whole of the aim.
+    let hit = false;
+    for (let j = 0; j < BODIES.length; j++) {
+      const t = BODIES[j];
+      if (t === b || t.potted) continue;
+      const d = Math.hypot(st.p[0]-t.p[0], st.p[1]-t.p[1]);
+      if (t.attractor) { if ((t.hole && d < t.captureR) || (t.star && d < 0.05)) hit = true; }
+      else if (d < b.worldR + t.worldR) hit = true;
+    }
+    if ((i % 6) === 0) out.push([st.p[0], heightAt(st.p[0], st.p[1]), st.p[1]]);
+    if (hit) break;
+  }
+  return out;
+}
+
+function stepDrive(dt) {
+  DOCK.near = DOCK.on ? null : dockCandidate();
+
+  // Docked: the ship is luggage. The mouse aims the shot instead of the hull,
+  // and the only thing the player is spending is time.
+  if (DOCK.on) {
+    const b = DOCK.body;
+    aimPt = pickSurface();
+    ship.x = b.p[0]; ship.z = b.p[1]; ship.vx = 0; ship.vz = 0; ship.spd = 0;
+    if (aimPt) {
+      const dx = aimPt.x - ship.x, dz = aimPt.z - ship.z;
+      if (Math.hypot(dx, dz) > 1e-4) ship.head = Math.atan2(dx, dz);
+    }
+    ship.face += angWrap(ship.head - ship.face) * Math.min(1, DRV.aimSlew*dt);
+    ship.thr += (0 - ship.thr) * Math.min(1, 9*dt);
+    ship.revThr += (0 - ship.revThr) * Math.min(1, 9*dt);
+    ship.bank += (0 - ship.bank) * Math.min(1, 7*dt);
+    return;
+  }
+
+  // The nose tracks the cursor ALWAYS, thrusting or not, so the aim is a
+  // standing statement of intent rather than something you only see mid-burn.
+  let tx = 0, tz = 0, fwd = 0;
+  ship.aimx = 0; ship.aimz = 0;
+
+  if (SCHEMES[scheme].id === 'burn') {
+    // BURN. The nose tracks the cursor ALWAYS, thrusting or not, so the aim is a
+    // standing statement of intent rather than something you only see mid-burn.
+    // S reverses along the same axis at DRV.reverse of the power - retro
+    // thrusters - so you can hold the nose on a target while shedding speed.
+    const t = pickSurface();
+    aimPt = t;
+    if (t) {
+      const dx = t.x - ship.x, dz = t.z - ship.z, d = Math.hypot(dx, dz);
+      if (d > 1e-4) {
+        ship.head = Math.atan2(dx, dz);
+        ship.aimx = dx / d; ship.aimz = dz / d;
+        if (firing || keys['w']) { tx = ship.aimx; tz = ship.aimz; fwd = 1; }
+        else if (keys['s'])      { tx = -ship.aimx * DRV.reverse; tz = -ship.aimz * DRV.reverse; fwd = -1; }
+      }
+    }
+  } else {
+    // VECTOR. The hull points along the COURSE and the thrusters are bolted to
+    // it: W/S along the way you are already going, A/D across it. No cursor is
+    // involved at all, which is the whole contrast with BURN.
+    aimPt = null;
+    const c = ship.course;
+    const fx = Math.sin(c),  fz = Math.cos(c);
+    const rx = -Math.cos(c), rz = Math.sin(c);        // ship-right; screen right when chased
+    const along = (keys['w'] ? 1 : 0) - (keys['s'] ? DRV.reverse : 0);
+    const side  = ((keys['d'] ? 1 : 0) - (keys['a'] ? 1 : 0)) * DRV.lateral;
+    tx = fx*along + rx*side; tz = fz*along + rz*side;
+    fwd = along > 0 ? 1 : (along < 0 ? -1 : 0);
+    ship.head = c;
+  }
+
+
+
+  ship.spd = advance(ship, dt, tx, tz);
+
+  // COURSE: the bearing the ship is actually moving along, held through
+  // near-stops so it does not spin when the velocity direction stops meaning
+  // anything. This is what the chase camera looks along - see below.
+  if (ship.spd > 0.02) ship.course = Math.atan2(ship.vx, ship.vz);
+  ship.thr    += ((fwd > 0 ? 1 : 0) - ship.thr)    * Math.min(1, 9*dt);
+  ship.revThr += ((fwd < 0 ? 1 : 0) - ship.revThr) * Math.min(1, 9*dt);
+
+  // The hull shows the AIM, not the travel - that is the whole point of the
+  // scheme. Slewed rather than snapped, so a flick of the mouse reads as the
+  // ship swinging round rather than teleporting its nose.
+  ship.face += angWrap(ship.head - ship.face) * Math.min(1, DRV.aimSlew*dt);
+
+  // Bank INTO the turn, read off how fast the facing is actually changing.
+  if (ship.prevFace === undefined) ship.prevFace = ship.face;
+  const turn = angWrap(ship.face - ship.prevFace);
+  ship.prevFace = ship.face;
+  const tb = Math.max(-0.85, Math.min(0.85,
+    (turn / Math.max(1e-3, dt)) * DRV.bank * Math.min(1, ship.spd)));
+  ship.bank += (tb - ship.bank) * Math.min(1, 7*dt);
+
+  const hy = heightAt(ship.x, ship.z);
+  const last = trail[trail.length-1];
+  if (!last || Math.hypot(ship.x - last[0], ship.z - last[2]) > 0.035) trail.push([ship.x, hy, ship.z]);
+  if (trail.length > 300) trail.shift();
+}
+
+// Orientation: UP IS THE SURFACE NORMAL, so the rocket pitches with the ground
+// for free - nose up climbing out of a well, nose down diving into one. That is
+// the whole "reacts to the surface angle" requirement, and it falls straight
+// out of the gradient the physics already needs.
+function shipBasis(hs) {
+  const g = gradAt(ship.x, ship.z);
+  const up = nrm([-g[0]*hs, 1, -g[1]*hs]);
+  let f = [Math.sin(ship.face), 0, Math.cos(ship.face)];
+  const d = dot(f, up);
+  f = nrm([f[0]-up[0]*d, f[1]-up[1]*d, f[2]-up[2]*d]);   // heading, onto the tangent plane
+  return { up:up, f:f, slope:Math.atan(Math.hypot(g[0], g[1]) * hs) };
+}
+
+function shipModel(hs) {
+  const b = shipBasis(hs);
+  const r = nrm(cross(b.f, b.up)), u = cross(r, b.f);
+  const cb = Math.cos(ship.bank), sb = Math.sin(ship.bank);
+  const r2 = [r[0]*cb+u[0]*sb, r[1]*cb+u[1]*sb, r[2]*cb+u[2]*sb];
+  const u2 = [u[0]*cb-r[0]*sb, u[1]*cb-r[1]*sb, u[2]*cb-r[2]*sb];
+  const S = DRV.scale, y = heightAt(ship.x, ship.z)*hs + DRV.hover;
+  return { m:[ r2[0]*S, r2[1]*S, r2[2]*S, 0,
+               u2[0]*S, u2[1]*S, u2[2]*S, 0,
+               b.f[0]*S, b.f[1]*S, b.f[2]*S, 0,
+               ship.x,  y,       ship.z,  1 ], slope:b.slope, y:y };
+}
+
+function showScheme() {
+  const S = SCHEMES[scheme];
+  document.getElementById('drvName').textContent = (scheme+1) + '/' + SCHEMES.length + '  ' + S.key;
+  document.getElementById('drvNote').textContent = S.note;
+  document.getElementById('drvKeys').textContent = S.keys;
+}
+
+// ---------------------------------------------------------------------------
+// Draw
+// ---------------------------------------------------------------------------
+const U = {}, UP = {};
+['uVP','uHScale','uCam','uBands','uFlat','uCount','uBPos','uBCol','uBR','uCurtain','uAlpha','uFade']
+  .forEach(function (n) { U[n] = gl.getUniformLocation(pSurf, n); });
+['uVP','uHScale','uPx'].forEach(function (n) { UP[n] = gl.getUniformLocation(pPt, n); });
+
+const bp = new Float32Array(18), bc = new Float32Array(18), br = new Float32Array(6);
+const lit = new Float32Array(BODIES.length * 4);   // per-body light dir + emissive flag
+BODIES.forEach(function (b, i) {
+  bp[i*3] = b.p[0]; bp[i*3+1] = 0; bp[i*3+2] = b.p[1];
+  bc[i*3] = b.rgb[0]*0.13; bc[i*3+1] = b.rgb[1]*0.13; bc[i*3+2] = b.rgb[2]*0.13;
+});
+
+// How far has any world moved since the terrain was last built?
+const lastBuilt = new Float64Array(BODIES.length * 2);
+function markBuilt() {
+  for (let i = 0; i < BODIES.length; i++) {
+    lastBuilt[i*2] = BODIES[i].p[0]; lastBuilt[i*2+1] = BODIES[i].p[1];
+  }
+}
+function movedSinceRebuild() {
+  let m = 0;
+  for (let i = 0; i < BODIES.length; i++) {
+    const dx = BODIES[i].p[0] - lastBuilt[i*2], dz = BODIES[i].p[1] - lastBuilt[i*2+1];
+    const d = dx*dx + dz*dz;
+    if (d > m) m = d;
+  }
+  return Math.sqrt(m);
+}
+
+const modeEl = document.getElementById('modeName');
+let worldDirty = false, frameNo = 0;
+const spdEl = document.getElementById('drvSpd'), slpEl = document.getElementById('drvSlp');
+const chaseEl = document.getElementById('chaseState');
+const pathEl = document.getElementById('pathState');
+const clkEl = document.getElementById('clock'), potEl = document.getElementById('potted');
+const promptEl = document.getElementById('prompt');
+let lastT = 0;
+
+function frame(now) {
+  const dt = Math.min(0.05, lastT ? (now - lastT) / 1000 : 0.016);
+  lastT = now || 0;
+
+  // THE CLOCK. Nonzero only while docked - that is the rule the design turns on.
+  const warp = DOCK.on ? WARPS[warpIdx] : 0;
+  if (warp > 0) {
+    advanceWorld(warp * dt);
+    worldDirty = true;
+  }
+  stepDrive(dt);
+
+  // The sheet is made of where the bodies ARE, so a moving table is a moving
+  // landscape - but only once the move is big enough to SEE. Rebuilding on a
+  // sub-cell displacement redraws an identical picture at full price, and at
+  // warp 1 the worlds cross half a cell about once every ten frames.
+  if (worldDirty && movedSinceRebuild() > (2*HALF)/(N-1) * 0.5) {
+    rebuild(); worldDirty = false;
+  }
+  frameNo++;
+
+  // Chase: the camera swings in behind the heading unless you have grabbed it
+  // with the right button. Docked, it stops following the nose and just holds
+  // station overhead, because up there the heading is not what you are reading.
+  // The chase looks along the COURSE, not the aim. With the nose free to track
+  // the cursor, chasing the nose would swing the entire world every time the
+  // mouse moved - which is the motion-sickness complaint in its purest form.
+  // Following the direction of travel means the camera only turns when the SHIP
+  // turns, and the ship turns slowly because nothing but gravity and your own
+  // burns can turn it.
+  if (camGoal) {
+    const kc = Math.min(1, 3.2*dt);
+    cam.yaw   += angWrap(camGoal.yaw - cam.yaw) * kc;
+    cam.frame += (camGoal.frame - cam.frame) * kc;
+    if (Math.abs(angWrap(camGoal.yaw - cam.yaw)) < 0.004 &&
+        Math.abs(camGoal.frame - cam.frame) < 0.004) camGoal = null;
+  } else if (chase && docked < 0.5) {
+    cam.yaw += angWrap((ship.course + Math.PI + yawOffset) - cam.yaw) * Math.min(1, DRV.chaseRate*dt);
+  }
+  // Recentre once the button is up. Held, it stays exactly where you put it.
+  if (!drag && yawOffset !== 0) {
+    yawOffset -= yawOffset * Math.min(1, 2.6*dt);
+    if (Math.abs(yawOffset) < 1e-4) yawOffset = 0;
+  }
+  // Docked, hold the whole table rather than following the ship around it.
+  const fol = Math.min(1, 6*dt);
+  const fx = DOCK.on ? CX : ship.x, fz = DOCK.on ? CZ : ship.z;
+  const fy = DOCK.on ? 0 : heightAt(ship.x, ship.z)*curHS + DRV.hover;
+  cam.tgt[0] += (fx - cam.tgt[0]) * fol;
+  cam.tgt[2] += (fz - cam.tgt[2]) * fol;
+  cam.tgt[1] += (fy - cam.tgt[1]) * fol;
+
+  docked += (dockedTarget - docked) * 0.085;
+  modeEl.textContent = DOCK.on ? ('DOCKED \u00b7 ' + DOCK.body.name) : 'FLYING';
+  modeEl.className = DOCK.on ? 'docked' : 'flying';
+  clkEl.textContent = DOCK.on
+    ? ('t ' + simTime.toFixed(2) + ' yr \u00b7 warp ' + warpIdx + ' (' + WARPS[warpIdx].toFixed(2) + ' yr/s)')
+    : 'time frozen \u2014 dock to start the clock';
+  potEl.textContent = 'potted ' + potted + (lost ? '  \u00b7  lost ' + lost : '') +
+                      (hits ? '  \u00b7  ' + hits + ' contact' + (hits>1?'s':'') : '');
+  promptEl.textContent = DOCK.on ? 'SPACE to undock \u00b7 drag from the world and release to strike it'
+                       : (DOCK.near ? 'in range of ' + DOCK.near.name + ' \u2014 SPACE to dock' : '');
+
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = Math.floor(innerWidth * dpr), h = Math.floor(innerHeight * dpr);
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  gl.viewport(0, 0, w, h);
+  gl.clearColor(0.020, 0.024, 0.043, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.enable(gl.DEPTH_TEST);
+
+  const vp = viewProj(w / h);
+  // Relief flattens as the camera rises, so the overview reads as the flat map
+  // the 2D game already is - with a hint of depth left in, not a hard switch.
+  const hs = K.hgt * lerp(1.0, 0.06, vp.e);
+  const mv = new Float32Array(vp.m);
+  lastVP = vp; curHS = hs;
+
+
+  // The sky goes down FIRST, with no depth involvement at all, so everything else
+  // lands on top of it. It was previously emitted after the surface draw, where a
+  // fullscreen opaque triangle simply painted the entire gravity sheet out.
+  gl.disable(gl.DEPTH_TEST); gl.depthMask(false);
+  gl.useProgram(pSky); gl.bindVertexArray(vaoSky);
+  gl.uniform3fv(USky.uF, new Float32Array(vp.f));
+  gl.uniform3fv(USky.uR, new Float32Array(vp.r));
+  gl.uniform3fv(USky.uU, new Float32Array(vp.u));
+  gl.uniform1f(USky.uTh, vp.th);
+  gl.uniform1f(USky.uAsp, vp.asp);
+  gl.uniform1f(USky.uPixAng, 2.0 * vp.th / h);   // one pixel, in radians
+  gl.uniform1f(USky.uStars, K.stars);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  gl.depthMask(true); gl.enable(gl.DEPTH_TEST);
+
+  gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.useProgram(pSurf); gl.bindVertexArray(vaoS);
+  gl.uniformMatrix4fv(U.uVP, false, mv);
+  gl.uniform1f(U.uHScale, hs);
+  gl.uniform3fv(U.uCam, new Float32Array(vp.eye));
+  gl.uniform1f(U.uBands, K.bands);
+  gl.uniform1f(U.uAlpha, K.alpha);
+  gl.uniform3f(U.uFade, CX, CZ, HALF);
+  gl.uniform1f(U.uFlat, vp.e);
+  gl.uniform1i(U.uCount, BODIES.length);
+  for (let i = 0; i < BODIES.length; i++) {
+    bp[i*3] = BODIES[i].p[0]; bp[i*3+2] = BODIES[i].p[1];
+    br[i] = BODIES[i].potted ? 0 : BODIES[i].baseR * K.rad;
+  }
+  // The struck world flares white. Written every frame, not in rebuild(), or the
+  // flash would only be as fresh as the last terrain rebuild.
+  {
+    const pcF = new Float32Array(BODIES.length*3);
+    const fl = boom ? Math.pow(Math.max(0, 1 - (performance.now() - boom.t0)/900), 0.6) * 6.0 : 0;
+    for (let i = 0; i < BODIES.length; i++) {
+      const b = BODIES[i], k2 = (boom && boom.body === b) ? fl : 0;
+      pcF[i*3] = b.rgb[0] + k2; pcF[i*3+1] = b.rgb[1] + k2*0.85; pcF[i*3+2] = b.rgb[2] + k2*0.6;
+    }
+    gl.bindBuffer(gl.ARRAY_BUFFER, bPC); gl.bufferData(gl.ARRAY_BUFFER, pcF, gl.DYNAMIC_DRAW);
+  }
+  gl.uniform3fv(U.uBPos, bp);
+  gl.uniform3fv(U.uBCol, bc);
+  gl.uniform1fv(U.uBR, br);
+  gl.uniform4fv(U.uCurtain, new Float32Array([CURTAIN.x1, CURTAIN.z1, CURTAIN.x2, CURTAIN.z2]));
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, bIx);
+  gl.drawElements(gl.TRIANGLES, (N-1)*(N-1)*6, gl.UNSIGNED_INT, 0);
+
+  // SUNLIGHT. For each body, the direction to the star, rotated into view space
+  // by the camera basis so the sprite shader can use it directly. Recomputed per
+  // frame because turning the camera moves the star in view space even though
+  // nothing in the world has moved.
+  //
+  // The star sits at the BOTTOM of the deepest well, so the true direction to it
+  // points partly downward and lights the planets from underneath. That is
+  // geometrically honest and looks wrong, so the vertical component is damped to
+  // 0.45 - enough to feel the funnel, not enough to read as uplighting. It also
+  // flattens itself: uHScale drops to 0.06 in the docked view, so up there the
+  // light becomes purely a compass bearing.
+  {
+    const su = BODIES[0];
+    const sunY = heightAt(su.p[0], su.p[1]) * hs + su.worldR * 1.25;
+    for (let i = 0; i < BODIES.length; i++) {
+      const b = BODIES[i];
+      const by = heightAt(b.p[0], b.p[1]) * hs + b.worldR * 1.25;
+      let wx = su.p[0] - b.p[0], wy = (sunY - by) * 0.45, wz = su.p[1] - b.p[1];
+      const len = Math.hypot(wx, wy, wz) || 1;
+      wx /= len; wy /= len; wz /= len;
+      lit[i*4  ] =  wx*vp.r[0] + wy*vp.r[1] + wz*vp.r[2];
+      lit[i*4+1] =  wx*vp.u[0] + wy*vp.u[1] + wz*vp.u[2];
+      lit[i*4+2] = -(wx*vp.f[0] + wy*vp.f[1] + wz*vp.f[2]);
+      lit[i*4+3] = (i === 0) ? 1 : 0;
+    }
+    gl.bindBuffer(gl.ARRAY_BUFFER, bPL);
+    gl.bufferData(gl.ARRAY_BUFFER, lit, gl.DYNAMIC_DRAW);
+  }
+
+  gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.useProgram(pPt); gl.bindVertexArray(vaoP);
+  gl.uniformMatrix4fv(UP.uVP, false, mv);
+  gl.uniform1f(UP.uHScale, hs);
+  gl.uniform1f(UP.uPx, h / vp.tanHalf);
+  gl.drawArrays(gl.POINTS, 0, BODIES.length);
+
+  // ---- trail and tether. The tether is the cheapest possible readout of the
+  // hover contract: a vertical stub from the sheet to the ship, so you can see
+  // at a glance that the height is the surface plus a constant and never drifts.
+  const sm = shipModel(hs);
+  gl.useProgram(pLn); gl.bindVertexArray(vaoL);
+  gl.uniformMatrix4fv(ULn.uVP, false, mv);
+  gl.uniform1f(ULn.uHScale, 1.0); gl.uniform1f(ULn.uLift, 0.0);
+
+  if (trail.length > 1) {
+    const tp = new Float32Array(trail.length*3), ta = new Float32Array(trail.length);
+    for (let i = 0; i < trail.length; i++) {
+      tp[i*3] = trail[i][0]; tp[i*3+1] = trail[i][1]*hs + DRV.hover*0.35; tp[i*3+2] = trail[i][2];
+      ta[i] = (i / trail.length) * 0.55;
+    }
+    gl.bindBuffer(gl.ARRAY_BUFFER, bLP); gl.bufferData(gl.ARRAY_BUFFER, tp, gl.DYNAMIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, bLA); gl.bufferData(gl.ARRAY_BUFFER, ta, gl.DYNAMIC_DRAW);
+    gl.uniform3f(ULn.uCol, 0.55, 0.85, 1.0);
+    gl.drawArrays(gl.LINE_STRIP, 0, trail.length);
+  }
+  // PROJECTED PATHS. Blue is what happens if you do nothing from here. Orange is
+  // ONE ribbon: where you go if you do nothing from here.
+  // drawn only when you are NOT firing, because once you commit the blue line is
+  // already the truth and two lines would just argue with each other.
+  // The projected path is drawn as a RIBBON, not a line: GL line width is capped
+  // at 1px on most drivers, so a line was a thread you had to hunt for. It fades
+  // AND narrows with distance, because the far end of a prediction is the part
+  // you should trust least. Depth test off, so it never disappears behind the
+  // terrain it is describing.
+  function drawPath(pts, r, gg, b, a0, a1, width) {
+    if (pts.length < 2) return;
+    const N2 = pts.length * 2;
+    const vp2 = new Float32Array(N2*3), va = new Float32Array(N2);
+    for (let i = 0; i < pts.length; i++) {
+      const jn = Math.min(pts.length-1, i+1), jp = Math.max(0, i-1);
+      let dx = pts[jn][0]-pts[jp][0], dz = pts[jn][2]-pts[jp][2];
+      const L = Math.hypot(dx, dz) || 1; dx /= L; dz /= L;
+      const ox0 = -dz, oz0 = dx;
+      const y = pts[i][1]*hs + DRV.hover * 1.05;
+      const u = i / (pts.length - 1);
+      // Fades with distance instead of dashing. The far end of a prediction is
+      // the least trustworthy part of it, so it should look that way - the
+      // ribbon both dims and narrows as it runs out ahead of you.
+      const fall = Math.pow(1 - u, 1.5);
+      const a = a1 + (a0 - a1) * fall;
+      const w = width * (0.30 + 0.70 * fall);
+      vp2[(i*2)*3  ] = pts[i][0]+ox0*w; vp2[(i*2)*3+1]   = y; vp2[(i*2)*3+2]   = pts[i][2]+oz0*w;
+      vp2[(i*2+1)*3] = pts[i][0]-ox0*w; vp2[(i*2+1)*3+1] = y; vp2[(i*2+1)*3+2] = pts[i][2]-oz0*w;
+      va[i*2] = a; va[i*2+1] = a;
+    }
+    gl.bindBuffer(gl.ARRAY_BUFFER, bLP); gl.bufferData(gl.ARRAY_BUFFER, vp2, gl.DYNAMIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, bLA); gl.bufferData(gl.ARRAY_BUFFER, va, gl.DYNAMIC_DRAW);
+    gl.uniform3f(ULn.uCol, r, gg, b);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, N2);
+  }
+  gl.disable(gl.DEPTH_TEST);
+  if (DOCK.on) {
+    // Docked, the line worth drawing is the SHOT, not the ship.
+    if (PRED.show > 0 && aimPt) {
+      const b = DOCK.body;
+      const dx = aimPt.x - b.p[0], dz = aimPt.z - b.p[1], d = Math.hypot(dx, dz);
+      if (d > 1e-3) {
+        const pw = Math.min(1, d / SHOT.maxDrag);
+        drawPath(predictShot(dx/d, dz/d, pw), 1.0, 0.88, 0.46, 0.95, 0.06, 0.05);
+      }
+    }
+  } else {
+    if (PRED.show > 0) drawPath(predict(0, 0, 0), 0.44, 0.82, 1.0, 0.95, 0.04, 0.038);
+
+  }
+  gl.enable(gl.DEPTH_TEST);
+
+  if (aimPt) {
+    // The cue line: ship to cursor, laid on the surface so it bends over the
+    // terrain it is going to have to cross.
+    const STEP = 24, ap = new Float32Array(STEP*3), aa = new Float32Array(STEP);
+    for (let i = 0; i < STEP; i++) {
+      const u = i / (STEP-1);
+      const x = ship.x + (aimPt.x - ship.x) * u, z = ship.z + (aimPt.z - ship.z) * u;
+      ap[i*3] = x; ap[i*3+1] = heightAt(x, z)*hs + DRV.hover*0.5; ap[i*3+2] = z;
+      aa[i] = 0.07 + 0.16 * u;
+    }
+    gl.bindBuffer(gl.ARRAY_BUFFER, bLP); gl.bufferData(gl.ARRAY_BUFFER, ap, gl.DYNAMIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, bLA); gl.bufferData(gl.ARRAY_BUFFER, aa, gl.DYNAMIC_DRAW);
+    gl.uniform3f(ULn.uCol, 0.62, 0.52, 0.36);
+    gl.drawArrays(gl.LINE_STRIP, 0, STEP);
+  }
+  {
+    const sy = heightAt(ship.x, ship.z)*hs;
+    const tp = new Float32Array([ship.x, sy, ship.z, ship.x, sm.y, ship.z]);
+    gl.bindBuffer(gl.ARRAY_BUFFER, bLP); gl.bufferData(gl.ARRAY_BUFFER, tp, gl.DYNAMIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, bLA); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0.30, 0.55]), gl.DYNAMIC_DRAW);
+    gl.uniform3f(ULn.uCol, 0.70, 0.92, 1.0);
+    gl.drawArrays(gl.LINES, 0, 2);
+  }
+  // ---- THE STRIKE. Additive, so it reads as light rather than paint.
+  if (boom) {
+    const age = (performance.now() - boom.t0) / 1000, T = 0.90;
+    if (age > T || boom.body.potted) { boom = null; }
+    else {
+      const u = age / T, fade = (1 - u) * (1 - u);
+      const bx = boom.body.p[0], bz = boom.body.p[1];
+      const by = heightAt(bx, bz) * hs + boom.body.worldR * 1.3;
+      const scale = 0.9 + 2.1 * boom.power;          // this is a WORLD being moved
+      const dx = -boom.dx, dz = -boom.dz;            // opposite the aim
+      const px = -dz, pz = dx;
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE);            // additive: light, not paint
+      gl.useProgram(pLn); gl.bindVertexArray(vaoL);
+      gl.uniformMatrix4fv(ULn.uVP, false, mv);
+      gl.uniform1f(ULn.uHScale, 1.0); gl.uniform1f(ULn.uLift, 0.0);
+
+      // A cone laid on the sheet, apex at the world, opening away from the aim.
+      function plume(len, wid, r, g, b, amp, taper) {
+        const NS = 22, vp3 = new Float32Array(NS*2*3), va3 = new Float32Array(NS*2);
+        for (let i = 0; i < NS; i++) {
+          const q = i / (NS - 1);
+          const w = wid * Math.sin(Math.PI * Math.pow(q, 0.55));
+          const cx = bx + dx*len*q, cz = bz + dz*len*q;
+          const a = fade * (1 - q*taper) * amp;
+          vp3[(i*2)*3  ] = cx + px*w; vp3[(i*2)*3+1]   = by; vp3[(i*2)*3+2]   = cz + pz*w;
+          vp3[(i*2+1)*3] = cx - px*w; vp3[(i*2+1)*3+1] = by; vp3[(i*2+1)*3+2] = cz - pz*w;
+          va3[i*2] = a; va3[i*2+1] = a;
+        }
+        gl.bindBuffer(gl.ARRAY_BUFFER, bLP); gl.bufferData(gl.ARRAY_BUFFER, vp3, gl.DYNAMIC_DRAW);
+        gl.bindBuffer(gl.ARRAY_BUFFER, bLA); gl.bufferData(gl.ARRAY_BUFFER, va3, gl.DYNAMIC_DRAW);
+        gl.uniform3f(ULn.uCol, r, g, b);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, NS*2);
+      }
+      function ring(rad, rw, r, g, b, amp) {
+        const RS = 48, vp3 = new Float32Array((RS+1)*2*3), va3 = new Float32Array((RS+1)*2);
+        for (let i = 0; i <= RS; i++) {
+          const th = i / RS * Math.PI * 2, cs = Math.cos(th), sn = Math.sin(th);
+          vp3[(i*2)*3  ] = bx + cs*(rad+rw); vp3[(i*2)*3+1]   = by; vp3[(i*2)*3+2]   = bz + sn*(rad+rw);
+          vp3[(i*2+1)*3] = bx + cs*(rad-rw); vp3[(i*2+1)*3+1] = by; vp3[(i*2+1)*3+2] = bz + sn*(rad-rw);
+          va3[i*2] = amp; va3[i*2+1] = amp;
+        }
+        gl.bindBuffer(gl.ARRAY_BUFFER, bLP); gl.bufferData(gl.ARRAY_BUFFER, vp3, gl.DYNAMIC_DRAW);
+        gl.bindBuffer(gl.ARRAY_BUFFER, bLA); gl.bufferData(gl.ARRAY_BUFFER, va3, gl.DYNAMIC_DRAW);
+        gl.uniform3f(ULn.uCol, r, g, b);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, (RS+1)*2);
+      }
+
+      // Three passes, additively stacked: a broad deep-red wash, the orange body
+      // of the exhaust, and a white-hot core down the middle. Stacking is what
+      // gives it a blown-out centre without any bloom pass to do it properly.
+      plume((0.14 + 1.9*u) * scale, (0.08 + 0.42*u) * scale, 1.0, 0.26, 0.10, 0.55, 0.95);
+      plume((0.12 + 1.5*u) * scale, (0.05 + 0.24*u) * scale, 1.0, 0.62, 0.20, 0.95, 0.88);
+      plume((0.10 + 1.0*u) * scale, (0.02 + 0.09*u) * scale, 1.0, 0.97, 0.88, 1.00, 0.70);
+
+      ring((0.06 + 1.5*u) * scale, 0.02 + 0.05*(1-u), 1.0, 0.86, 0.60, fade * 0.9);
+      ring((0.04 + 0.8*u) * scale, 0.03 + 0.09*(1-u), 1.0, 0.98, 0.92, fade * 1.0);
+
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.bindVertexArray(null);
+    }
+  }
+  gl.disable(gl.BLEND);
+
+  gl.useProgram(pRk); gl.bindVertexArray(vaoR);
+  gl.uniformMatrix4fv(URk.uVP, false, mv);
+  gl.uniformMatrix4fv(URk.uM, false, new Float32Array(sm.m));
+  const revLead = ship.revThr > ship.thr;
+  gl.uniform1f(URk.uThr, 0.25 + 0.95 * (revLead ? ship.revThr : ship.thr));
+  gl.uniform1f(URk.uRev, revLead ? 1 : 0);
+  {
+    // Same damped vertical as the planets get: the star sits at the bottom of the
+    // deepest well, so the true direction to it lights everything from underneath.
+    const su = BODIES[0];
+    const sunY = heightAt(su.p[0], su.p[1]) * hs + su.worldR * 1.25;
+    let lx = su.p[0] - ship.x, ly = (sunY - sm.y) * 0.45, lz = su.p[1] - ship.z;
+    const ll = Math.hypot(lx, ly, lz) || 1;
+    gl.uniform3f(URk.uL, lx/ll, ly/ll, lz/ll);
+  }
+  gl.drawArrays(gl.TRIANGLES, 0, RK.n);
+
+  spdEl.textContent = ship.spd.toFixed(2);
+  slpEl.textContent = (sm.slope * 180 / Math.PI).toFixed(0) + '\u00b0';
+
+  gl.bindVertexArray(null);
+  requestAnimationFrame(frame);
+}
+
+objSlider(DRV,'sGrv','vGrv','grav');  objSlider(DRV,'sThr','vThr','burn');
+objSlider(DRV,'sVmx','vVmx','vmax');
+objSlider(DRV,'sSlw','vSlw','aimSlew',1); objSlider(DRV,'sBnk','vBnk','bank');
+objSlider(DRV,'sChs','vChs','chaseRate'); objSlider(DRV,'sRev','vRev','reverse');
+objSlider(DRV,'sLat','vLat','lateral');
+objSlider(DRV,'sHov','vHov','hover');
+objSlider(PRED,'sHrz','vHrz','horizon',1);
+objSlider(SHOT,'sPow','vPow','power');     objSlider(SHOT,'sPul','vPul','maxDrag');
+objSlider(GAME,'sBst','vBst','boost',0);
+
+rebuild();
+showScheme();
+resetShip();
+frame(0);
+</script>

@@ -75,6 +75,21 @@ export const SKETCHES = [
       antigravity free flight, and right mouse teleports while you are off the rail.`,
     tags: ['variant', 'rail surfing', 'ship frame', 'teleport'],
   },
+  {
+    id: '007',
+    name: '007 Gravity Sheet',
+    href: '/gravity-sheet.html',
+    tagline: 'The gravity field as a landscape you fly over, and dock to shoot.',
+    description: `A 3D reading of the table. The field is drawn as a surface — one
+      funnel with a dimple per world — and you fly across it in a frozen field,
+      because time only runs while you are docked. Docking squares the camera up
+      into a top-down pool view, starts the clock, and makes the world you are
+      standing on the cue ball. Struck worlds are unmoored onto the game gravity
+      layer and can knock the rest of the rack loose. Two control schemes on Tab:
+      VECTOR thrusts relative to your own course, BURN aims with the mouse and
+      fires along it.`,
+    tags: ['3D surface', 'frozen time', 'dock to shoot', 'unmoored bodies', 'trajectory preview'],
+  },
 ]
 
 /** @param {string} id */
