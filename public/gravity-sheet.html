@@ -94,7 +94,7 @@
 </div>
 
 <div class="panel" id="ctl">
-  <div><kbd>R</kbd> reset &nbsp; <kbd>space</kbd> dock &nbsp; <kbd>tab</kbd> control &nbsp; <kbd>1</kbd>&ndash;<kbd>5</kbd> time warp &nbsp; <kbd>P</kbd> paths <span id="pathState">on</span></div>
+  <div><kbd>R</kbd> reset &nbsp; <kbd>space</kbd> dock &nbsp; <kbd>tab</kbd> control &nbsp; <kbd>1</kbd>&ndash;<kbd>5</kbd> time warp &nbsp; <kbd>P</kbd> paths <span id="pathState">on</span> &nbsp; <kbd>U</kbd> hide UI</div>
   <div><kbd>right-drag</kbd> height / look &nbsp; <kbd>wheel</kbd> zoom &nbsp; <kbd>C</kbd> chase cam <span id="chaseState">off</span></div>
   <div class="hdr">surface</div>
   <div class="row"><label>well radius</label><input id="sRad" type="range" min="0.35" max="3" step="0.01" value="1"><span class="val" id="vRad">1.00</span></div>
@@ -748,6 +748,16 @@ function viewProj(aspect) {
 // ---------------------------------------------------------------------------
 // Input
 // ---------------------------------------------------------------------------
+// U hides every panel at once. This is a lab and the readouts cover a good third
+// of the screen, so there has to be one key that gets them out of the way when
+// you want to look at the thing itself. Collected once - the panels are in the
+// document above this script, so they already exist.
+let uiOn = true;
+const PANELS = document.querySelectorAll('.panel');
+function applyUI() {
+  for (let i = 0; i < PANELS.length; i++) PANELS[i].style.display = uiOn ? '' : 'none';
+}
+
 let drag = null;
 // Orbit moved to the RIGHT button: GLIDER and SEEK steer with the cursor, so the
 // left button and the pointer position both belong to the ship now.
@@ -788,6 +798,7 @@ addEventListener('keydown', function (e) {
   if (e.code === 'Space') { e.preventDefault(); toggleDock(); return; }
   if (k >= '1' && k <= '5') { warpIdx = k.charCodeAt(0) - 49; return; }
   if (e.code === 'Tab') { e.preventDefault(); scheme = (scheme + 1) % SCHEMES.length; showScheme(); return; }
+  if (k === 'u') { uiOn = !uiOn; applyUI(); return; }
   if (k === 'r') { resetShip(); return; }
   if (k === 'c') { chase = !chase; chaseEl.textContent = chase ? 'ON' : 'off'; return; }
   if (k === 'p') {
