@@ -30,8 +30,8 @@
                    DRAG mode: press and pull back, release to shoot the other way
     Tab            swap CHARGE / DRAG
     Esc            cancel a charge or a drag
-    After a shot that ball cannot be caught for captureLockoutS seconds (its ring goes
-    red with a countdown), and the ship takes half the shot's delta-v backwards, so it
+    After a shot that ball cannot be caught for captureLockoutS seconds (it has no
+    catch ring until then; the ring appearing is the cue), and the ship takes half the shot's delta-v backwards, so it
     leaves the ring rather than catching its own shot.
     Space          new ball on the nose now. The ball already out keeps flying and can
                    still be caught; the new one costs one of the three (panel toggle).
@@ -458,7 +458,7 @@ function fireAcb(dx, dy, power) {
   ship.vx -= dx * dv * S.recoilFrac; ship.vy -= dy * dv * S.recoilFrac;
   score.shots++;
   flash(k.x, k.y, 0.08 + power * 0.15, "#ffffff");
-  note("SHOT " + score.shots + " at " + (power * 100).toFixed(0) + "%" + (S.captureLockoutS > 0 ? ", recapture locked " + S.captureLockoutS + " s" : ""), "#e8f0fa");
+  note("SHOT " + score.shots + " at " + (power * 100).toFixed(0) + "%" + (S.captureLockoutS > 0 ? ", catchable in " + S.captureLockoutS + " s" : ""), "#e8f0fa");
   if (S.autoStabilise) { stab = { err: 1 }; note("STABILISER: correcting orbit after the shot", "#e8b463"); }
 }
 // ---- THE STABILISER --------------------------------------------------------------
@@ -507,7 +507,7 @@ function checkCapture(realDt) {
   // The lockout runs on every ball whether the nose is bare or not, and announces its end.
   for (const k of balls) if (k.lock > 0) {
     k.lock -= realDt;
-    if (k.lock <= 0) { k.lock = 0; note("RECAPTURE OPEN", "#8fe8b0"); }
+    if (k.lock <= 0) { k.lock = 0; note("BALL CAN BE CAUGHT", "#8fe8b0"); }
   }
   if (acb.mode !== "empty" && acb.mode !== "lost") return;   // a bare nose catches; a full one does not
   for (const k of balls) {
@@ -793,13 +793,11 @@ function draw(realDt) {
     const [sx, sy] = worldToScreen(k.x, k.y);
     const d = dist(ship.x, ship.y, k.x, k.y), rel = Math.hypot(ship.vx - k.vx, ship.vy - k.vy);
     const inside = d < S.captureRadiusAU, slow = rel < S.captureSpeed;
-    const locked = k.lock > 0;
-    const col = locked ? "rgba(255,80,48,0.7)" : !noseBare ? "rgba(255,255,255,0.18)" : inside && slow ? "rgba(143,232,176,0.9)" : inside ? "rgba(232,180,99,0.8)" : "rgba(255,255,255,0.35)";
+    // No ring at all until the ball is catchable: the ring appearing IS the signal.
+    if (k.lock > 0) { drawBall(sx, sy); continue; }
+    const col = !noseBare ? "rgba(255,255,255,0.18)" : inside && slow ? "rgba(143,232,176,0.9)" : inside ? "rgba(232,180,99,0.8)" : "rgba(255,255,255,0.35)";
     cx.setLineDash([4, 4]); circle(sx, sy, S.captureRadiusAU * sc, null, col, 1.5); cx.setLineDash([]);
-    if (locked) {
-      cx.fillStyle = col; cx.font = `10px "Share Tech Mono", monospace`; cx.textAlign = "center";
-      cx.fillText("LOCKED " + k.lock.toFixed(1) + " s", sx, sy - S.captureRadiusAU * sc - 6);
-    } else if (inside && noseBare) {
+    if (inside && noseBare) {
       cx.fillStyle = col; cx.font = `10px "Share Tech Mono", monospace`; cx.textAlign = "center";
       cx.fillText(slow ? "MATCHED" : "REL " + rel.toFixed(1) + " AU/yr", sx, sy - S.captureRadiusAU * sc - 6);
     }
