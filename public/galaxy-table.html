@@ -63,6 +63,12 @@
   the ship and the ACB inside their influence radius. A world only feels them once
   struck, so the rack stays an authored set of rings until a shot breaks it.
 
+  THE STABILISER. A shot kicks the ship backwards (recoilFrac), which is honest and
+  leaves you slowly falling out of your ring while you watch the ball. So after every
+  shot the ship burns itself back onto a circular orbit at whatever radius it is at, with
+  the same engine the hand flies, and says so in the log. Any WASD or Shift input is the
+  manual override: it cancels the burn and the log says that too. Off on the panel.
+
   FOULS. The ACB into a pocket or the star is destroyed and a fresh one respawns on the
   nose after a few seconds; a world into the star is burned. Both count as fouls. The
   ship into either respawns on its opening orbit. No timer, no energy, no fog, no scan,
@@ -146,6 +152,8 @@ const DEFAULTS = {
   respawnSeconds: 3,      // a lost ACB comes back on the nose after this
   viewRadiusAU: 2.9,      // whole-table camera: half the short side, in AU
   gameSpeedK: 1000,       // the clock's resting speed, in thousands of times real time
+  autoStabilise: true,    // burn back to a circular orbit after every shot
+  stabiliseDoneAUyr: 0.05,// close enough: remaining velocity error that ends the burn
 };
 let S = loadSettings();
 
@@ -193,7 +201,7 @@ function resetWorld() {
   score = { shots: 0, fouls: 0, potted: 0, burned: 0, deaths: 0, won: false, wonAt: 0 };
   simYears = 0;
   sliderT = 0.5; sliderShown = 0.5;   // open at the centre: 1M, the table's pace
-  charging = false; charge = 0; drag = null;
+  charging = false; charge = 0; drag = null; stab = null;
   ghost = null;
 }
 
@@ -202,6 +210,7 @@ let sliderT = 0.5, sliderShown = 0.5;       // 0..1 position, and its eased disp
 let paused = false;
 let charging = false, charge = 0;
 let drag = null;                            // {ax, ay} screen anchor while a DRAG shot is held
+let stab = null;                            // { err } while the post-shot stabiliser burns
 let flashes = [];
 let notices = [];
 const keys = {};
@@ -327,7 +336,7 @@ function simStep(h, offGravity) {
     const s = orbitState(SHIP_DEF.r, SHIP_DEF.a, SHIP_DEF.overSpeed);
     Object.assign(ship, s); ship.nose = Math.atan2(s.vy, s.vx); ship.trail = [];
     if (acb.mode === "capturing") { acb.mode = "free"; acb.cap = null; }
-    charging = false; charge = 0; drag = null;
+    charging = false; charge = 0; drag = null; stab = null;
   }
   if (!score.won && bodies.every(b => !b.alive)) { score.won = true; score.wonAt = simYears; note("TABLE CLEARED", "#ffe08a"); }
 }
@@ -388,6 +397,29 @@ function fireAcb(dx, dy, power) {
   score.shots++;
   flash(acb.x, acb.y, 0.08 + power * 0.15, "#ffffff");
   note("SHOT " + score.shots + " at " + (power * 100).toFixed(0) + "%", "#e8f0fa");
+  if (S.autoStabilise) { stab = { err: 1 }; note("STABILISER: correcting orbit after the shot", "#e8b463"); }
+}
+// ---- THE STABILISER --------------------------------------------------------------
+// The circular-orbit velocity at the ship's current radius, keeping its sense of
+// rotation, and one substep's worth of engine toward it. Runs inside the substep loop
+// so it sees the same clock the hand's thrust does.
+function stabiliseStep(h) {
+  if (!stab) return;
+  const dx = ship.x - STAR.x, dy = ship.y - STAR.y, r = Math.hypot(dx, dy);
+  if (r < 1e-6) return;
+  const v = Math.sqrt(G * STAR.mass / r);
+  const cw = dx * ship.vy - dy * ship.vx >= 0 ? 1 : -1;     // sign of angular momentum
+  const tx = -dy / r * v * cw, ty = dx / r * v * cw;
+  const ex = tx - ship.vx, ey = ty - ship.vy, err = Math.hypot(ex, ey);
+  stab.err = err;
+  if (err < S.stabiliseDoneAUyr) { stab = null; note("STABILISER: orbit stable, holding", "#8fe8b0"); return; }
+  const cap = S.thrustAccel * h;
+  const k = Math.min(1, cap / err);
+  ship.vx += ex * k; ship.vy += ey * k;
+}
+function overrideStabiliser(why) {
+  if (!stab) return;
+  stab = null; note("STABILISER: manual override (" + why + ")", "#e8b463");
 }
 // What the shot WOULD be right now, for the aim line: [dx, dy, power] or null.
 function pendingShot() {
@@ -500,12 +532,14 @@ function frame(now) {
   if (charging) charge = Math.min(1, charge + realDt / S.chargeSeconds);
 
   const thrusting = !!thrustVector();
+  if (stab && thrusting) overrideStabiliser("engine");
+  if (stab && keys.shift) overrideStabiliser("zero gravity drift");
   const offGravity = keys.shift || (thrusting && S.thrustAntigrav);
 
   const dtYr = warp * realDt / SPY;
   const steps = dtYr > MAX_SUBSTEP_YR ? Math.min(MAX_SUBSTEPS, Math.ceil(dtYr / MAX_SUBSTEP_YR)) : 1;
   const h = dtYr / steps;
-  for (let i = 0; i < steps; i++) { applyThrust(h); simStep(h, offGravity); }
+  for (let i = 0; i < steps; i++) { applyThrust(h); stabiliseStep(h); simStep(h, offGravity); }
   simYears += dtYr;
 
   // The settle, once per frame on the real clock, only while off gravity: game feel,
@@ -744,7 +778,8 @@ function drawHud(W, H) {
     ["ACB " + (acb.mode === "attached" ? "ON THE NOSE" : acb.mode === "free" ? "FREE, go and catch it" :
               acb.mode === "capturing" ? "WINCHING IN" : "LOST, new one in " + Math.max(0, S.respawnSeconds - acb.lostT).toFixed(1) + " s"),
      acb.mode === "attached" ? "#e8f0fa" : acb.mode === "lost" ? "#ff5030" : "#8fe8b0"],
-  ];
+    stab ? ["STABILISER burning, " + stab.err.toFixed(2) + " AU/yr to go.  WASD or Shift to override", "#e8b463"] : null,
+  ].filter(Boolean);
   lines.forEach((l, i) => { cx.fillStyle = l[1]; cx.fillText(l[0], 14, 22 + i * 17); });
   notices.forEach((n, i) => { cx.fillStyle = colA(n.color, Math.min(1, (20 - n.t) / 4)); cx.fillText(n.text, 14, H - 20 - (notices.length - 1 - i) * 16); });
   cx.fillStyle = "rgba(120,140,170,0.6)"; cx.textAlign = "right";
@@ -792,7 +827,7 @@ cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { cam.zoom = Math.max(0.4, Math.min(6, cam.zoom * Math.exp(-e.deltaY * 0.0012))); e.preventDefault(); }, { passive: false });
 
 // ============================== TEST PANEL ======================================
-const STORE_KEY = "galaxytable.v3";   // bumped: saved settings would otherwise hide the new default
+const STORE_KEY = "galaxytable.v4";   // bumped: saved settings would otherwise hide the new default
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
   catch { return { ...DEFAULTS }; }
@@ -810,6 +845,8 @@ const PANEL = [
   ["r", "dragMaxPx", "pull-back distance for full power (px)", 60, 500, 10],
   ["r", "recoilFrac", "ship kickback on a shot", 0, 1, 0.05],
   ["b", "projections", "show where the shot will go"],
+  ["b", "autoStabilise", "auto-correct the orbit after a shot"],
+  ["r", "stabiliseDoneAUyr", "how precise the orbit correction is (lower = tighter)", 0.01, 0.5, 0.01],
   ["-"],
   ["r", "acbMassRatio", "cue ball weight vs a planet (1 = same)", 0.2, 10, 0.1],
   ["r", "restitution", "bounciness of hits (1 = full)", 0.2, 1, 0.05],
@@ -894,13 +931,15 @@ window.RIG = {
                   score: { ...score }, notices: notices.map(n => n.text),
                   ghost: ghost ? { pts: ghost.acb.length, hit: ghost.hit, worlds: ghost.worlds.length } : null }),
   settings: () => S,
+  stab: () => stab,
   set: (k, v) => { S[k] = v; },
   reset: resetWorld,
   setNose: a => { ship.nose = a; },
   fire: (dx, dy, p) => fireAcb(dx, dy, p),
-  step: (yr) => { const n = Math.ceil(yr / MAX_SUBSTEP_YR), h = yr / n; for (let i = 0; i < n; i++) simStep(h, false); simYears += yr; if (acb.mode === "attached") placeAcbOnNose(); },
+  step: (yr) => { const n = Math.ceil(yr / MAX_SUBSTEP_YR), h = yr / n; for (let i = 0; i < n; i++) { stabiliseStep(h); simStep(h, false); } simYears += yr; if (acb.mode === "attached") placeAcbOnNose(); },
   teleportShip: (x, y, vx, vy) => { ship.x = x; ship.y = y; ship.vx = vx; ship.vy = vy; },
   key: (k, down) => { keys[k] = down; },
+  override: (why) => overrideStabiliser(why),
   teleportBody: (i, x, y, vx, vy, struck) => { const b = bodies[i]; b.x = x; b.y = y; b.vx = vx; b.vy = vy; if (struck != null) b.struck = struck; },
   ghostNow: () => { buildGhost(); return ghost ? { pts: ghost.acb.length, hit: ghost.hit, worlds: ghost.worlds.length } : null; },
   realTick: (s) => { checkCapture(s); stepCapture(s); stepLost(s); },
