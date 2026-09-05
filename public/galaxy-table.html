@@ -65,9 +65,10 @@
 
   THE FORCE ARROWS. While you hold a shot the cue ball grows a free-body diagram: the
   ship's velocity it will inherit (blue), the cue blast the shot adds (white) drawn
-  head-to-tail from the first, the resultant (green), and the gravity pull at the seat
-  (orange) shown as the velocity it would add over the next 0.1 year, with the body that
-  dominates it named. Velocities and that gravity horizon share one pixel scale, so the
+  head-to-tail from the first, and the gravity pull at the seat (orange) shown as the
+  velocity it would add over the next 0.1 year, with the body that dominates it named.
+  The resultant is not drawn: the forecast line already is the resultant, and a third
+  arrow was too much. Labels name the source only; numbers are a panel toggle. Velocities and that gravity horizon share one pixel scale, so the
   lengths are comparable: near the star's ring gravity is a stub next to the cue, and
   next to a boosted world it is not, which is exactly the thing to see before shooting.
 
@@ -160,9 +161,10 @@ const DEFAULTS = {
   planetBoost: 10000,     // the game layer's boost, unchanged: wells you can grab
   respawnSeconds: 3,      // a lost ACB comes back on the nose after this
   viewRadiusAU: 2.9,      // whole-table camera: half the short side, in AU
-  gameSpeedK: 1000,       // the clock's resting speed, in thousands of times real time
+  gameSpeedK: 200,        // the clock's resting speed, in thousands of times real time
   maxLostBalls: 3,        // lose this many ACBs and the table is failed
   forceArrows: true,      // the free-body diagram on the cue ball while aiming
+  arrowNumbers: false,    // label the arrows with values, not just their source
   arrowPxPerAUyr: 12,     // one pixel scale for every arrow, so they compare
   gravityHorizonYr: 0.1,  // gravity is drawn as the velocity it adds over this
   autoStabilise: true,    // burn back to a circular orbit after every shot
@@ -803,24 +805,21 @@ function drawForceArrows(p) {
   const cueV = [p[0] * p[2] * S.shotPower, p[1] * p[2] * S.shotPower];
   const g = gravityAt(acb.x, acb.y, S.acbFeelsWorlds);
   const gravV = [g.ax * S.gravityHorizonYr, g.ay * S.gravityHorizonYr];
-  const resV = [shipV[0] + cueV[0], shipV[1] + cueV[1]];
-  // head to tail: ship, then cue from the ship's tip; the resultant closes the triangle
+  // head to tail: ship, then cue from the ship's tip
   const t1 = [ax0 + shipV[0] * k, ay0 + shipV[1] * k];
   const t2 = [t1[0] + cueV[0] * k, t1[1] + cueV[1] * k];
   const tg = [ax0 + gravV[0] * k, ay0 + gravV[1] * k];
   arrow(ax0, ay0, t1[0], t1[1], "#4fc3f7", 2);
   arrow(t1[0], t1[1], t2[0], t2[1], "#ffffff", 2);
-  arrow(ax0, ay0, t2[0], t2[1], "#8fe8b0", 2, [5, 4]);
   arrow(ax0, ay0, tg[0], tg[1], "#ffa040", 2);
   // Labels sit at midpoints, pushed to opposite sides of the line, because the ship and
   // cue arrows are often near-collinear and tip labels would stack on each other.
   const side = (a, b, sgn) => { const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1;
     return [(a[0] + b[0]) / 2 - dy / L * 14 * sgn, (a[1] + b[1]) / 2 + dx / L * 14 * sgn]; };
-  const sm = side([ax0, ay0], t1, 1);
-  arrowLabel(sm[0], sm[1], "ship " + Math.hypot(...shipV).toFixed(1) + " AU/yr", "#4fc3f7");
-  arrowLabel(t2[0], t2[1], "cue " + Math.hypot(...cueV).toFixed(1) + " AU/yr", "#ffffff");
-  arrowLabel(t2[0], t2[1] + 14, "result " + Math.hypot(...resV).toFixed(1) + " AU/yr", "#8fe8b0");
-  arrowLabel(tg[0], tg[1] + 14, "gravity +" + Math.hypot(...gravV).toFixed(2) + " AU/yr in " + S.gravityHorizonYr + " yr (" + g.top + ")", "#ffa040");
+  const sm = side([ax0, ay0], t1, 1), n = S.arrowNumbers;
+  arrowLabel(sm[0], sm[1], "ship" + (n ? " " + Math.hypot(...shipV).toFixed(1) + " AU/yr" : ""), "#4fc3f7");
+  arrowLabel(t2[0], t2[1], "cue" + (n ? " " + Math.hypot(...cueV).toFixed(1) + " AU/yr" : ""), "#ffffff");
+  arrowLabel(tg[0], tg[1] + 14, "gravity: " + g.top + (n ? " +" + Math.hypot(...gravV).toFixed(2) + " AU/yr in " + S.gravityHorizonYr + " yr" : ""), "#ffa040");
 }
 function drawTimeBand(W, H) {
   const R = W * 1.1, cxp = W / 2, cyp = H - R - 90;
@@ -909,7 +908,7 @@ cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { cam.zoom = Math.max(0.4, Math.min(6, cam.zoom * Math.exp(-e.deltaY * 0.0012))); e.preventDefault(); }, { passive: false });
 
 // ============================== TEST PANEL ======================================
-const STORE_KEY = "galaxytable.v5";   // bumped: saved settings would otherwise hide the new default
+const STORE_KEY = "galaxytable.v6";   // bumped: saved settings would otherwise hide the new default
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
   catch { return { ...DEFAULTS }; }
@@ -928,6 +927,7 @@ const PANEL = [
   ["r", "recoilFrac", "ship kickback on a shot", 0, 1, 0.05],
   ["b", "projections", "show where the shot will go"],
   ["b", "forceArrows", "show force arrows while aiming"],
+  ["b", "arrowNumbers", "show numbers on the arrows"],
   ["r", "arrowPxPerAUyr", "arrow length per unit of speed (px)", 4, 40, 1],
   ["r", "gravityHorizonYr", "gravity arrow looks ahead (years)", 0.02, 0.5, 0.01],
   ["b", "autoStabilise", "auto-correct the orbit after a shot"],
