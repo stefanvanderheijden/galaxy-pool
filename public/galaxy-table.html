@@ -30,6 +30,8 @@
                    DRAG mode: press and pull back, release to shoot the other way
     Tab            swap CHARGE / DRAG
     Esc            cancel a charge or a drag
+    Space          new ball on the nose now. Abandons a free ball (costs one of the
+                   three); during a respawn wait it just skips the wait
     C              camera: whole table / follow the ship
     Scroll         zoom    R  reset    P  pause    H  hide the settings panel
 
@@ -169,6 +171,7 @@ const DEFAULTS = {
   viewRadiusAU: 2.9,      // whole-table camera: half the short side, in AU
   gameSpeedK: 200,        // the clock's resting speed, in thousands of times real time
   maxLostBalls: 3,        // lose this many ACBs and the table is failed
+  spaceCostsBall: true,   // Space on a free ball counts it as lost
   forceArrows: true,      // the free-body diagram on the cue ball while aiming
   arrowNumbers: false,    // label the arrows with values, not just their source
   arrowPxPerAUyr: 12,     // one pixel scale for every arrow, so they compare
@@ -496,6 +499,23 @@ function stepCapture(realDt) {
   acb.y = ship.y + acb.cap.sy + (ty - ship.y - acb.cap.sy) * e;
   acb.vx = ship.vx; acb.vy = ship.vy;
   if (t >= 1) { acb.mode = "attached"; acb.cap = null; placeAcbOnNose(); }
+}
+// Space: a new ball on the nose now. A free ball is abandoned and, by default, counted
+// against the three, or Space would be a free undo for every bad shot. A ball already
+// lost has already been counted, so Space during the wait only skips the wait.
+function newBallNow() {
+  if (score.failed || score.won || acb.mode === "attached" || acb.mode === "capturing") return;
+  if (acb.mode === "free") {
+    if (S.spaceCostsBall) {
+      score.lost++; score.fouls++;
+      const left = S.maxLostBalls - score.lost;
+      flash(acb.x, acb.y, 0.15, "#ffffff");
+      note("ACB ABANDONED (foul, " + Math.max(0, left) + " left)", "#ff5030");
+      if (left <= 0) { score.failed = true; acb.mode = "lost"; acb.lostT = 0; note("TABLE FAILED: no cue balls left", "#ff5030"); return; }
+    } else note("ACB ABANDONED", "#e8b463");
+  }
+  acb.mode = "attached"; acb.cap = null; acb.trail = []; placeAcbOnNose();
+  note("NEW ACB ON THE NOSE", "#e8f0fa");
 }
 function stepLost(realDt) {
   if (acb.mode !== "lost" || score.failed) return;
@@ -861,7 +881,7 @@ function drawHud(W, H) {
   lines.forEach((l, i) => { cx.fillStyle = l[1]; cx.fillText(l[0], 14, 22 + i * 17); });
   notices.forEach((n, i) => { cx.fillStyle = colA(n.color, Math.min(1, (20 - n.t) / 4)); cx.fillText(n.text, 14, H - 20 - (notices.length - 1 - i) * 16); });
   cx.fillStyle = "rgba(120,140,170,0.6)"; cx.textAlign = "right";
-  cx.fillText("WASD fly  Shift drift  Q/E time  LMB shoot  Tab mode  C camera  R reset  H panel", W - 14, H - 14);
+  cx.fillText("WASD fly  Shift drift  Q/E time  LMB shoot  Space new ball  Tab mode  C camera  R reset  H panel", W - 14, H - 14);
   cx.textAlign = "left";
   if (score.won) {
     cx.fillStyle = "rgba(5,7,13,0.6)"; cx.fillRect(W / 2 - 200, H / 2 - 50, 400, 90);
@@ -895,6 +915,7 @@ addEventListener("keydown", e => {
   if (e.code === "KeyP") paused = !paused;
   if (e.code === "KeyH") { const p = document.getElementById("panel"); p.style.display = p.style.display === "none" ? "" : "none"; }
   if (e.code === "Escape") { charging = false; charge = 0; drag = null; }
+  if (e.code === "Space") { newBallNow(); e.preventDefault(); }
 });
 addEventListener("keyup", e => { if (KEYMAP[e.code]) keys[KEYMAP[e.code]] = false; });
 addEventListener("blur", () => { for (const k in keys) keys[k] = false; });
@@ -958,6 +979,7 @@ const PANEL = [
   ["r", "captureSeconds", "seconds to reel the cue ball in", 0.2, 3, 0.05],
   ["r", "respawnSeconds", "seconds until a lost cue ball returns", 0, 10, 0.5],
   ["r", "maxLostBalls", "cue balls you can lose before failing", 1, 10, 1],
+  ["b", "spaceCostsBall", "Space (new ball) costs one of them"],
   ["-"],
   ["l", "thrustAccel", "engine power", 300, 30000],   // log: 3000 sits at the midpoint
   ["r", "linearDamp", "how fast the ship slows when coasting (0 = never)", 0, 4, 0.05],
@@ -1033,6 +1055,7 @@ window.RIG = {
   teleportShip: (x, y, vx, vy) => { ship.x = x; ship.y = y; ship.vx = vx; ship.vy = vy; },
   key: (k, down) => { keys[k] = down; },
   override: (why) => overrideStabiliser(why),
+  newBall: () => newBallNow(),
   teleportBody: (i, x, y, vx, vy, struck) => { const b = bodies[i]; b.x = x; b.y = y; b.vx = vx; b.vy = vy; if (struck != null) b.struck = struck; },
   ghostNow: () => { buildGhost(); return ghost ? { pts: ghost.acb.length, hit: ghost.hit, worlds: ghost.worlds.length } : null; },
   realTick: (s) => { checkCapture(s); stepCapture(s); stepLost(s); },
