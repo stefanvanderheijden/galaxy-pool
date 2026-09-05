@@ -158,7 +158,7 @@ const DEFAULTS = {
   minBallAU: 0.05,        // floor under ballScale, so Vera is not a speck
   acbRadiusAU: 0.045,
   captureRadiusAU: 0.14,  // the ring around a free ACB the ship must be inside
-  captureSpeed: 3.0,      // AU/yr of relative speed the ship must be under
+  captureSpeed: 8.0,      // AU/yr of relative speed the ship must be under. Was 3: too strict
   captureDwellS: 0.25,    // real seconds inside and slow before the winch starts
   captureSeconds: 1.25,   // real seconds of eased winch back onto the nose (001)
   pocketRadiusAU: 0.12,   // the pocket: capture radius of each black hole
@@ -914,7 +914,7 @@ cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { cam.zoom = Math.max(0.4, Math.min(6, cam.zoom * Math.exp(-e.deltaY * 0.0012))); e.preventDefault(); }, { passive: false });
 
 // ============================== TEST PANEL ======================================
-const STORE_KEY = "galaxytable.v8";   // bumped: saved settings would otherwise hide the new default
+const STORE_KEY = "galaxytable.v9";   // bumped: saved settings would otherwise hide the new default
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
   catch { return { ...DEFAULTS }; }
@@ -931,7 +931,7 @@ const PANEL = [
   ["r", "chargeSeconds", "seconds to full charge", 0.3, 3, 0.1],
   ["r", "dragMaxPx", "pull-back distance for full power (px)", 60, 500, 10],
   ["r", "recoilFrac", "ship kickback on a shot", 0, 1, 0.05],
-  ["r", "inheritFrac", "how much ship speed the cue ball keeps (1 = all)", 0, 1, 0.05],
+  ["r", "inheritFrac", "how much ship speed bends the shot (0 = none, 1 = all)", 0, 1, 0.05],
   ["b", "projections", "show where the shot will go"],
   ["b", "forceArrows", "show force arrows while aiming"],
   ["b", "arrowNumbers", "show numbers on the arrows"],
@@ -953,7 +953,7 @@ const PANEL = [
   ["r", "pocketMass", "pocket pull strength", 0.1, 2, 0.05],
   ["-"],
   ["r", "captureRadiusAU", "catch ring size", 0.05, 0.4, 0.01],
-  ["r", "captureSpeed", "max speed difference to catch", 0.5, 10, 0.25],
+  ["r", "captureSpeed", "speed match needed to catch (higher = easier)", 0.5, 20, 0.25],
   ["r", "captureDwellS", "seconds in the ring before catching", 0, 1.5, 0.05],
   ["r", "captureSeconds", "seconds to reel the cue ball in", 0.2, 3, 0.05],
   ["r", "respawnSeconds", "seconds until a lost cue ball returns", 0, 10, 0.5],
