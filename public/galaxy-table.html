@@ -70,7 +70,8 @@
   manual override: it cancels the burn and the log says that too. Off on the panel.
 
   FOULS. The ACB into a pocket or the star is destroyed and a fresh one respawns on the
-  nose after a few seconds; a world into the star is burned. Both count as fouls. The
+  nose after a few seconds; a world into the star is burned. Both count as fouls. Lose
+  maxLostBalls cue balls (three) and the table is failed: no respawn, R to rack again. The
   ship into either respawns on its opening orbit. No timer, no energy, no fog, no scan,
   no rogue, no gas cloud, no Robert: a feel rig for one question, whether shooting and
   chasing a cue ball is better than shooting with the ship.
@@ -152,6 +153,7 @@ const DEFAULTS = {
   respawnSeconds: 3,      // a lost ACB comes back on the nose after this
   viewRadiusAU: 2.9,      // whole-table camera: half the short side, in AU
   gameSpeedK: 1000,       // the clock's resting speed, in thousands of times real time
+  maxLostBalls: 3,        // lose this many ACBs and the table is failed
   autoStabilise: true,    // burn back to a circular orbit after every shot
   stabiliseDoneAUyr: 0.05,// close enough: remaining velocity error that ends the burn
 };
@@ -198,7 +200,7 @@ function resetWorld() {
   // the nose every step and carries the ship's velocity; only free does it integrate.
   acb = { mode: "attached", x: 0, y: 0, vx: 0, vy: 0, trail: [], dwell: 0, cap: null, lostT: 0 };
   placeAcbOnNose();
-  score = { shots: 0, fouls: 0, potted: 0, burned: 0, deaths: 0, won: false, wonAt: 0 };
+  score = { shots: 0, fouls: 0, potted: 0, burned: 0, deaths: 0, lost: 0, won: false, wonAt: 0, failed: false };
   simYears = 0;
   sliderT = 0.5; sliderShown = 0.5;   // open at the centre: 1M, the table's pace
   charging = false; charge = 0; drag = null; stab = null;
@@ -325,9 +327,11 @@ function simStep(h, offGravity) {
   if (acb.mode === "free") {
     const p = pocketAt(acb.x, acb.y, 0);
     if (p || dist(acb.x, acb.y, STAR.x, STAR.y) < starR()) {
-      acb.mode = "lost"; acb.lostT = 0; score.fouls++;
+      acb.mode = "lost"; acb.lostT = 0; score.fouls++; score.lost++;
       flash(acb.x, acb.y, 0.2, "#ffffff"); burst(acb.x, acb.y, 0.08, "#ffffff");
-      note(p ? "ACB LOST: pocketed in " + p.name + " (foul)" : "ACB LOST: burned (foul)", "#ff5030");
+      const left = S.maxLostBalls - score.lost;
+      note((p ? "ACB LOST: pocketed in " + p.name : "ACB LOST: burned") + " (foul, " + Math.max(0, left) + " left)", "#ff5030");
+      if (left <= 0 && !score.won) { score.failed = true; note("TABLE FAILED: no cue balls left", "#ff5030"); }
     }
   }
   if (pocketAt(ship.x, ship.y, 0) || dist(ship.x, ship.y, STAR.x, STAR.y) < starR()) {
@@ -388,7 +392,7 @@ function placeAcbOnNose() {
 // Both modes end here: a direction and a 0..1 power. The ACB leaves the seat with the
 // ship's velocity plus the shot, and the ship takes recoilFrac of it backwards.
 function fireAcb(dx, dy, power) {
-  if (acb.mode !== "attached") return;
+  if (acb.mode !== "attached" || score.failed) return;
   const dv = power * S.shotPower;
   placeAcbOnNose();
   acb.vx += dx * dv; acb.vy += dy * dv;
@@ -461,7 +465,7 @@ function stepCapture(realDt) {
   if (t >= 1) { acb.mode = "attached"; acb.cap = null; placeAcbOnNose(); }
 }
 function stepLost(realDt) {
-  if (acb.mode !== "lost") return;
+  if (acb.mode !== "lost" || score.failed) return;
   acb.lostT += realDt;
   if (acb.lostT >= S.respawnSeconds) { acb.mode = "attached"; placeAcbOnNose(); acb.trail = []; note("NEW ACB ON THE NOSE", "#e8f0fa"); }
 }
@@ -772,11 +776,12 @@ function drawHud(W, H) {
   cx.font = `12px "Share Tech Mono", monospace`; cx.textAlign = "left";
   const alive = bodies.filter(b => b.alive).length;
   const lines = [
-    ["SHOTS " + score.shots + "   FOULS " + score.fouls + "   POTTED " + score.potted + "/" + bodies.length, "#cfe0ff"],
+    ["SHOTS " + score.shots + "   FOULS " + score.fouls + "   POTTED " + score.potted + "/" + bodies.length +
+     "   BALLS LEFT " + Math.max(0, S.maxLostBalls - score.lost), score.lost >= S.maxLostBalls - 1 ? "#ff8c70" : "#cfe0ff"],
     ["T " + simYears.toFixed(2) + " yr" + (score.deaths ? "   SHIP LOST " + score.deaths : ""), "#9fb4cc"],
     ["MODE " + (S.dragMode ? "DRAG (pull back)" : "CHARGE (hold LMB)") + "   Tab swaps", "#8fc3e8"],
     ["ACB " + (acb.mode === "attached" ? "ON THE NOSE" : acb.mode === "free" ? "FREE, go and catch it" :
-              acb.mode === "capturing" ? "WINCHING IN" : "LOST, new one in " + Math.max(0, S.respawnSeconds - acb.lostT).toFixed(1) + " s"),
+              acb.mode === "capturing" ? "WINCHING IN" : score.failed ? "NONE LEFT" : "LOST, new one in " + Math.max(0, S.respawnSeconds - acb.lostT).toFixed(1) + " s"),
      acb.mode === "attached" ? "#e8f0fa" : acb.mode === "lost" ? "#ff5030" : "#8fe8b0"],
     stab ? ["STABILISER burning, " + stab.err.toFixed(2) + " AU/yr to go.  WASD or Shift to override", "#e8b463"] : null,
   ].filter(Boolean);
@@ -792,6 +797,15 @@ function drawHud(W, H) {
     cx.fillText("TABLE CLEARED", W / 2, H / 2 - 14);
     cx.font = `12px "Share Tech Mono", monospace`;
     cx.fillText(score.shots + " shots, " + score.fouls + " fouls, " + score.wonAt.toFixed(2) + " yr.  R to rack again", W / 2, H / 2 + 14);
+    cx.textAlign = "left";
+  }
+  if (score.failed && !score.won) {
+    cx.fillStyle = "rgba(5,7,13,0.6)"; cx.fillRect(W / 2 - 200, H / 2 - 50, 400, 90);
+    cx.strokeStyle = "#ff5030"; cx.strokeRect(W / 2 - 200, H / 2 - 50, 400, 90);
+    cx.fillStyle = "#ff5030"; cx.font = `20px "Share Tech Mono", monospace`; cx.textAlign = "center";
+    cx.fillText("TABLE FAILED", W / 2, H / 2 - 14);
+    cx.font = `12px "Share Tech Mono", monospace`;
+    cx.fillText(S.maxLostBalls + " cue balls lost, " + score.potted + " potted.  R to rack again", W / 2, H / 2 + 14);
     cx.textAlign = "left";
   }
   if (paused) { cx.fillStyle = "#e8f0fa"; cx.font = `16px "Share Tech Mono", monospace`; cx.textAlign = "center"; cx.fillText("PAUSED", W / 2, 40); cx.textAlign = "left"; }
@@ -827,7 +841,7 @@ cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { cam.zoom = Math.max(0.4, Math.min(6, cam.zoom * Math.exp(-e.deltaY * 0.0012))); e.preventDefault(); }, { passive: false });
 
 // ============================== TEST PANEL ======================================
-const STORE_KEY = "galaxytable.v4";   // bumped: saved settings would otherwise hide the new default
+const STORE_KEY = "galaxytable.v5";   // bumped: saved settings would otherwise hide the new default
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
   catch { return { ...DEFAULTS }; }
@@ -865,6 +879,7 @@ const PANEL = [
   ["r", "captureDwellS", "seconds in the ring before catching", 0, 1.5, 0.05],
   ["r", "captureSeconds", "seconds to reel the cue ball in", 0.2, 3, 0.05],
   ["r", "respawnSeconds", "seconds until a lost cue ball returns", 0, 10, 0.5],
+  ["r", "maxLostBalls", "cue balls you can lose before failing", 1, 10, 1],
   ["-"],
   ["r", "thrustAccel", "engine power", 50, 3000, 25],
   ["r", "linearDamp", "how fast the ship slows when coasting (0 = never)", 0, 4, 0.05],
