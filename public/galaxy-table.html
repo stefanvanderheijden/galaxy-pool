@@ -31,7 +31,7 @@
     Tab            swap CHARGE / DRAG
     Esc            cancel a charge or a drag
     C              camera: whole table / follow the ship
-    Scroll         zoom    R  reset    P  pause    H  hide the panel
+    Scroll         zoom    R  reset    P  pause    H  hide the settings panel
 
   FLYING is hyperwarp 2's: the nose chases the cursor, the keys are pure translation,
   and while the drive is on the ship answers the hand and gravity lets go (the panel can
@@ -79,8 +79,9 @@
   #panel #collapse { cursor: pointer; color: #6f86a8; }
   #panel .row { margin: 2px 0; }
   #panel label { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
-  #panel input[type=range] { width: 120px; }
-  #panel .val { width: 52px; text-align: right; color: #e2ecff; }
+  #panel label span:first-child { flex: 1; line-height: 1.2; }
+  #panel input[type=range] { width: 90px; flex: none; }
+  #panel .val { width: 44px; text-align: right; color: #e2ecff; }
   #panel hr { border: 0; border-top: 1px solid #22304a; margin: 6px 0; }
   #panel button { background: #182640; color: #cfe0ff; border: 1px solid #2f4468; border-radius: 4px;
     font: inherit; padding: 3px 8px; cursor: pointer; width: 100%; }
@@ -108,7 +109,9 @@ const MAX_SUBSTEP_YR = 1e-4;               // same rule as the game: fixed step 
 const MAX_SUBSTEPS = 200;                  // frame backstop: degrade, never freeze
 const SOFT2 = 1e-6;                        // Plummer softening^2, matches SimUnits scale
 // Log-linear in two halves with the centre PINNED. See the header: 1M here, not 100K.
-const WARP_MID = 1e6, WARP_MAX = 5e6;
+// The centre is the panel's "game speed"; the fast end stays at least five times it.
+function warpMid() { return S.gameSpeedK * 1000; }
+function warpMax() { return Math.max(5e6, warpMid() * 5); }
 const TAU = Math.PI * 2;
 
 // ============================== TUNABLES (test panel) ===========================
@@ -142,6 +145,7 @@ const DEFAULTS = {
   planetBoost: 10000,     // the game layer's boost, unchanged: wells you can grab
   respawnSeconds: 3,      // a lost ACB comes back on the nose after this
   viewRadiusAU: 2.9,      // whole-table camera: half the short side, in AU
+  gameSpeedK: 1000,       // the clock's resting speed, in thousands of times real time
 };
 let S = loadSettings();
 
@@ -210,9 +214,10 @@ function note(text, color) {
   if (notices.length > 5) notices.shift();
 }
 function warpNow() {
+  const mid = warpMid(), max = warpMax();
   return sliderT <= 0.5
-    ? Math.pow(10, (sliderT / 0.5) * Math.log10(WARP_MID))
-    : Math.pow(10, Math.log10(WARP_MID) + ((sliderT - 0.5) / 0.5) * Math.log10(WARP_MAX / WARP_MID));
+    ? Math.pow(10, (sliderT / 0.5) * Math.log10(mid))
+    : Math.pow(10, Math.log10(mid) + ((sliderT - 0.5) / 0.5) * Math.log10(max / mid));
 }
 function dist(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return Math.sqrt(dx * dx + dy * dy); }
 function easeInOutCubic(t) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
@@ -787,7 +792,7 @@ cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { cam.zoom = Math.max(0.4, Math.min(6, cam.zoom * Math.exp(-e.deltaY * 0.0012))); e.preventDefault(); }, { passive: false });
 
 // ============================== TEST PANEL ======================================
-const STORE_KEY = "galaxytable.v2";   // bumped: saved settings would otherwise hide the new default
+const STORE_KEY = "galaxytable.v3";   // bumped: saved settings would otherwise hide the new default
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
   catch { return { ...DEFAULTS }; }
@@ -795,41 +800,45 @@ function loadSettings() {
 function saveSettings() { try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); } catch {} }
 
 const PANEL = [
-  ["h", "GALAXY TABLE TEST PANEL"],
-  ["b", "dragMode", "shot: DRAG (off = CHARGE)  [Tab]"],
-  ["b", "thrustAntigrav", "drive lets go of gravity"],
-  ["b", "driftMode", "time slider springs home"],
-  ["b", "projections", "aim line + forecasts"],
-  ["b", "acbFeelsWorlds", "ACB feels boosted worlds"],
-  ["b", "planetsCollide", "struck worlds collide"],
-  ["b", "camFollow", "camera follows ship  [C]"],
+  ["h", "GALAXY TABLE SETTINGS"],
+  ["r", "gameSpeedK", "game speed (x1000 real time)", 50, 5000, 50],
+  ["b", "driftMode", "clock returns to game speed when Q/E released"],
   ["-"],
-  ["r", "shotPower", "shot power AU/yr", 1, 20, 0.5],
-  ["r", "chargeSeconds", "charge time s", 0.3, 3, 0.1],
-  ["r", "dragMaxPx", "drag full pull px", 60, 500, 10],
-  ["r", "recoilFrac", "recoil fraction", 0, 1, 0.05],
-  ["r", "acbMassRatio", "ACB mass / world mass", 0.2, 10, 0.1],
-  ["r", "restitution", "restitution", 0.2, 1, 0.05],
+  ["b", "dragMode", "aim by pulling back (off = hold to charge)  [Tab]"],
+  ["r", "shotPower", "shot strength", 1, 20, 0.5],
+  ["r", "chargeSeconds", "seconds to full charge", 0.3, 3, 0.1],
+  ["r", "dragMaxPx", "pull-back distance for full power (px)", 60, 500, 10],
+  ["r", "recoilFrac", "ship kickback on a shot", 0, 1, 0.05],
+  ["b", "projections", "show where the shot will go"],
   ["-"],
-  ["r", "ballScale", "ball scale (draw + hit)", 2, 20, 0.5],
-  ["r", "minBallAU", "ball floor AU", 0.02, 0.1, 0.005],
-  ["r", "acbRadiusAU", "ACB radius AU", 0.02, 0.1, 0.005],
-  ["r", "pocketRadiusAU", "pocket radius AU", 0.05, 0.3, 0.01],
-  ["r", "pocketInfluenceAU", "pocket influence AU", 0.1, 1.2, 0.05],
-  ["r", "pocketMass", "pocket mass Msun", 0.1, 2, 0.05],
+  ["r", "acbMassRatio", "cue ball weight vs a planet (1 = same)", 0.2, 10, 0.1],
+  ["r", "restitution", "bounciness of hits (1 = full)", 0.2, 1, 0.05],
+  ["b", "planetsCollide", "struck planets can hit other planets"],
+  ["b", "acbFeelsWorlds", "planets bend the cue ball's path"],
   ["-"],
-  ["r", "captureRadiusAU", "capture ring AU", 0.05, 0.4, 0.01],
-  ["r", "captureSpeed", "capture rel speed AU/yr", 0.5, 10, 0.25],
-  ["r", "captureDwellS", "capture dwell s", 0, 1.5, 0.05],
-  ["r", "captureSeconds", "winch time s", 0.2, 3, 0.05],
-  ["r", "respawnSeconds", "ACB respawn s", 0, 10, 0.5],
+  ["r", "ballScale", "planet size", 2, 20, 0.5],
+  ["r", "minBallAU", "smallest planet size", 0.02, 0.1, 0.005],
+  ["r", "acbRadiusAU", "cue ball size", 0.02, 0.1, 0.005],
+  ["r", "pocketRadiusAU", "pocket size", 0.05, 0.3, 0.01],
+  ["r", "pocketInfluenceAU", "pocket pull reach", 0.1, 1.2, 0.05],
+  ["r", "pocketMass", "pocket pull strength", 0.1, 2, 0.05],
   ["-"],
-  ["r", "thrustAccel", "thrust AU/yr^2", 50, 3000, 25],
-  ["r", "linearDamp", "settle /s (0 = real space)", 0, 4, 0.05],
-  ["r", "aimEase", "aim ease /s", 3, 60, 1],
-  ["r", "planetBoost", "planet boost", 100, 30000, 100],
-  ["r", "viewRadiusAU", "table view radius AU", 1.5, 5, 0.1],
+  ["r", "captureRadiusAU", "catch ring size", 0.05, 0.4, 0.01],
+  ["r", "captureSpeed", "max speed difference to catch", 0.5, 10, 0.25],
+  ["r", "captureDwellS", "seconds in the ring before catching", 0, 1.5, 0.05],
+  ["r", "captureSeconds", "seconds to reel the cue ball in", 0.2, 3, 0.05],
+  ["r", "respawnSeconds", "seconds until a lost cue ball returns", 0, 10, 0.5],
+  ["-"],
+  ["r", "thrustAccel", "engine power", 50, 3000, 25],
+  ["r", "linearDamp", "how fast the ship slows when coasting (0 = never)", 0, 4, 0.05],
+  ["r", "aimEase", "how fast the nose turns to the mouse", 3, 60, 1],
+  ["b", "thrustAntigrav", "gravity switches off while the engine runs"],
+  ["r", "planetBoost", "planet gravity on the ship and cue ball", 100, 30000, 100],
+  ["-"],
+  ["b", "camFollow", "camera follows the ship  [C]"],
+  ["r", "viewRadiusAU", "how much of the table you see", 1.5, 5, 0.1],
 ];
+
 function buildPanel() {
   const el = document.getElementById("panel");
   let html = "";
