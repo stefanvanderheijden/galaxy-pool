@@ -65,7 +65,7 @@
   struck, so the rack stays an authored set of rings until a shot breaks it.
 
   THE FORCE ARROWS. While you hold a shot the cue ball grows a free-body diagram: the
-  ship's velocity it will inherit (blue), the resultant launch velocity (green, ship
+  ship's velocity it will keep (blue, inheritFrac of it), the resultant launch velocity (green, ship
   plus cue blast), and the gravity pull at the seat (orange) shown as the velocity it
   would add over the next 0.1 year, with the body that dominates it named. The cue
   blast itself is not drawn as an arrow: the cue stick already shows it, and a third
@@ -147,6 +147,11 @@ const DEFAULTS = {
   chargeSeconds: 1.2,     // real seconds from empty to full charge
   dragMaxPx: 220,         // screen pixels of pull for a full-power drag shot
   recoilFrac: 0.15,       // fraction of the shot's delta-v the ship takes backwards
+  // THE ONE DISHONEST NUMBER IN THE SHOT. A ball on the nose carries the ship's whole
+  // velocity, and at 3.5 AU/yr on the ring that is half the cue blast: the shot goes
+  // where the orbit says, not where you aim. So the ball keeps only this fraction of
+  // the ship's velocity when it leaves. 1 is real physics.
+  inheritFrac: 0.25,
   acbMassRatio: 1.0,      // m_acb / m_world in the collision. 1 = real pool
   restitution: 1.0,       // 1 = elastic
   ballScale: 10,          // drawR multiplier, drawing AND collision. See the header
@@ -423,7 +428,7 @@ function fireAcb(dx, dy, power) {
   if (acb.mode !== "attached" || score.failed) return;
   const dv = power * S.shotPower;
   placeAcbOnNose();
-  acb.vx += dx * dv; acb.vy += dy * dv;
+  acb.vx = ship.vx * S.inheritFrac + dx * dv; acb.vy = ship.vy * S.inheritFrac + dy * dv;
   acb.mode = "free"; acb.trail = []; acb.dwell = 0;
   ship.vx -= dx * dv * S.recoilFrac; ship.vy -= dy * dv * S.recoilFrac;
   score.shots++;
@@ -513,7 +518,7 @@ function buildGhost() {
     const p = pendingShot();
     if (!p) { ghost = null; return; }
     const [x, y] = noseSeat();
-    ball = { x, y, vx: ship.vx + p[0] * p[2] * S.shotPower, vy: ship.vy + p[1] * p[2] * S.shotPower };
+    ball = { x, y, vx: ship.vx * S.inheritFrac + p[0] * p[2] * S.shotPower, vy: ship.vy * S.inheritFrac + p[1] * p[2] * S.shotPower };
   }
   const gb = bodies.map(b => ({ ...b, trail: null }));
   const out = { acb: [{ x: ball.x, y: ball.y }], hit: null, worlds: [], ballDead: false };
@@ -802,7 +807,7 @@ function arrowLabel(x, y, text, color) {
 function drawForceArrows(p) {
   const [ax0, ay0] = worldToScreen(acb.x, acb.y);
   const k = S.arrowPxPerAUyr;
-  const shipV = [ship.vx, ship.vy];
+  const shipV = [ship.vx * S.inheritFrac, ship.vy * S.inheritFrac];   // what the ball keeps
   const cueV = [p[0] * p[2] * S.shotPower, p[1] * p[2] * S.shotPower];
   const g = gravityAt(acb.x, acb.y, S.acbFeelsWorlds);
   const gravV = [g.ax * S.gravityHorizonYr, g.ay * S.gravityHorizonYr];
@@ -819,7 +824,7 @@ function drawForceArrows(p) {
     return [(a[0] + b[0]) / 2 - dy / L * 14 * sgn, (a[1] + b[1]) / 2 + dx / L * 14 * sgn]; };
   const sm = side([ax0, ay0], t1, 1), n = S.arrowNumbers;
   arrowLabel(sm[0], sm[1], "ship" + (n ? " " + Math.hypot(...shipV).toFixed(1) + " AU/yr" : ""), "#4fc3f7");
-  arrowLabel(t2[0], t2[1], "result" + (n ? " " + Math.hypot(shipV[0] + cueV[0], shipV[1] + cueV[1]).toFixed(1) + " AU/yr" : ""), "#8fe8b0");
+  if (n) arrowLabel(t2[0], t2[1], Math.hypot(shipV[0] + cueV[0], shipV[1] + cueV[1]).toFixed(1) + " AU/yr", "#8fe8b0");
   arrowLabel(tg[0], tg[1] + 14, "gravity: " + g.top + (n ? " +" + Math.hypot(...gravV).toFixed(2) + " AU/yr in " + S.gravityHorizonYr + " yr" : ""), "#ffa040");
 }
 function drawTimeBand(W, H) {
@@ -909,7 +914,7 @@ cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { cam.zoom = Math.max(0.4, Math.min(6, cam.zoom * Math.exp(-e.deltaY * 0.0012))); e.preventDefault(); }, { passive: false });
 
 // ============================== TEST PANEL ======================================
-const STORE_KEY = "galaxytable.v7";   // bumped: saved settings would otherwise hide the new default
+const STORE_KEY = "galaxytable.v8";   // bumped: saved settings would otherwise hide the new default
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
   catch { return { ...DEFAULTS }; }
@@ -926,6 +931,7 @@ const PANEL = [
   ["r", "chargeSeconds", "seconds to full charge", 0.3, 3, 0.1],
   ["r", "dragMaxPx", "pull-back distance for full power (px)", 60, 500, 10],
   ["r", "recoilFrac", "ship kickback on a shot", 0, 1, 0.05],
+  ["r", "inheritFrac", "how much ship speed the cue ball keeps (1 = all)", 0, 1, 0.05],
   ["b", "projections", "show where the shot will go"],
   ["b", "forceArrows", "show force arrows while aiming"],
   ["b", "arrowNumbers", "show numbers on the arrows"],
