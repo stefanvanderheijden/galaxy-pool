@@ -30,6 +30,9 @@
                    DRAG mode: press and pull back, release to shoot the other way
     Tab            swap CHARGE / DRAG
     Esc            cancel a charge or a drag
+    After a shot that ball cannot be caught for captureLockoutS seconds (its ring goes
+    red with a countdown), and the ship takes half the shot's delta-v backwards, so it
+    leaves the ring rather than catching its own shot.
     Space          new ball on the nose now. The ball already out keeps flying and can
                    still be caught; the new one costs one of the three (panel toggle).
                    During a respawn wait it just skips the wait
@@ -149,7 +152,9 @@ const DEFAULTS = {
   shotPower: 8.0,         // AU/yr of delta-v at full charge / full pull
   chargeSeconds: 1.2,     // real seconds from empty to full charge
   dragMaxPx: 220,         // screen pixels of pull for a full-power drag shot
-  recoilFrac: 0.15,       // fraction of the shot's delta-v the ship takes backwards
+  recoilFrac: 0.5,        // fraction of the shot's delta-v the ship takes backwards. 0.15 left
+                          // the ship inside the ball's ring and it caught its own shot
+  captureLockoutS: 2,     // real seconds after a shot before that ball can be caught
   // THE ONE DISHONEST NUMBER IN THE SHOT. A ball on the nose carries the ship's whole
   // velocity, and at 3.5 AU/yr on the ring that is half the cue blast: the shot goes
   // where the orbit says, not where you aim. So the ball keeps only this fraction of
@@ -384,7 +389,7 @@ function simStep(h, offGravity) {
     note("SHIP LOST: RESPAWNING", "#ff5030");
     const s = orbitState(SHIP_DEF.r, SHIP_DEF.a, SHIP_DEF.overSpeed);
     Object.assign(ship, s); ship.nose = Math.atan2(s.vy, s.vx); ship.trail = [];
-    if (acb.mode === "capturing") { balls.push({ x: acb.x, y: acb.y, vx: 0, vy: 0, trail: [], dwell: 0 }); acb.mode = "empty"; acb.cap = null; }
+    if (acb.mode === "capturing") { balls.push({ x: acb.x, y: acb.y, vx: 0, vy: 0, trail: [], dwell: 0, lock: 0 }); acb.mode = "empty"; acb.cap = null; }
     charging = false; charge = 0; drag = null; stab = null;
   }
   if (!score.won && bodies.every(b => !b.alive)) { score.won = true; score.wonAt = simYears; note("TABLE CLEARED", "#ffe08a"); }
@@ -447,13 +452,13 @@ function fireAcb(dx, dy, power) {
   if (acb.mode !== "attached" || score.failed) return;
   const dv = power * S.shotPower;
   placeAcbOnNose();
-  const k = { x: acb.x, y: acb.y, vx: ship.vx * S.inheritFrac + dx * dv, vy: ship.vy * S.inheritFrac + dy * dv, trail: [], dwell: 0 };
+  const k = { x: acb.x, y: acb.y, vx: ship.vx * S.inheritFrac + dx * dv, vy: ship.vy * S.inheritFrac + dy * dv, trail: [], dwell: 0, lock: S.captureLockoutS };
   balls.push(k);
   acb.mode = "empty";
   ship.vx -= dx * dv * S.recoilFrac; ship.vy -= dy * dv * S.recoilFrac;
   score.shots++;
   flash(k.x, k.y, 0.08 + power * 0.15, "#ffffff");
-  note("SHOT " + score.shots + " at " + (power * 100).toFixed(0) + "%", "#e8f0fa");
+  note("SHOT " + score.shots + " at " + (power * 100).toFixed(0) + "%" + (S.captureLockoutS > 0 ? ", recapture locked " + S.captureLockoutS + " s" : ""), "#e8f0fa");
   if (S.autoStabilise) { stab = { err: 1 }; note("STABILISER: correcting orbit after the shot", "#e8b463"); }
 }
 // ---- THE STABILISER --------------------------------------------------------------
@@ -499,8 +504,14 @@ function catchable(k) {
   return dist(ship.x, ship.y, k.x, k.y) < S.captureRadiusAU && Math.hypot(ship.vx - k.vx, ship.vy - k.vy) < S.captureSpeed;
 }
 function checkCapture(realDt) {
+  // The lockout runs on every ball whether the nose is bare or not, and announces its end.
+  for (const k of balls) if (k.lock > 0) {
+    k.lock -= realDt;
+    if (k.lock <= 0) { k.lock = 0; note("RECAPTURE OPEN", "#8fe8b0"); }
+  }
   if (acb.mode !== "empty" && acb.mode !== "lost") return;   // a bare nose catches; a full one does not
   for (const k of balls) {
+    if (k.lock > 0) { k.dwell = 0; continue; }
     if (catchable(k)) k.dwell += realDt; else k.dwell = 0;
     if (k.dwell >= S.captureDwellS) {
       balls = balls.filter(o => o !== k);
@@ -782,9 +793,13 @@ function draw(realDt) {
     const [sx, sy] = worldToScreen(k.x, k.y);
     const d = dist(ship.x, ship.y, k.x, k.y), rel = Math.hypot(ship.vx - k.vx, ship.vy - k.vy);
     const inside = d < S.captureRadiusAU, slow = rel < S.captureSpeed;
-    const col = !noseBare ? "rgba(255,255,255,0.18)" : inside && slow ? "rgba(143,232,176,0.9)" : inside ? "rgba(232,180,99,0.8)" : "rgba(255,255,255,0.35)";
+    const locked = k.lock > 0;
+    const col = locked ? "rgba(255,80,48,0.7)" : !noseBare ? "rgba(255,255,255,0.18)" : inside && slow ? "rgba(143,232,176,0.9)" : inside ? "rgba(232,180,99,0.8)" : "rgba(255,255,255,0.35)";
     cx.setLineDash([4, 4]); circle(sx, sy, S.captureRadiusAU * sc, null, col, 1.5); cx.setLineDash([]);
-    if (inside && noseBare) {
+    if (locked) {
+      cx.fillStyle = col; cx.font = `10px "Share Tech Mono", monospace`; cx.textAlign = "center";
+      cx.fillText("LOCKED " + k.lock.toFixed(1) + " s", sx, sy - S.captureRadiusAU * sc - 6);
+    } else if (inside && noseBare) {
       cx.fillStyle = col; cx.font = `10px "Share Tech Mono", monospace`; cx.textAlign = "center";
       cx.fillText(slow ? "MATCHED" : "REL " + rel.toFixed(1) + " AU/yr", sx, sy - S.captureRadiusAU * sc - 6);
     }
@@ -964,7 +979,7 @@ cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { cam.zoom = Math.max(0.4, Math.min(6, cam.zoom * Math.exp(-e.deltaY * 0.0012))); e.preventDefault(); }, { passive: false });
 
 // ============================== TEST PANEL ======================================
-const STORE_KEY = "galaxytable.v10";   // bumped: saved settings would otherwise hide the new default
+const STORE_KEY = "galaxytable.v11";   // bumped: saved settings would otherwise hide the new default
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
   catch { return { ...DEFAULTS }; }
@@ -981,6 +996,7 @@ const PANEL = [
   ["r", "chargeSeconds", "seconds to full charge", 0.3, 3, 0.1],
   ["r", "dragMaxPx", "pull-back distance for full power (px)", 60, 500, 10],
   ["r", "recoilFrac", "ship kickback on a shot", 0, 1, 0.05],
+  ["r", "captureLockoutS", "seconds after a shot before you can catch it", 0, 6, 0.25],
   ["r", "inheritFrac", "how much ship speed bends the shot (0 = none, 1 = all)", 0, 1, 0.05],
   ["b", "projections", "show where the shot will go"],
   ["b", "forceArrows", "show force arrows while aiming"],
@@ -1070,7 +1086,7 @@ window.RIG = {
   state: () => ({ simYears, sliderT, warp: warpNow(),
                   ship: { x: ship.x, y: ship.y, vx: ship.vx, vy: ship.vy, nose: ship.nose },
                   acb: { mode: acb.mode, x: acb.x, y: acb.y, vx: acb.vx, vy: acb.vy },
-                  balls: balls.map(k => ({ x: k.x, y: k.y, vx: k.vx, vy: k.vy, dwell: k.dwell })),
+                  balls: balls.map(k => ({ x: k.x, y: k.y, vx: k.vx, vy: k.vy, dwell: k.dwell, lock: k.lock })),
                   bodies: bodies.map(b => ({ name: b.name, x: b.x, y: b.y, vx: b.vx, vy: b.vy, alive: b.alive, struck: b.struck })),
                   pockets: POCKETS.map(p => ({ name: p.name, x: p.x, y: p.y })),
                   score: { ...score }, notices: notices.map(n => n.text),
