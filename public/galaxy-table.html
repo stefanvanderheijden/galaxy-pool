@@ -63,6 +63,14 @@
   the ship and the ACB inside their influence radius. A world only feels them once
   struck, so the rack stays an authored set of rings until a shot breaks it.
 
+  THE FORCE ARROWS. While you hold a shot the cue ball grows a free-body diagram: the
+  ship's velocity it will inherit (blue), the cue blast the shot adds (white) drawn
+  head-to-tail from the first, the resultant (green), and the gravity pull at the seat
+  (orange) shown as the velocity it would add over the next 0.1 year, with the body that
+  dominates it named. Velocities and that gravity horizon share one pixel scale, so the
+  lengths are comparable: near the star's ring gravity is a stub next to the cue, and
+  next to a boosted world it is not, which is exactly the thing to see before shooting.
+
   THE STABILISER. A shot kicks the ship backwards (recoilFrac), which is honest and
   leaves you slowly falling out of your ring while you watch the ball. So after every
   shot the ship burns itself back onto a circular orbit at whatever radius it is at, with
@@ -154,6 +162,9 @@ const DEFAULTS = {
   viewRadiusAU: 2.9,      // whole-table camera: half the short side, in AU
   gameSpeedK: 1000,       // the clock's resting speed, in thousands of times real time
   maxLostBalls: 3,        // lose this many ACBs and the table is failed
+  forceArrows: true,      // the free-body diagram on the cue ball while aiming
+  arrowPxPerAUyr: 12,     // one pixel scale for every arrow, so they compare
+  gravityHorizonYr: 0.1,  // gravity is drawn as the velocity it adds over this
   autoStabilise: true,    // burn back to a circular orbit after every shot
   stabiliseDoneAUyr: 0.05,// close enough: remaining velocity error that ends the burn
 };
@@ -258,6 +269,20 @@ function gameGravity(o, list, h, feelWorlds) {
   pull(STAR.x, STAR.y, G * STAR.mass, o, h);
   if (feelWorlds) for (const b of list) if (b.alive) pull(b.x, b.y, G * b.mass * S.planetBoost, o, h);
   pullPockets(o, h);
+}
+// The game-layer acceleration at a point, and which body is most of it. For the arrows.
+function gravityAt(x, y, feelWorlds) {
+  const parts = [];
+  const add = (name, bx, by, gm) => {
+    const dx = bx - x, dy = by - y, d2 = dx * dx + dy * dy + SOFT2, k = gm / (d2 * Math.sqrt(d2));
+    parts.push({ name, ax: dx * k, ay: dy * k, mag: gm / d2 });
+  };
+  add("Solaris", STAR.x, STAR.y, G * STAR.mass);
+  if (feelWorlds) for (const b of bodies) if (b.alive) add(b.name, b.x, b.y, G * b.mass * S.planetBoost);
+  for (const p of POCKETS) if (dist(x, y, p.x, p.y) < S.pocketInfluenceAU) add(p.name, p.x, p.y, G * S.pocketMass);
+  let ax = 0, ay = 0, top = parts[0];
+  for (const q of parts) { ax += q.ax; ay += q.ay; if (q.mag > top.mag) top = q; }
+  return { ax, ay, top: top.name };
 }
 // Two discs meet: impulse along the normal, then separate them so they do not sink in.
 // Returns true on contact. Masses are whatever the caller says they are.
@@ -738,6 +763,7 @@ function draw(realDt) {
       cx.lineTo(ax - p[0] * (S.acbRadiusAU * sc + 8 + len), ay - p[1] * (S.acbRadiusAU * sc + 8 + len)); cx.stroke();
       cx.fillStyle = "rgba(20,30,50,0.8)"; cx.fillRect(sx - 30, sy + 22, 60, 6);
       cx.fillStyle = "#e8f0fa"; cx.fillRect(sx - 30, sy + 22, 60 * p[2], 6);
+      if (S.forceArrows) drawForceArrows(p);
     }
   }
   // flashes
@@ -754,6 +780,48 @@ function draw(realDt) {
   drawHud(W, H);
 }
 
+function arrow(x0, y0, x1, y1, color, width, dash) {
+  const dx = x1 - x0, dy = y1 - y0, L = Math.hypot(dx, dy);
+  if (L < 2) return;
+  cx.strokeStyle = color; cx.fillStyle = color; cx.lineWidth = width; cx.setLineDash(dash || []);
+  cx.beginPath(); cx.moveTo(x0, y0); cx.lineTo(x1, y1); cx.stroke(); cx.setLineDash([]);
+  const ux = dx / L, uy = dy / L, h = Math.min(9, L * 0.5);
+  cx.beginPath(); cx.moveTo(x1, y1); cx.lineTo(x1 - ux * h - uy * h * 0.5, y1 - uy * h + ux * h * 0.5);
+  cx.lineTo(x1 - ux * h + uy * h * 0.5, y1 - uy * h - ux * h * 0.5); cx.closePath(); cx.fill();
+}
+function arrowLabel(x, y, text, color) {
+  cx.font = `10px "Share Tech Mono", monospace`; cx.textAlign = "left";
+  const w = cx.measureText(text).width;
+  cx.fillStyle = "rgba(5,7,13,0.75)"; cx.fillRect(x + 4, y - 9, w + 6, 13);
+  cx.fillStyle = color; cx.fillText(text, x + 7, y + 1);
+}
+// The free-body diagram on the cue ball. See the header: one pixel scale for all of it.
+function drawForceArrows(p) {
+  const [ax0, ay0] = worldToScreen(acb.x, acb.y);
+  const k = S.arrowPxPerAUyr;
+  const shipV = [ship.vx, ship.vy];
+  const cueV = [p[0] * p[2] * S.shotPower, p[1] * p[2] * S.shotPower];
+  const g = gravityAt(acb.x, acb.y, S.acbFeelsWorlds);
+  const gravV = [g.ax * S.gravityHorizonYr, g.ay * S.gravityHorizonYr];
+  const resV = [shipV[0] + cueV[0], shipV[1] + cueV[1]];
+  // head to tail: ship, then cue from the ship's tip; the resultant closes the triangle
+  const t1 = [ax0 + shipV[0] * k, ay0 + shipV[1] * k];
+  const t2 = [t1[0] + cueV[0] * k, t1[1] + cueV[1] * k];
+  const tg = [ax0 + gravV[0] * k, ay0 + gravV[1] * k];
+  arrow(ax0, ay0, t1[0], t1[1], "#4fc3f7", 2);
+  arrow(t1[0], t1[1], t2[0], t2[1], "#ffffff", 2);
+  arrow(ax0, ay0, t2[0], t2[1], "#8fe8b0", 2, [5, 4]);
+  arrow(ax0, ay0, tg[0], tg[1], "#ffa040", 2);
+  // Labels sit at midpoints, pushed to opposite sides of the line, because the ship and
+  // cue arrows are often near-collinear and tip labels would stack on each other.
+  const side = (a, b, sgn) => { const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1;
+    return [(a[0] + b[0]) / 2 - dy / L * 14 * sgn, (a[1] + b[1]) / 2 + dx / L * 14 * sgn]; };
+  const sm = side([ax0, ay0], t1, 1);
+  arrowLabel(sm[0], sm[1], "ship " + Math.hypot(...shipV).toFixed(1) + " AU/yr", "#4fc3f7");
+  arrowLabel(t2[0], t2[1], "cue " + Math.hypot(...cueV).toFixed(1) + " AU/yr", "#ffffff");
+  arrowLabel(t2[0], t2[1] + 14, "result " + Math.hypot(...resV).toFixed(1) + " AU/yr", "#8fe8b0");
+  arrowLabel(tg[0], tg[1] + 14, "gravity +" + Math.hypot(...gravV).toFixed(2) + " AU/yr in " + S.gravityHorizonYr + " yr (" + g.top + ")", "#ffa040");
+}
 function drawTimeBand(W, H) {
   const R = W * 1.1, cxp = W / 2, cyp = H - R - 90;
   const span = 0.38;
@@ -859,6 +927,9 @@ const PANEL = [
   ["r", "dragMaxPx", "pull-back distance for full power (px)", 60, 500, 10],
   ["r", "recoilFrac", "ship kickback on a shot", 0, 1, 0.05],
   ["b", "projections", "show where the shot will go"],
+  ["b", "forceArrows", "show force arrows while aiming"],
+  ["r", "arrowPxPerAUyr", "arrow length per unit of speed (px)", 4, 40, 1],
+  ["r", "gravityHorizonYr", "gravity arrow looks ahead (years)", 0.02, 0.5, 0.01],
   ["b", "autoStabilise", "auto-correct the orbit after a shot"],
   ["r", "stabiliseDoneAUyr", "how precise the orbit correction is (lower = tighter)", 0.01, 0.5, 0.01],
   ["-"],
