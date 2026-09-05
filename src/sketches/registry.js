@@ -104,6 +104,19 @@ export const SKETCHES = [
       world is potted or has moved past. Flies level-01 on a port of the Unity sim.`,
     tags: ['first person', 'cards', 'parallax', 'pool loop', 'level-01'],
   },
+  {
+    id: '009',
+    name: '009 Galaxy Table',
+    href: '/galaxy-table.html',
+    tagline: 'The cue in two parts: shoot a white artificial moon off the nose, then fly out and catch it.',
+    description: `Galaxy Pool top-down, one twist: the ship carries a detachable white artificial
+      celestial body, the ACB, and that is the cue ball. Ride your orbit, shoot the ACB in one
+      of two aim modes (Tab: hold to charge, or pull back like pool), and it knocks the worlds of
+      level-01 into three black-hole pockets on the rim. Then go and catch it: close and slow
+      inside the ring and it winches back on. Hits are elastic collisions at equal mass, so a
+      square hit stops the cue dead. Flies hyperwarp 2's scheme, Q/E for the clock.`,
+    tags: ['cue ball', 'collisions', 'catch', 'two aim modes', 'level-01'],
+  },
 ]
 
 /** @param {string} id */
