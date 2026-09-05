@@ -30,8 +30,9 @@
                    DRAG mode: press and pull back, release to shoot the other way
     Tab            swap CHARGE / DRAG
     Esc            cancel a charge or a drag
-    Space          new ball on the nose now. Abandons a free ball (costs one of the
-                   three); during a respawn wait it just skips the wait
+    Space          new ball on the nose now. The ball already out keeps flying and can
+                   still be caught; the new one costs one of the three (panel toggle).
+                   During a respawn wait it just skips the wait
     C              camera: whole table / follow the ship
     Scroll         zoom    R  reset    P  pause    H  hide the settings panel
 
@@ -160,7 +161,7 @@ const DEFAULTS = {
   minBallAU: 0.05,        // floor under ballScale, so Vera is not a speck
   acbRadiusAU: 0.045,
   captureRadiusAU: 0.14,  // the ring around a free ACB the ship must be inside
-  captureSpeed: 8.0,      // AU/yr of relative speed the ship must be under. Was 3: too strict
+  captureSpeed: 4.0,      // AU/yr of relative speed the ship must be under. 3 was too strict, 8 too loose
   captureDwellS: 0.25,    // real seconds inside and slow before the winch starts
   captureSeconds: 1.25,   // real seconds of eased winch back onto the nose (001)
   pocketRadiusAU: 0.12,   // the pocket: capture radius of each black hole
@@ -201,7 +202,7 @@ const POCKETS = [
   { name: "Acheron", a: STYX_A + 2 * TAU / 3 },
 ].map(p => ({ name: p.name, x: STYX_R * Math.cos(p.a), y: STYX_R * Math.sin(p.a), color: "#b48cff" }));
 
-let bodies, ship, acb, score, simYears;
+let bodies, ship, acb, balls, score, simYears;
 
 function orbitState(r, a, over) {
   const v = Math.sqrt(G * STAR.mass / r) * (over || 1);
@@ -218,9 +219,13 @@ function resetWorld() {
   bodies = PLANET_DEFS.map(derivePlanet);
   const s = orbitState(SHIP_DEF.r, SHIP_DEF.a, SHIP_DEF.overSpeed);
   ship = { ...s, nose: Math.atan2(s.vy, s.vx), trail: [] };
-  // The ACB: mode attached | free | capturing | lost. While attached it is placed on
-  // the nose every step and carries the ship's velocity; only free does it integrate.
-  acb = { mode: "attached", x: 0, y: 0, vx: 0, vy: 0, trail: [], dwell: 0, cap: null, lostT: 0 };
+  // THE NOSE and THE BALLS are separate things. acb is the nose seat: attached (a ball
+  // sits on it), capturing (one is winching in), empty (the ball was shot and is out
+  // there), lost (a ball was destroyed and a new one is on its way). balls is every
+  // free ball on the table, because Space can put a new one on the nose while the old
+  // one is still flying, and the old one keeps flying.
+  acb = { mode: "attached", x: 0, y: 0, vx: 0, vy: 0, cap: null, lostT: 0 };
+  balls = [];
   placeAcbOnNose();
   score = { shots: 0, fouls: 0, potted: 0, burned: 0, deaths: 0, lost: 0, won: false, wonAt: 0, failed: false };
   simYears = 0;
@@ -240,7 +245,7 @@ let notices = [];
 const keys = {};
 let mouse = { sx: 0, sy: 0 };
 let cam = { x: 0, y: 0, scale: 200, zoom: 1 };
-let ghost = null;                           // { acb: [pts], hit: {x,y}|null, worlds: [{color, pts}] }
+let ghost = null;                           // { pending: [pts]|null, hit, balls: [[pts]], worlds: [{color, pts}] }
 
 function note(text, color) {
   notices.push({ text, color: color || "#9fb4cc", t: 0 });
@@ -315,15 +320,18 @@ function collide(a, ma, ra, b, mb, rb) {
 }
 // Every contact on the table for one step. Shared with the ghost, which is why it
 // takes its actors as arguments and reports rather than scores.
-function resolveContacts(list, ball, events) {
+function resolveContacts(list, freeBalls, events) {
   const rA = S.acbRadiusAU;
-  if (ball) for (const b of list) {
+  for (const ball of freeBalls) for (const b of list) {
     if (!b.alive) continue;
     if (collide(ball, S.acbMassRatio * b.mass, rA, b, b.mass, ballR(b))) {
       if (!b.struck) { b.struck = true; events.push({ kind: "struck", b, x: b.x, y: b.y }); }
       else events.push({ kind: "hit", b, x: b.x, y: b.y });
     }
   }
+  // two cue balls meet: equal masses, whatever they are
+  for (let i = 0; i < freeBalls.length; i++) for (let j = i + 1; j < freeBalls.length; j++)
+    collide(freeBalls[i], 1, rA, freeBalls[j], 1, rA);
   if (S.planetsCollide) for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
     const p = list[i], q = list[j];
     if (!p.alive || !q.alive || (!p.struck && !q.struck)) continue;
@@ -337,13 +345,13 @@ function pocketAt(x, y, r) { for (const p of POCKETS) if (dist(x, y, p.x, p.y) <
 function simStep(h, offGravity) {
   stepWorlds(bodies, h);
   if (!offGravity) gameGravity(ship, bodies, h, true);
-  if (acb.mode === "free") gameGravity(acb, bodies, h, S.acbFeelsWorlds);
+  for (const k of balls) gameGravity(k, bodies, h, S.acbFeelsWorlds);
   for (const b of bodies) if (b.alive) { b.x += b.vx * h; b.y += b.vy * h; b.spin += h * 40; }
   ship.x += ship.vx * h; ship.y += ship.vy * h;
-  if (acb.mode === "free") { acb.x += acb.vx * h; acb.y += acb.vy * h; }
+  for (const k of balls) { k.x += k.vx * h; k.y += k.vy * h; }
 
   const events = [];
-  resolveContacts(bodies, acb.mode === "free" ? acb : null, events);
+  resolveContacts(bodies, balls, events);
   for (const e of events) {
     if (e.kind === "struck") { flash(e.x, e.y, 0.15, e.b.color); note("STRUCK: " + e.b.name, e.b.color); }
   }
@@ -360,22 +368,23 @@ function simStep(h, offGravity) {
       note("BURNED: " + b.name + " (foul)", "#ff5030");
     }
   }
-  if (acb.mode === "free") {
-    const p = pocketAt(acb.x, acb.y, 0);
-    if (p || dist(acb.x, acb.y, STAR.x, STAR.y) < starR()) {
-      acb.mode = "lost"; acb.lostT = 0; score.fouls++; score.lost++;
-      flash(acb.x, acb.y, 0.2, "#ffffff"); burst(acb.x, acb.y, 0.08, "#ffffff");
-      const left = S.maxLostBalls - score.lost;
-      note((p ? "ACB LOST: pocketed in " + p.name : "ACB LOST: burned") + " (foul, " + Math.max(0, left) + " left)", "#ff5030");
-      if (left <= 0 && !score.won) { score.failed = true; note("TABLE FAILED: no cue balls left", "#ff5030"); }
+  for (const k of balls) {
+    const p = pocketAt(k.x, k.y, 0);
+    if (p || dist(k.x, k.y, STAR.x, STAR.y) < starR()) {
+      k.dead = true;
+      flash(k.x, k.y, 0.2, "#ffffff"); burst(k.x, k.y, 0.08, "#ffffff");
+      loseBall(p ? "ACB LOST: pocketed in " + p.name : "ACB LOST: burned");
+      // the nose only waits for a replacement if it is bare; a ball already on it stays
+      if (acb.mode === "empty" && !score.failed) { acb.mode = "lost"; acb.lostT = 0; }
     }
   }
+  balls = balls.filter(k => !k.dead);
   if (pocketAt(ship.x, ship.y, 0) || dist(ship.x, ship.y, STAR.x, STAR.y) < starR()) {
     score.deaths++; flash(ship.x, ship.y, 0.3, "#ffffff");
     note("SHIP LOST: RESPAWNING", "#ff5030");
     const s = orbitState(SHIP_DEF.r, SHIP_DEF.a, SHIP_DEF.overSpeed);
     Object.assign(ship, s); ship.nose = Math.atan2(s.vy, s.vx); ship.trail = [];
-    if (acb.mode === "capturing") { acb.mode = "free"; acb.cap = null; }
+    if (acb.mode === "capturing") { balls.push({ x: acb.x, y: acb.y, vx: 0, vy: 0, trail: [], dwell: 0 }); acb.mode = "empty"; acb.cap = null; }
     charging = false; charge = 0; drag = null; stab = null;
   }
   if (!score.won && bodies.every(b => !b.alive)) { score.won = true; score.wonAt = simYears; note("TABLE CLEARED", "#ffe08a"); }
@@ -425,17 +434,25 @@ function placeAcbOnNose() {
 }
 
 // ============================== THE SHOT ========================================
+// One ball gone, whatever took it. Counts down the three and fails the table at zero.
+function loseBall(why) {
+  score.fouls++; score.lost++;
+  const left = S.maxLostBalls - score.lost;
+  note(why + " (foul, " + Math.max(0, left) + " left)", "#ff5030");
+  if (left <= 0 && !score.won && !score.failed) { score.failed = true; note("TABLE FAILED: no cue balls left", "#ff5030"); }
+}
 // Both modes end here: a direction and a 0..1 power. The ACB leaves the seat with the
 // ship's velocity plus the shot, and the ship takes recoilFrac of it backwards.
 function fireAcb(dx, dy, power) {
   if (acb.mode !== "attached" || score.failed) return;
   const dv = power * S.shotPower;
   placeAcbOnNose();
-  acb.vx = ship.vx * S.inheritFrac + dx * dv; acb.vy = ship.vy * S.inheritFrac + dy * dv;
-  acb.mode = "free"; acb.trail = []; acb.dwell = 0;
+  const k = { x: acb.x, y: acb.y, vx: ship.vx * S.inheritFrac + dx * dv, vy: ship.vy * S.inheritFrac + dy * dv, trail: [], dwell: 0 };
+  balls.push(k);
+  acb.mode = "empty";
   ship.vx -= dx * dv * S.recoilFrac; ship.vy -= dy * dv * S.recoilFrac;
   score.shots++;
-  flash(acb.x, acb.y, 0.08 + power * 0.15, "#ffffff");
+  flash(k.x, k.y, 0.08 + power * 0.15, "#ffffff");
   note("SHOT " + score.shots + " at " + (power * 100).toFixed(0) + "%", "#e8f0fa");
   if (S.autoStabilise) { stab = { err: 1 }; note("STABILISER: correcting orbit after the shot", "#e8b463"); }
 }
@@ -478,16 +495,20 @@ function pendingShot() {
 // Close and slow (galaxy-64's capture rule), then 001's eased approach: inside the ring
 // under the relative speed for a short dwell, and the ACB winches onto the nose over
 // captureSeconds in the ship's frame. The ship is what you fly; the ball is what moves.
+function catchable(k) {
+  return dist(ship.x, ship.y, k.x, k.y) < S.captureRadiusAU && Math.hypot(ship.vx - k.vx, ship.vy - k.vy) < S.captureSpeed;
+}
 function checkCapture(realDt) {
-  if (acb.mode !== "free") return;
-  const d = dist(ship.x, ship.y, acb.x, acb.y);
-  const rel = Math.hypot(ship.vx - acb.vx, ship.vy - acb.vy);
-  if (d < S.captureRadiusAU && rel < S.captureSpeed) acb.dwell += realDt;
-  else acb.dwell = 0;
-  if (acb.dwell >= S.captureDwellS) {
-    acb.mode = "capturing";
-    acb.cap = { age: 0, sx: acb.x - ship.x, sy: acb.y - ship.y };
-    note("ACB CAPTURED", "#8fe8b0");
+  if (acb.mode !== "empty" && acb.mode !== "lost") return;   // a bare nose catches; a full one does not
+  for (const k of balls) {
+    if (catchable(k)) k.dwell += realDt; else k.dwell = 0;
+    if (k.dwell >= S.captureDwellS) {
+      balls = balls.filter(o => o !== k);
+      acb.mode = "capturing"; acb.x = k.x; acb.y = k.y;
+      acb.cap = { age: 0, sx: k.x - ship.x, sy: k.y - ship.y };
+      note("ACB CAPTURED", "#8fe8b0");
+      return;
+    }
   }
 }
 function stepCapture(realDt) {
@@ -500,27 +521,23 @@ function stepCapture(realDt) {
   acb.vx = ship.vx; acb.vy = ship.vy;
   if (t >= 1) { acb.mode = "attached"; acb.cap = null; placeAcbOnNose(); }
 }
-// Space: a new ball on the nose now. A free ball is abandoned and, by default, counted
-// against the three, or Space would be a free undo for every bad shot. A ball already
-// lost has already been counted, so Space during the wait only skips the wait.
+// Space: a new ball on the nose now. The ball out there keeps flying and can still be
+// caught; the new one is, by default, counted against the three, or Space would be a
+// free reload after every bad shot. A ball already lost has already been counted, so
+// Space during the wait only skips the wait.
 function newBallNow() {
   if (score.failed || score.won || acb.mode === "attached" || acb.mode === "capturing") return;
-  if (acb.mode === "free") {
-    if (S.spaceCostsBall) {
-      score.lost++; score.fouls++;
-      const left = S.maxLostBalls - score.lost;
-      flash(acb.x, acb.y, 0.15, "#ffffff");
-      note("ACB ABANDONED (foul, " + Math.max(0, left) + " left)", "#ff5030");
-      if (left <= 0) { score.failed = true; acb.mode = "lost"; acb.lostT = 0; note("TABLE FAILED: no cue balls left", "#ff5030"); return; }
-    } else note("ACB ABANDONED", "#e8b463");
+  if (acb.mode === "empty" && S.spaceCostsBall) {
+    loseBall("NEW BALL ISSUED");
+    if (score.failed) { acb.mode = "lost"; acb.lostT = 0; return; }
   }
-  acb.mode = "attached"; acb.cap = null; acb.trail = []; placeAcbOnNose();
-  note("NEW ACB ON THE NOSE", "#e8f0fa");
+  acb.mode = "attached"; acb.cap = null; placeAcbOnNose();
+  note("NEW ACB ON THE NOSE" + (balls.length ? " (" + balls.length + " still out)" : ""), "#e8f0fa");
 }
 function stepLost(realDt) {
   if (acb.mode !== "lost" || score.failed) return;
   acb.lostT += realDt;
-  if (acb.lostT >= S.respawnSeconds) { acb.mode = "attached"; placeAcbOnNose(); acb.trail = []; note("NEW ACB ON THE NOSE", "#e8f0fa"); }
+  if (acb.lostT >= S.respawnSeconds) { acb.mode = "attached"; placeAcbOnNose(); note("NEW ACB ON THE NOSE", "#e8f0fa"); }
 }
 
 function flash(x, y, r, color) { flashes.push({ x, y, r, t: 0, color, kind: "ring" }); }
@@ -532,40 +549,45 @@ function burst(x, y, r, color) { flashes.push({ x, y, r, t: 0, color, kind: "fla
 // flies). It shows the ACB's line, the point of first contact, and where each struck
 // world goes afterwards, which is the whole of aiming in pool. ~1 year of future.
 function buildGhost() {
-  let ball = null;
-  if (acb.mode === "free") ball = { x: acb.x, y: acb.y, vx: acb.vx, vy: acb.vy };
-  else {
-    const p = pendingShot();
-    if (!p) { ghost = null; return; }
+  const sim = [];                                   // every ball the forecast flies
+  let pending = null;
+  const p = pendingShot();
+  if (p) {
     const [x, y] = noseSeat();
-    ball = { x, y, vx: ship.vx * S.inheritFrac + p[0] * p[2] * S.shotPower, vy: ship.vy * S.inheritFrac + p[1] * p[2] * S.shotPower };
+    pending = { x, y, vx: ship.vx * S.inheritFrac + p[0] * p[2] * S.shotPower, vy: ship.vy * S.inheritFrac + p[1] * p[2] * S.shotPower, pts: [{ x, y }], dead: false };
+    sim.push(pending);
   }
+  for (const k of balls) sim.push({ x: k.x, y: k.y, vx: k.vx, vy: k.vy, pts: [{ x: k.x, y: k.y }], dead: false });
+  if (!sim.length) { ghost = null; return; }
   const gb = bodies.map(b => ({ ...b, trail: null }));
-  const out = { acb: [{ x: ball.x, y: ball.y }], hit: null, worlds: [], ballDead: false };
+  const out = { pending: null, hit: null, balls: [], worlds: [] };
   const track = new Map();
   for (const b of gb) if (b.struck && b.alive) track.set(b.id, { color: b.color, pts: [{ x: b.x, y: b.y }] });
   const H = 2e-4, N = 5000;
   for (let i = 0; i < N; i++) {
     stepWorlds(gb, H);
-    if (!out.ballDead) gameGravity(ball, gb, H, S.acbFeelsWorlds);
+    const live = sim.filter(k => !k.dead);
+    for (const k of live) gameGravity(k, gb, H, S.acbFeelsWorlds);
     for (const b of gb) if (b.alive) { b.x += b.vx * H; b.y += b.vy * H; }
-    if (!out.ballDead) { ball.x += ball.vx * H; ball.y += ball.vy * H; }
+    for (const k of live) { k.x += k.vx * H; k.y += k.vy * H; }
     const events = [];
-    resolveContacts(gb, out.ballDead ? null : ball, events);
+    resolveContacts(gb, live, events);
     for (const e of events) {
-      if (!out.hit) out.hit = { x: e.x, y: e.y };
+      if (!out.hit && pending && !pending.dead && dist(e.x, e.y, pending.x, pending.y) < 0.2) out.hit = { x: e.x, y: e.y };
       if (!track.has(e.b.id)) track.set(e.b.id, { color: e.b.color, pts: [{ x: e.b.x, y: e.b.y }] });
     }
     for (const b of gb) {
       if (!b.alive) continue;
       if (pocketAt(b.x, b.y, 0) || dist(b.x, b.y, STAR.x, STAR.y) < starR() + ballR(b) * 0.5) b.alive = false;
     }
-    if (!out.ballDead && (pocketAt(ball.x, ball.y, 0) || dist(ball.x, ball.y, STAR.x, STAR.y) < starR())) out.ballDead = true;
+    for (const k of live) if (pocketAt(k.x, k.y, 0) || dist(k.x, k.y, STAR.x, STAR.y) < starR()) k.dead = true;
     if (i % 8 === 0) {
-      if (!out.ballDead) out.acb.push({ x: ball.x, y: ball.y });
+      for (const k of sim) if (!k.dead) k.pts.push({ x: k.x, y: k.y });
       for (const b of gb) { const t = track.get(b.id); if (t && b.alive) t.pts.push({ x: b.x, y: b.y }); }
     }
   }
+  out.pending = pending ? pending.pts : null;
+  out.balls = sim.filter(k => k !== pending).map(k => k.pts);
   out.worlds = [...track.values()];
   ghost = out;
 }
@@ -612,7 +634,7 @@ function frame(now) {
   stepLost(realDt);
 
   pushTrail(ship.trail, ship.x, ship.y, 500);
-  if (acb.mode === "free") pushTrail(acb.trail, acb.x, acb.y, 400);
+  for (const k of balls) pushTrail(k.trail, k.x, k.y, 400);
   for (const b of bodies) if (b.alive && b.struck) pushTrail(b.trail, b.x, b.y, 300);
 
   if (S.projections) buildGhost(); else ghost = null;
@@ -729,12 +751,13 @@ function draw(realDt) {
   }
   // trails
   strokePts(ship.trail, "#4fc3f7", 0.3, 1);
-  if (acb.mode === "free") strokePts(acb.trail, "#ffffff", 0.35, 1);
+  for (const k of balls) strokePts(k.trail, "#ffffff", 0.35, 1);
   for (const b of bodies) if (b.alive && b.struck) strokePts(b.trail, b.color, 0.4, 1);
   // the forecast
   if (ghost) {
     for (const w of ghost.worlds) strokePts(w.pts, w.color, 0.55, 1, [4, 4]);
-    strokePts(ghost.acb, "#ffffff", 0.45, 1, [3, 5]);
+    for (const pts of ghost.balls) strokePts(pts, "#ffffff", 0.3, 1, [3, 5]);
+    if (ghost.pending) strokePts(ghost.pending, "#ffffff", 0.45, 1, [3, 5]);
     if (ghost.hit) { const [sx, sy] = worldToScreen(ghost.hit.x, ghost.hit.y); circle(sx, sy, 6, null, "rgba(255,255,255,0.7)", 1); }
   }
   // worlds
@@ -744,26 +767,30 @@ function draw(realDt) {
     if (!drawSprite(b.sprite, sx, sy, R)) circle(sx, sy, R, b.color);
     if (b.struck) circle(sx, sy, R + 3, null, colA(b.color, 0.5), 1);
   }
-  // the ACB
-  if (acb.mode !== "lost") {
-    const [sx, sy] = worldToScreen(acb.x, acb.y), R = S.acbRadiusAU * sc;
-    if (acb.mode === "free") {
-      const d = dist(ship.x, ship.y, acb.x, acb.y), rel = Math.hypot(ship.vx - acb.vx, ship.vy - acb.vy);
-      const inside = d < S.captureRadiusAU, slow = rel < S.captureSpeed;
-      const col = inside && slow ? "rgba(143,232,176,0.9)" : inside ? "rgba(232,180,99,0.8)" : "rgba(255,255,255,0.35)";
-      cx.setLineDash([4, 4]); circle(sx, sy, S.captureRadiusAU * sc, null, col, 1.5); cx.setLineDash([]);
-      if (inside) {
-        cx.fillStyle = col; cx.font = `10px "Share Tech Mono", monospace`; cx.textAlign = "center";
-        cx.fillText(slow ? "MATCHED" : "REL " + rel.toFixed(1) + " AU/yr", sx, sy - S.captureRadiusAU * sc - 6);
-      }
-    }
-    const g = cx.createRadialGradient(sx, sy, R * 0.5, sx, sy, R * 2.2);
+  // the balls: every free one with its catch ring, then the one on the nose
+  const drawBall = (x, y) => {
+    const R = S.acbRadiusAU * sc;
+    const g = cx.createRadialGradient(x, y, R * 0.5, x, y, R * 2.2);
     g.addColorStop(0, "rgba(255,255,255,0.35)"); g.addColorStop(1, "rgba(255,255,255,0)");
-    circle(sx, sy, R * 2.2, g);
-    const b = cx.createRadialGradient(sx - R * 0.35, sy - R * 0.35, R * 0.1, sx, sy, R);
+    circle(x, y, R * 2.2, g);
+    const b = cx.createRadialGradient(x - R * 0.35, y - R * 0.35, R * 0.1, x, y, R);
     b.addColorStop(0, "#ffffff"); b.addColorStop(0.7, "#dfe6f0"); b.addColorStop(1, "#8a97a8");
-    circle(sx, sy, R, b);
+    circle(x, y, R, b);
+  };
+  const noseBare = acb.mode === "empty" || acb.mode === "lost";
+  for (const k of balls) {
+    const [sx, sy] = worldToScreen(k.x, k.y);
+    const d = dist(ship.x, ship.y, k.x, k.y), rel = Math.hypot(ship.vx - k.vx, ship.vy - k.vy);
+    const inside = d < S.captureRadiusAU, slow = rel < S.captureSpeed;
+    const col = !noseBare ? "rgba(255,255,255,0.18)" : inside && slow ? "rgba(143,232,176,0.9)" : inside ? "rgba(232,180,99,0.8)" : "rgba(255,255,255,0.35)";
+    cx.setLineDash([4, 4]); circle(sx, sy, S.captureRadiusAU * sc, null, col, 1.5); cx.setLineDash([]);
+    if (inside && noseBare) {
+      cx.fillStyle = col; cx.font = `10px "Share Tech Mono", monospace`; cx.textAlign = "center";
+      cx.fillText(slow ? "MATCHED" : "REL " + rel.toFixed(1) + " AU/yr", sx, sy - S.captureRadiusAU * sc - 6);
+    }
+    drawBall(sx, sy);
   }
+  if (acb.mode === "attached" || acb.mode === "capturing") { const [sx, sy] = worldToScreen(acb.x, acb.y); drawBall(sx, sy); }
   // the ship
   {
     const [sx, sy] = worldToScreen(ship.x, ship.y);
@@ -873,8 +900,10 @@ function drawHud(W, H) {
      "   BALLS LEFT " + Math.max(0, S.maxLostBalls - score.lost), score.lost >= S.maxLostBalls - 1 ? "#ff8c70" : "#cfe0ff"],
     ["T " + simYears.toFixed(2) + " yr" + (score.deaths ? "   SHIP LOST " + score.deaths : ""), "#9fb4cc"],
     ["MODE " + (S.dragMode ? "DRAG (pull back)" : "CHARGE (hold LMB)") + "   Tab swaps", "#8fc3e8"],
-    ["ACB " + (acb.mode === "attached" ? "ON THE NOSE" : acb.mode === "free" ? "FREE, go and catch it" :
-              acb.mode === "capturing" ? "WINCHING IN" : score.failed ? "NONE LEFT" : "LOST, new one in " + Math.max(0, S.respawnSeconds - acb.lostT).toFixed(1) + " s"),
+    ["ACB " + (acb.mode === "attached" ? "ON THE NOSE" : acb.mode === "capturing" ? "WINCHING IN" :
+              acb.mode === "empty" ? "OUT, go and catch it (Space for a new one)" :
+              score.failed ? "NONE LEFT" : "LOST, new one in " + Math.max(0, S.respawnSeconds - acb.lostT).toFixed(1) + " s")
+     + (balls.length > 1 || (balls.length === 1 && acb.mode !== "empty") ? "   " + balls.length + " BALL" + (balls.length > 1 ? "S" : "") + " OUT" : ""),
      acb.mode === "attached" ? "#e8f0fa" : acb.mode === "lost" ? "#ff5030" : "#8fe8b0"],
     stab ? ["STABILISER burning, " + stab.err.toFixed(2) + " AU/yr to go.  WASD or Shift to override", "#e8b463"] : null,
   ].filter(Boolean);
@@ -935,7 +964,7 @@ cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { cam.zoom = Math.max(0.4, Math.min(6, cam.zoom * Math.exp(-e.deltaY * 0.0012))); e.preventDefault(); }, { passive: false });
 
 // ============================== TEST PANEL ======================================
-const STORE_KEY = "galaxytable.v9";   // bumped: saved settings would otherwise hide the new default
+const STORE_KEY = "galaxytable.v10";   // bumped: saved settings would otherwise hide the new default
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
   catch { return { ...DEFAULTS }; }
@@ -1040,11 +1069,12 @@ buildPanel();
 window.RIG = {
   state: () => ({ simYears, sliderT, warp: warpNow(),
                   ship: { x: ship.x, y: ship.y, vx: ship.vx, vy: ship.vy, nose: ship.nose },
-                  acb: { mode: acb.mode, x: acb.x, y: acb.y, vx: acb.vx, vy: acb.vy, dwell: acb.dwell },
+                  acb: { mode: acb.mode, x: acb.x, y: acb.y, vx: acb.vx, vy: acb.vy },
+                  balls: balls.map(k => ({ x: k.x, y: k.y, vx: k.vx, vy: k.vy, dwell: k.dwell })),
                   bodies: bodies.map(b => ({ name: b.name, x: b.x, y: b.y, vx: b.vx, vy: b.vy, alive: b.alive, struck: b.struck })),
                   pockets: POCKETS.map(p => ({ name: p.name, x: p.x, y: p.y })),
                   score: { ...score }, notices: notices.map(n => n.text),
-                  ghost: ghost ? { pts: ghost.acb.length, hit: ghost.hit, worlds: ghost.worlds.length } : null }),
+                  ghost: ghost ? { pts: ghost.pending ? ghost.pending.length : 0, hit: ghost.hit, balls: ghost.balls.length, worlds: ghost.worlds.length } : null }),
   settings: () => S,
   stab: () => stab,
   set: (k, v) => { S[k] = v; },
@@ -1057,7 +1087,7 @@ window.RIG = {
   override: (why) => overrideStabiliser(why),
   newBall: () => newBallNow(),
   teleportBody: (i, x, y, vx, vy, struck) => { const b = bodies[i]; b.x = x; b.y = y; b.vx = vx; b.vy = vy; if (struck != null) b.struck = struck; },
-  ghostNow: () => { buildGhost(); return ghost ? { pts: ghost.acb.length, hit: ghost.hit, worlds: ghost.worlds.length } : null; },
+  ghostNow: () => { buildGhost(); return ghost ? { pts: ghost.pending ? ghost.pending.length : 0, hit: ghost.hit, balls: ghost.balls.length, worlds: ghost.worlds.length } : null; },
   realTick: (s) => { checkCapture(s); stepCapture(s); stepLost(s); },
 };
 
