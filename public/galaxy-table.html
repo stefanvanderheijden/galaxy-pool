@@ -801,7 +801,7 @@ function saveSettings() { try { localStorage.setItem(STORE_KEY, JSON.stringify(S
 
 const PANEL = [
   ["h", "GALAXY TABLE SETTINGS"],
-  ["r", "gameSpeedK", "game speed (x1000 real time)", 50, 5000, 50],
+  ["l", "gameSpeedK", "game speed (x1000 real time)", 20, 5000],   // log: room at the slow end
   ["b", "driftMode", "clock returns to game speed when Q/E released"],
   ["-"],
   ["b", "dragMode", "aim by pulling back (off = hold to charge)  [Tab]"],
@@ -839,6 +839,7 @@ const PANEL = [
   ["r", "viewRadiusAU", "how much of the table you see", 1.5, 5, 0.1],
 ];
 
+function fmtLog(v) { return v < 100 ? v.toFixed(1) : v.toFixed(0); }
 function buildPanel() {
   const el = document.getElementById("panel");
   let html = "";
@@ -846,7 +847,12 @@ function buildPanel() {
     if (row[0] === "h") { html += `<h1>${row[1]} <span id="collapse">[-]</span></h1><div id="panelBody">`; continue; }
     if (row[0] === "-") { html += "<hr>"; continue; }
     const [kind, key, label, min, max, step] = row;
-    if (kind === "b")
+    // "l" is a log-scaled range: the slider travels an exponent, so each doubling gets
+    // the same room and the slow end is not three pixels wide.
+    if (kind === "l") {
+      const t = Math.log(S[key] / min) / Math.log(max / min);
+      html += `<div class="row"><label><span>${label}</span><input type="range" data-k="${key}" data-log="${min},${max}" min="0" max="1" step="0.001" value="${t}"><span class="val" id="v_${key}">${fmtLog(S[key])}</span></label></div>`;
+    } else if (kind === "b")
       html += `<div class="row"><label><span>${label}</span><input type="checkbox" data-k="${key}" ${S[key] ? "checked" : ""}></label></div>`;
     else
       html += `<div class="row"><label><span>${label}</span><input type="range" data-k="${key}" min="${min}" max="${max}" step="${step}" value="${S[key]}"><span class="val" id="v_${key}">${S[key]}</span></label></div>`;
@@ -856,9 +862,14 @@ function buildPanel() {
   el.querySelectorAll("input").forEach(inp => {
     inp.addEventListener("input", () => {
       const k = inp.dataset.k;
-      S[k] = inp.type === "checkbox" ? inp.checked : parseFloat(inp.value);
+      let shown = inp.value;
+      if (inp.dataset.log) {
+        const [lo, hi] = inp.dataset.log.split(",").map(Number);
+        S[k] = lo * Math.pow(hi / lo, parseFloat(inp.value));
+        shown = fmtLog(S[k]);
+      } else S[k] = inp.type === "checkbox" ? inp.checked : parseFloat(inp.value);
       const v = document.getElementById("v_" + k);
-      if (v) v.textContent = inp.value;
+      if (v) v.textContent = shown;
       saveSettings();
     });
   });
