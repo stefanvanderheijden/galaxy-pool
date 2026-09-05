@@ -90,6 +90,20 @@ export const SKETCHES = [
       fires along it.`,
     tags: ['3D surface', 'frozen time', 'dock to shoot', 'unmoored bodies', 'trajectory preview'],
   },
+  {
+    id: '008',
+    name: '008 Galaxy 64',
+    href: '/galaxy-64.html',
+    tagline: 'The captain\'s seat over the pool table: fly first person, get captured, pull out, pool, snap back.',
+    description: `A first-person layer over the space game, in the N64 way: the planets are
+      flat cards that scroll a seamless band through a circular mask to read as rotating
+      spheres, the sky is nested parallax domes, and the bridge carries Robert, the mirror,
+      the inspector and a radar. WASD to fly, hold Shift for zero gravity drift, Q/E for the
+      clock. Get close and slow near a world to enter orbit; the camera pulls up to the
+      table, drag back from the world and release to pool it, and the seat returns once the
+      world is potted or has moved past. Flies level-01 on a port of the Unity sim.`,
+    tags: ['first person', 'cards', 'parallax', 'pool loop', 'level-01'],
+  },
 ]
 
 /** @param {string} id */
