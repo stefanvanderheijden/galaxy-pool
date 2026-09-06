@@ -115,9 +115,24 @@
   the same engine the hand flies, and says so in the log. Any WASD or Shift input is the
   manual override: it cancels the burn and the log says that too. Off on the panel.
 
-  FOULS. The ACB into a pocket or the star is destroyed and a fresh one respawns on the
-  nose after a few seconds; a world into the star is burned. Both count as fouls. Lose
-  maxLostBalls cue balls (three) and the table is failed: no respawn, R to rack again. The
+  THE CHAMBER. Three cue balls, one on the nose and two chambered, shown bottom left
+  above the log. A ball is only spent when it is DESTROYED: a pocket, the star, or a
+  thermonuclear going off. A ball flying about is not lost, it is out, and catching it
+  puts it back on the nose or into the chamber. Space loads the next chambered ball
+  onto a bare nose; after a ball is destroyed the next loads itself. When no ball is
+  left anywhere the table is failed, R to rack again. A world into the star is burned,
+  a foul like any destroyed ball. Cue balls knock each other.
+
+  BALL TYPES, set per slot by clicking the slot's type in the chamber menu:
+    Standard       white. The ball described everywhere above.
+    Thermonuclear  yellow. Goes off on impact, so it is spent, and hits with
+                   thermoEnergy times a normal shot: the ball for a heavy world. A
+                   FRAGILE world (Terra, Vera: rock and ice) breaks instead of moving,
+                   which is a foul; Red's thick envelope takes it.
+    Gravitizer     dark purple. Once shot it pulls at everything inside gravReachAU,
+                   worlds, balls and the ship, as a softened point mass of gravPull
+                   solar masses; a world it reaches is unmoored. Drawn with subtle
+                   inward-pulsing purple rings, the pull made visible. The
   ship into either respawns on its opening orbit. No timer, no energy, no fog, no scan,
   no rogue, no gas cloud, no Robert: a feel rig for one question, whether shooting and
   chasing a cue ball is better than shooting with the ship.
@@ -136,6 +151,15 @@
   #panel input[type=range] { width: 90px; flex: none; }
   #panel .val { width: 44px; text-align: right; color: #e2ecff; }
   #panel hr { border: 0; border-top: 1px solid #22304a; margin: 6px 0; }
+  #chamber { position: fixed; left: 14px; bottom: 112px; display: flex; gap: 8px; font: 11px/1.4 "Share Tech Mono", Menlo, monospace; user-select: none; }
+  #chamber .slot { width: 96px; background: rgba(8,12,22,0.8); border: 1px solid #2a3a55; border-radius: 6px; padding: 6px 8px; color: #9fb4cc; }
+  #chamber .slot .lbl { font-size: 9px; letter-spacing: 1px; color: #6f86a8; }
+  #chamber .slot .ball { display: flex; align-items: center; gap: 6px; margin: 4px 0 2px; }
+  #chamber .slot .dot { width: 14px; height: 14px; border-radius: 50%; box-shadow: 0 0 6px rgba(255,255,255,0.25); }
+  #chamber .slot .type { cursor: pointer; color: #cfe0ff; border-bottom: 1px dotted #4a5f80; }
+  #chamber .slot .type:hover { color: #ffffff; }
+  #chamber .slot.out .type, #chamber .slot.none .type { cursor: default; border-bottom: 0; color: #6f86a8; }
+  #chamber .slot.active { border-color: #4fc3f7; }
   #panel button { background: #182640; color: #cfe0ff; border: 1px solid #2f4468; border-radius: 4px;
     font: inherit; padding: 3px 8px; cursor: pointer; width: 100%; }
 </style>
@@ -143,6 +167,7 @@
 <body>
 <canvas id="cv"></canvas>
 <div id="panel"></div>
+<div id="chamber"></div>
 <script>
 "use strict";
 // ============================== SPRITES (baked) ================================
@@ -203,11 +228,12 @@ const DEFAULTS = {
   pocketInfluenceAU: 0.5, // level-01's influenceRadius
   pocketMass: 0.6,        // level-01's Styx
   planetBoost: 10000,     // the game layer's boost, unchanged: wells you can grab
-  respawnSeconds: 3,      // a lost ACB comes back on the nose after this
+  respawnSeconds: 3,      // after a ball is destroyed, the next chambered one loads after this
   viewRadiusAU: 2.9,      // whole-table camera: half the short side, in AU
   gameSpeedK: 200,        // the clock's resting speed, in thousands of times real time
-  maxLostBalls: 3,        // lose this many ACBs and the table is failed
-  spaceCostsBall: true,   // Space on a free ball counts it as lost
+  thermoEnergy: 3,        // thermonuclear impact energy, x a normal shot
+  gravPull: 0.03,         // gravitizer mass, solar masses
+  gravReachAU: 0.6,       // gravitizer reach
   forceArrows: true,      // the free-body diagram on the cue ball while aiming
   arrowNumbers: false,    // label the arrows with values, not just their source
   arrowPxPerAUyr: 12,     // one pixel scale for every arrow, so they compare
@@ -230,9 +256,16 @@ let S = loadSettings();
 const STAR = { x: 0, y: 0, mass: 0.45, drawR: 0.012, color: "#ff4b2b" };
 const PLANET_DEFS = [
   { id: "smell",   name: "Red",   sprite: "red",       r: 0.55, a: 2.35,  mass: 4.1e-6,  drawR: 0.0068, color: "#d98c4a" },
-  { id: "hearing", name: "Terra", sprite: "terra",     r: 0.92, a: 0.62,  mass: 1.55e-6, drawR: 0.0052, color: "#7fa8a0" },
-  { id: "touch",   name: "Vera",  sprite: "vera",      r: 1.45, a: 5.583, mass: 4.2e-7,  drawR: 0.0038, color: "#cfd8e3" },
+  { id: "hearing", name: "Terra", sprite: "terra",     r: 0.92, a: 0.62,  mass: 1.55e-6, drawR: 0.0052, color: "#7fa8a0", fragile: true },
+  { id: "touch",   name: "Vera",  sprite: "vera",      r: 1.45, a: 5.583, mass: 4.2e-7,  drawR: 0.0038, color: "#cfd8e3", fragile: true },
 ];
+// The cue balls. See the header. Colours are the designer's: white, yellow, dark purple.
+const BALL_TYPES = {
+  standard: { name: "Standard",      short: "STD",   color: "#ffffff", hi: "#ffffff", lo: "#8a97a8" },
+  thermo:   { name: "Thermonuclear", short: "THERMO", color: "#ffd23a", hi: "#fff2a0", lo: "#a8781a" },
+  grav:     { name: "Gravitizer",    short: "GRAV",  color: "#5a2a8a", hi: "#b48cff", lo: "#2a1040" },
+};
+const TYPE_ORDER = ["standard", "thermo", "grav"];
 const SHIP_DEF = { r: 1.45, a: 3.927, overSpeed: 1.005 };
 // Three pockets at Styx's radius, Styx first, the others 120 degrees round. Underworld
 // rivers, because a pocket is where a world goes and does not come back from.
@@ -243,7 +276,7 @@ const POCKETS = [
   { name: "Acheron", a: STYX_A + 2 * TAU / 3 },
 ].map(p => ({ name: p.name, x: STYX_R * Math.cos(p.a), y: STYX_R * Math.sin(p.a), color: "#b48cff" }));
 
-let bodies, ship, acb, balls, score, simYears;
+let bodies, ship, acb, balls, chamber, score, simYears;
 
 function orbitState(r, a, over) {
   const v = Math.sqrt(G * STAR.mass / r) * (over || 1);
@@ -251,9 +284,10 @@ function orbitState(r, a, over) {
 }
 function derivePlanet(d) {
   return { ...orbitState(d.r, d.a), id: d.id, name: d.name, sprite: d.sprite, mass: d.mass, drawR: d.drawR,
-           color: d.color, orbitR: d.r, struck: false, alive: true, trail: [], spin: Math.random() * TAU };
+           color: d.color, fragile: !!d.fragile, orbitR: d.r, struck: false, alive: true, trail: [], spin: Math.random() * TAU };
 }
 function ballR(b) { return Math.max(b.drawR * S.ballScale, S.minBallAU); }
+function ballsLeft() { return (acb.mode === "attached" || acb.mode === "capturing" ? 1 : 0) + chamber.length + balls.length; }
 function starR() { return Math.max(STAR.drawR * S.ballScale, 0.1); }
 
 function resetWorld() {
@@ -265,8 +299,9 @@ function resetWorld() {
   // there), lost (a ball was destroyed and a new one is on its way). balls is every
   // free ball on the table, because Space can put a new one on the nose while the old
   // one is still flying, and the old one keeps flying.
-  acb = { mode: "attached", x: 0, y: 0, vx: 0, vy: 0, cap: null, lostT: 0 };
+  acb = { mode: "attached", type: "standard", x: 0, y: 0, vx: 0, vy: 0, cap: null, lostT: 0 };
   balls = [];
+  chamber = ["standard", "standard"];        // the two behind the nose, next to load first
   placeAcbOnNose();
   score = { shots: 0, fouls: 0, potted: 0, burned: 0, deaths: 0, lost: 0, won: false, wonAt: 0, failed: false };
   simYears = 0;
@@ -367,15 +402,21 @@ function collide(a, ma, ra, b, mb, rb) {
 function resolveContacts(list, freeBalls, events) {
   const rA = S.acbRadiusAU;
   for (const ball of freeBalls) for (const b of list) {
-    if (!b.alive) continue;
-    if (collide(ball, S.acbMassRatio * b.mass, rA, b, b.mass, ballR(b))) {
-      if (!b.struck) { b.struck = true; events.push({ kind: "struck", b, x: b.x, y: b.y }); }
-      else events.push({ kind: "hit", b, x: b.x, y: b.y });
-    }
+    if (!b.alive || ball.dead) continue;
+    // a thermonuclear hits with thermoEnergy times the energy: scale its speed going in
+    const boost = ball.type === "thermo" ? Math.sqrt(S.thermoEnergy) : 1;
+    ball.vx *= boost; ball.vy *= boost;
+    const hit = collide(ball, S.acbMassRatio * b.mass, rA, b, b.mass, ballR(b));
+    if (!hit) { ball.vx /= boost; ball.vy /= boost; continue; }
+    if (!b.struck) { b.struck = true; events.push({ kind: "struck", b, ball, x: b.x, y: b.y }); }
+    else events.push({ kind: "hit", b, ball, x: b.x, y: b.y });
   }
   // two cue balls meet: equal masses, whatever they are
-  for (let i = 0; i < freeBalls.length; i++) for (let j = i + 1; j < freeBalls.length; j++)
-    collide(freeBalls[i], 1, rA, freeBalls[j], 1, rA);
+  for (let i = 0; i < freeBalls.length; i++) for (let j = i + 1; j < freeBalls.length; j++) {
+    const a = freeBalls[i], c = freeBalls[j];
+    if (a.dead || c.dead) continue;
+    if (collide(a, 1, rA, c, 1, rA)) events.push({ kind: "balls", a, c, x: (a.x + c.x) / 2, y: (a.y + c.y) / 2 });
+  }
   if (S.planetsCollide) for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
     const p = list[i], q = list[j];
     if (!p.alive || !q.alive || (!p.struck && !q.struck)) continue;
@@ -387,13 +428,13 @@ function resolveContacts(list, freeBalls, events) {
 // A flash ball's step: the segment P0 -> P0 + v h against every world's disc, first
 // contact wins, the ball is placed touching. Returns the world hit or null. Also the
 // forecast's step for the same ball, which is why it takes the list.
-function sweepBall(k, list, h) {
+function sweepBall(k, list, others, h) {
   const dx = k.vx * h, dy = k.vy * h, L = Math.hypot(dx, dy);
   if (L < 1e-12) return null;
   let best = null, bestT = 1;
-  for (const b of list) {
-    if (!b.alive) continue;
-    const R = S.acbRadiusAU + ballR(b);
+  const targets = list.filter(b => b.alive).concat(others.filter(o => o !== k && !o.dead && !o.flash).map(o => ({ ball: o, x: o.x, y: o.y })));
+  for (const b of targets) {
+    const R = S.acbRadiusAU + (b.ball ? S.acbRadiusAU : ballR(b));
     const fx0 = k.x - b.x, fy0 = k.y - b.y;
     const A = dx * dx + dy * dy, B = 2 * (fx0 * dx + fy0 * dy), C = fx0 * fx0 + fy0 * fy0 - R * R;
     if (C <= 0) { best = b; bestT = 0; break; }          // already inside: contact now
@@ -418,18 +459,40 @@ function burnOut(k) {
   k.vx = k.vx / v * dv; k.vy = k.vy / v * dv;
   k.flash = null;
 }
+// What a thermonuclear does after it has hit: it is spent, and a fragile world breaks.
+// Shared with the forecast, so the aim line shows a world breaking too.
+function thermoAftermath(ball, b) {
+  ball.dead = true; ball.spent = true;
+  if (b && b.fragile && b.alive) { b.alive = false; b.broken = true; }
+}
+// The gravitizer's pull on one object: softened point mass, inside its reach only.
+function gravitize(k, o, h) {
+  if (o === k || dist(k.x, k.y, o.x, o.y) > S.gravReachAU) return false;
+  pull(k.x, k.y, G * S.gravPull, o, h);
+  return true;
+}
+function gravitizeAll(freeBalls, list, others, shipObj, h) {
+  for (const k of freeBalls) {
+    if (k.type !== "grav" || k.flash || k.dead) continue;
+    for (const b of list) if (b.alive && gravitize(k, b, h) && !b.struck) b.struck = true;   // reached: unmoored
+    for (const o of others) if (!o.dead) gravitize(k, o, h);
+    if (shipObj) gravitize(k, shipObj, h);
+  }
+}
 function pocketAt(x, y, r) { for (const p of POCKETS) if (dist(x, y, p.x, p.y) < S.pocketRadiusAU + r) return p; return null; }
 
 function simStep(h, offGravity) {
   stepWorlds(bodies, h);
   if (!offGravity) gameGravity(ship, bodies, h, true);
   for (const k of balls) if (!k.flash) gameGravity(k, bodies, h, S.acbFeelsWorlds);   // a flash outruns gravity
+  gravitizeAll(balls, bodies, balls, offGravity ? null : ship, h);
   for (const b of bodies) if (b.alive) { b.x += b.vx * h; b.y += b.vy * h; b.spin += h * 40; }
   ship.x += ship.vx * h; ship.y += ship.vy * h;
   for (const k of balls) {
     if (!k.flash) { k.x += k.vx * h; k.y += k.vy * h; continue; }
-    const hit = sweepBall(k, bodies, h);
+    const hit = sweepBall(k, bodies, balls, h);
     k.flash.pts.push({ x: k.x, y: k.y, age: 0 });
+    if (hit && hit.ball) { flashHitsBall(k, hit.ball); continue; }
     if (hit) { beginImpactFrame(k, hit); return true; }   // the frame freezes here
     if (k.flash.remain <= 0) { fx.trails.push(k.flash.pts); burnOut(k); note("FLASH BURNED OUT: ball at normal speed", "#e8b463"); }
   }
@@ -438,6 +501,8 @@ function simStep(h, offGravity) {
   resolveContacts(bodies, balls.filter(k => !k.flash), events);
   for (const e of events) {
     if (e.kind === "struck") { flash(e.x, e.y, 0.15, e.b.color); note("STRUCK: " + e.b.name, e.b.color); }
+    if (e.kind === "balls") { flash(e.x, e.y, 0.08, "#ffffff"); note("CUE BALLS COLLIDE", "#e8f0fa"); }
+    if (e.ball && e.ball.type === "thermo") thermoGoesOff(e.ball, e.b);
   }
 
   // Endings. A world into a pocket is the point; into the star is the foul.
@@ -452,23 +517,33 @@ function simStep(h, offGravity) {
       note("BURNED: " + b.name + " (foul)", "#ff5030");
     }
   }
+  for (const b of bodies) if (b.broken && !b.brokenNoted) {
+    b.brokenNoted = true; score.burned++; score.fouls++;
+    burst(b.x, b.y, 0.2, b.color); burst(b.x, b.y, 0.12, "#ffffff"); flash(b.x, b.y, 0.3, b.color);
+    note("BROKEN: " + b.name + " shattered by the thermonuclear (foul)", "#ff5030");
+  }
+  const gone = [];
   for (const k of balls) {
+    if (k.dead) { gone.push({ k, why: "THERMONUCLEAR SPENT" }); continue; }
     const p = pocketAt(k.x, k.y, 0);
     if (p || dist(k.x, k.y, STAR.x, STAR.y) < starR()) {
       k.dead = true;
       flash(k.x, k.y, 0.2, "#ffffff"); burst(k.x, k.y, 0.08, "#ffffff");
-      loseBall(p ? "ACB LOST: pocketed in " + p.name : "ACB LOST: burned");
-      // the nose only waits for a replacement if it is bare; a ball already on it stays
-      if (acb.mode === "empty" && !score.failed) { acb.mode = "lost"; acb.lostT = 0; }
+      gone.push({ k, why: p ? "ACB LOST: pocketed in " + p.name : "ACB LOST: burned" });
     }
   }
-  balls = balls.filter(k => !k.dead);
+  if (gone.length) {
+    balls = balls.filter(k => !k.dead);
+    for (const g of gone) loseBall(g.why);
+    // a bare nose loads the next chambered ball after a moment; a ball already on it stays
+    if (acb.mode === "empty" && !score.failed) { acb.mode = "lost"; acb.lostT = 0; }
+  }
   if (pocketAt(ship.x, ship.y, 0) || dist(ship.x, ship.y, STAR.x, STAR.y) < starR()) {
     score.deaths++; flash(ship.x, ship.y, 0.3, "#ffffff");
     note("SHIP LOST: RESPAWNING", "#ff5030");
     const s = orbitState(SHIP_DEF.r, SHIP_DEF.a, SHIP_DEF.overSpeed);
     Object.assign(ship, s); ship.nose = Math.atan2(s.vy, s.vx); ship.trail = [];
-    if (acb.mode === "capturing") { balls.push({ x: acb.x, y: acb.y, vx: 0, vy: 0, trail: [], dwell: 0, lock: 0 }); acb.mode = "empty"; acb.cap = null; }
+    if (acb.mode === "capturing") { balls.push({ type: acb.type, x: acb.x, y: acb.y, vx: 0, vy: 0, trail: [], dwell: 0, lock: 0 }); acb.mode = "empty"; acb.cap = null; }
     charging = false; charge = 0; drag = null; stab = null;
   }
   if (!score.won && bodies.every(b => !b.alive)) { score.won = true; score.wonAt = simYears; note("TABLE CLEARED", "#ffe08a"); }
@@ -522,9 +597,26 @@ function placeAcbOnNose() {
 // One ball gone, whatever took it. Counts down the three and fails the table at zero.
 function loseBall(why) {
   score.fouls++; score.lost++;
-  const left = S.maxLostBalls - score.lost;
-  note(why + " (foul, " + Math.max(0, left) + " left)", "#ff5030");
+  const left = ballsLeft();
+  note(why + " (foul, " + left + " left)", "#ff5030");
   if (left <= 0 && !score.won && !score.failed) { score.failed = true; note("TABLE FAILED: no cue balls left", "#ff5030"); }
+}
+// The thermonuclear goes off: a big burst, the ball is spent, a fragile world breaks.
+function thermoGoesOff(ball, b) {
+  thermoAftermath(ball, b);
+  burst(ball.x, ball.y, 0.3, "#ffd23a"); burst(ball.x, ball.y, 0.18, "#ffffff"); flash(ball.x, ball.y, 0.5, "#ffd23a");
+  fx.flashA = Math.max(fx.flashA, 0.6); fx.shake = Math.max(fx.shake, 0.7);
+  note("THERMONUCLEAR DETONATED on " + b.name, "#ffd23a");
+}
+// A flash ball reaches another cue ball: no impact frame, the normal energy transfers.
+function flashHitsBall(k, o) {
+  const [ivx, ivy] = impactVelocity(k); k.vx = ivx; k.vy = ivy;
+  const dx = o.x - k.x, dy = o.y - k.y, d = Math.hypot(dx, dy) || 1, R = 2 * S.acbRadiusAU;
+  k.x = o.x - dx / d * R * 0.995; k.y = o.y - dy / d * R * 0.995;
+  collide(k, 1, S.acbRadiusAU, o, 1, S.acbRadiusAU);
+  flash(k.x, k.y, 0.1, "#ffffff"); note("CUE BALLS COLLIDE", "#e8f0fa");
+  fx.trails.push(k.flash.pts); k.flash = null;
+  if (k.type === "thermo") thermoGoesOff(k, { name: "a cue ball" });
 }
 // Both modes end here: a direction and a 0..1 power. The ACB leaves the seat with the
 // ship's velocity plus the shot, and the ship takes recoilFrac of it backwards.
@@ -532,7 +624,7 @@ function fireAcb(dx, dy, power) {
   if (acb.mode !== "attached" || score.failed) return;
   const dv = power * S.shotPower;
   placeAcbOnNose();
-  const k = { x: acb.x, y: acb.y, vx: ship.vx * S.inheritFrac + dx * dv, vy: ship.vy * S.inheritFrac + dy * dv, trail: [], dwell: 0, lock: S.captureLockoutS };
+  const k = { type: acb.type, x: acb.x, y: acb.y, vx: ship.vx * S.inheritFrac + dx * dv, vy: ship.vy * S.inheritFrac + dy * dv, trail: [], dwell: 0, lock: S.captureLockoutS };
   if (S.animeMode) {
     // the flash: same direction, flash speed, and the normal shot's energy remembered for the impact
     k.vx = ship.vx * S.inheritFrac + dx * S.animeSpeedAUyr; k.vy = ship.vy * S.inheritFrac + dy * S.animeSpeedAUyr;
@@ -596,15 +688,22 @@ function checkCapture(realDt) {
     k.lock -= realDt;
     if (k.lock <= 0) { k.lock = 0; note("BALL CAN BE CAUGHT", "#8fe8b0"); }
   }
-  if (acb.mode !== "empty" && acb.mode !== "lost") return;   // a bare nose catches; a full one does not
+  if (acb.mode === "capturing") return;
+  const bare = acb.mode === "empty" || acb.mode === "lost";
   for (const k of balls) {
     if (k.lock > 0) { k.dwell = 0; continue; }
     if (catchable(k)) k.dwell += realDt; else k.dwell = 0;
     if (k.dwell >= S.captureDwellS) {
       balls = balls.filter(o => o !== k);
-      acb.mode = "capturing"; acb.x = k.x; acb.y = k.y;
-      acb.cap = { age: 0, sx: k.x - ship.x, sy: k.y - ship.y };
-      note("ACB CAPTURED", "#8fe8b0");
+      if (bare) {
+        acb.mode = "capturing"; acb.type = k.type; acb.x = k.x; acb.y = k.y;
+        acb.cap = { age: 0, sx: k.x - ship.x, sy: k.y - ship.y };
+        note("ACB CAPTURED: " + BALL_TYPES[k.type].name + " on the nose", "#8fe8b0");
+      } else {
+        // the nose is full: the ball goes into the chamber
+        chamber.push(k.type); flash(k.x, k.y, 0.12, "#8fe8b0");
+        note("ACB RECOVERED: " + BALL_TYPES[k.type].name + " chambered", "#8fe8b0");
+      }
       return;
     }
   }
@@ -619,23 +718,19 @@ function stepCapture(realDt) {
   acb.vx = ship.vx; acb.vy = ship.vy;
   if (t >= 1) { acb.mode = "attached"; acb.cap = null; placeAcbOnNose(); }
 }
-// Space: a new ball on the nose now. The ball out there keeps flying and can still be
-// caught; the new one is, by default, counted against the three, or Space would be a
-// free reload after every bad shot. A ball already lost has already been counted, so
-// Space during the wait only skips the wait.
+// Space: load the next chambered ball onto a bare nose. Nothing is spent: a ball out
+// there keeps flying and can still be caught back into the chamber.
 function newBallNow() {
   if (score.failed || score.won || acb.mode === "attached" || acb.mode === "capturing") return;
-  if (acb.mode === "empty" && S.spaceCostsBall) {
-    loseBall("NEW BALL ISSUED");
-    if (score.failed) { acb.mode = "lost"; acb.lostT = 0; return; }
-  }
+  if (!chamber.length) { note("CHAMBER EMPTY: catch a ball", "#e8b463"); return; }
+  acb.type = chamber.shift();
   acb.mode = "attached"; acb.cap = null; placeAcbOnNose();
-  note("NEW ACB ON THE NOSE" + (balls.length ? " (" + balls.length + " still out)" : ""), "#e8f0fa");
+  note(BALL_TYPES[acb.type].name.toUpperCase() + " LOADED" + (balls.length ? " (" + balls.length + " out)" : ""), "#e8f0fa");
 }
 function stepLost(realDt) {
   if (acb.mode !== "lost" || score.failed) return;
   acb.lostT += realDt;
-  if (acb.lostT >= S.respawnSeconds) { acb.mode = "attached"; placeAcbOnNose(); note("NEW ACB ON THE NOSE", "#e8f0fa"); }
+  if (acb.lostT >= S.respawnSeconds && chamber.length) newBallNow();
 }
 
 function flash(x, y, r, color) { flashes.push({ x, y, r, t: 0, color, kind: "ring" }); }
@@ -662,11 +757,14 @@ function endImpactFrame() {
   // nudge into contact so collide() sees the overlap, then the ordinary elastic exchange
   const dx = b.x - k.x, dy = b.y - k.y, d = Math.hypot(dx, dy) || 1, R = S.acbRadiusAU + ballR(b);
   k.x = b.x - dx / d * R * 0.995; k.y = b.y - dy / d * R * 0.995;
+  const boost = k.type === "thermo" ? Math.sqrt(S.thermoEnergy) : 1;
+  k.vx *= boost; k.vy *= boost;
   collide(k, S.acbMassRatio * b.mass, S.acbRadiusAU, b, b.mass, ballR(b));
   if (!b.struck) { b.struck = true; note("STRUCK: " + b.name, b.color); }
   fx.shocks.push({ x: k.x, y: k.y, t: 0 });
   fx.shake = Math.max(fx.shake, 0.8);
   fx.trails.push(k.flash.pts); k.flash = null;
+  if (k.type === "thermo") thermoGoesOff(k, b);
 }
 // Effects on the real clock. Trails age even during the frame; that is the point of it.
 function stepFx(realDt) {
@@ -694,11 +792,11 @@ function buildGhost() {
   if (p) {
     const [x, y] = noseSeat();
     const dv = p[2] * S.shotPower, sp = S.animeMode ? S.animeSpeedAUyr : dv;
-    pending = { x, y, vx: ship.vx * S.inheritFrac + p[0] * sp, vy: ship.vy * S.inheritFrac + p[1] * sp, pts: [{ x, y }], dead: false,
+    pending = { type: acb.type, x, y, vx: ship.vx * S.inheritFrac + p[0] * sp, vy: ship.vy * S.inheritFrac + p[1] * sp, pts: [{ x, y }], dead: false,
                 flash: S.animeMode ? { remain: S.animeRangeAU, normalDv: dv, pts: [] } : null };
     sim.push(pending);
   }
-  for (const k of balls) sim.push({ x: k.x, y: k.y, vx: k.vx, vy: k.vy, pts: [{ x: k.x, y: k.y }], dead: false,
+  for (const k of balls) sim.push({ type: k.type, x: k.x, y: k.y, vx: k.vx, vy: k.vy, pts: [{ x: k.x, y: k.y }], dead: false,
                                     flash: k.flash ? { remain: k.flash.remain, normalDv: k.flash.normalDv, pts: [] } : null });
   if (!sim.length) { ghost = null; return; }
   const gb = bodies.map(b => ({ ...b, trail: null }));
@@ -709,15 +807,18 @@ function buildGhost() {
   // worlds where they stand now: at 1600 AU/yr they do not move during it.
   for (const k of sim) {
     if (!k.flash) continue;
-    const hit = sweepBall(k, gb, S.animeRangeAU / Math.hypot(k.vx, k.vy));
+    const hit = sweepBall(k, gb, sim, S.animeRangeAU / Math.hypot(k.vx, k.vy));
     k.pts.push({ x: k.x, y: k.y });
+    if (hit && hit.ball) { k.flash = null; continue; }   // ball on ball: the loop below resolves it
     if (hit) {
       if (k === pending) out.hit = { x: k.x, y: k.y };
       const [ivx, ivy] = impactVelocity(k); k.vx = ivx; k.vy = ivy;
       const dx = hit.x - k.x, dy = hit.y - k.y, d = Math.hypot(dx, dy) || 1, R = S.acbRadiusAU + ballR(hit);
       k.x = hit.x - dx / d * R * 0.995; k.y = hit.y - dy / d * R * 0.995;
+      const boost = k.type === "thermo" ? Math.sqrt(S.thermoEnergy) : 1; k.vx *= boost; k.vy *= boost;
       collide(k, S.acbMassRatio * hit.mass, S.acbRadiusAU, hit, hit.mass, ballR(hit));
       hit.struck = true;
+      if (k.type === "thermo") thermoAftermath(k, hit);
       if (!track.has(hit.id)) track.set(hit.id, { color: hit.color, pts: [{ x: hit.x, y: hit.y }] });
     } else burnOut(k);
     k.flash = null;
@@ -727,13 +828,15 @@ function buildGhost() {
     stepWorlds(gb, H);
     const live = sim.filter(k => !k.dead);
     for (const k of live) gameGravity(k, gb, H, S.acbFeelsWorlds);
+    gravitizeAll(live, gb, live, null, H);
     for (const b of gb) if (b.alive) { b.x += b.vx * H; b.y += b.vy * H; }
     for (const k of live) { k.x += k.vx * H; k.y += k.vy * H; }
     const events = [];
     resolveContacts(gb, live, events);
     for (const e of events) {
       if (!out.hit && pending && !pending.dead && dist(e.x, e.y, pending.x, pending.y) < 0.2) out.hit = { x: e.x, y: e.y };
-      if (!track.has(e.b.id)) track.set(e.b.id, { color: e.b.color, pts: [{ x: e.b.x, y: e.b.y }] });
+      if (e.b && !track.has(e.b.id)) track.set(e.b.id, { color: e.b.color, pts: [{ x: e.b.x, y: e.b.y }] });
+      if (e.ball && e.ball.type === "thermo") thermoAftermath(e.ball, e.b);
     }
     for (const b of gb) {
       if (!b.alive) continue;
@@ -936,31 +1039,38 @@ function draw(realDt) {
     if (b.struck) circle(sx, sy, R + 3, null, colA(b.color, 0.5), 1);
   }
   // the balls: every free one with its catch ring, then the one on the nose
-  const drawBall = (x, y) => {
-    const R = S.acbRadiusAU * sc;
+  const drawBall = (x, y, type, live) => {
+    const T = BALL_TYPES[type || "standard"], R = S.acbRadiusAU * sc;
+    if (type === "grav" && live) {
+      // the pull made visible: rings that shrink into the ball, subtle
+      const now = performance.now() / 1000;
+      for (let i = 0; i < 3; i++) {
+        const ph = 1 - ((now * 0.5 + i / 3) % 1);          // 1 at the edge, 0 at the ball
+        circle(x, y, R + ph * S.gravReachAU * sc * 0.5, null, `rgba(180,140,255,${0.28 * (1 - ph) + 0.04})`, 1);
+      }
+    }
     const g = cx.createRadialGradient(x, y, R * 0.5, x, y, R * 2.2);
-    g.addColorStop(0, "rgba(255,255,255,0.35)"); g.addColorStop(1, "rgba(255,255,255,0)");
+    g.addColorStop(0, colA(T.hi, 0.35)); g.addColorStop(1, colA(T.hi, 0));
     circle(x, y, R * 2.2, g);
     const b = cx.createRadialGradient(x - R * 0.35, y - R * 0.35, R * 0.1, x, y, R);
-    b.addColorStop(0, "#ffffff"); b.addColorStop(0.7, "#dfe6f0"); b.addColorStop(1, "#8a97a8");
+    b.addColorStop(0, T.hi); b.addColorStop(0.55, T.color); b.addColorStop(1, T.lo);
     circle(x, y, R, b);
   };
-  const noseBare = acb.mode === "empty" || acb.mode === "lost";
   for (const k of balls) {
     const [sx, sy] = worldToScreen(k.x, k.y);
     const d = dist(ship.x, ship.y, k.x, k.y), rel = Math.hypot(ship.vx - k.vx, ship.vy - k.vy);
     const inside = d < S.captureRadiusAU, slow = rel < S.captureSpeed;
     // No ring at all until the ball is catchable: the ring appearing IS the signal.
-    if (k.lock > 0) { drawBall(sx, sy); continue; }
-    const col = !noseBare ? "rgba(255,255,255,0.18)" : inside && slow ? "rgba(143,232,176,0.9)" : inside ? "rgba(232,180,99,0.8)" : "rgba(255,255,255,0.35)";
+    if (k.lock > 0) { drawBall(sx, sy, k.type, true); continue; }
+    const col = inside && slow ? "rgba(143,232,176,0.9)" : inside ? "rgba(232,180,99,0.8)" : "rgba(255,255,255,0.35)";
     cx.setLineDash([4, 4]); circle(sx, sy, S.captureRadiusAU * sc, null, col, 1.5); cx.setLineDash([]);
-    if (inside && noseBare) {
+    if (inside) {
       cx.fillStyle = col; cx.font = `10px "Share Tech Mono", monospace`; cx.textAlign = "center";
       cx.fillText(slow ? "MATCHED" : "REL " + rel.toFixed(1) + " AU/yr", sx, sy - S.captureRadiusAU * sc - 6);
     }
-    drawBall(sx, sy);
+    drawBall(sx, sy, k.type, true);
   }
-  if (acb.mode === "attached" || acb.mode === "capturing") { const [sx, sy] = worldToScreen(acb.x, acb.y); drawBall(sx, sy); }
+  if (acb.mode === "attached" || acb.mode === "capturing") { const [sx, sy] = worldToScreen(acb.x, acb.y); drawBall(sx, sy, acb.type, false); }
   // the ship
   {
     const [sx, sy] = worldToScreen(ship.x, ship.y);
@@ -1114,18 +1224,19 @@ function drawHud(W, H) {
   const alive = bodies.filter(b => b.alive).length;
   const lines = [
     ["SHOTS " + score.shots + "   FOULS " + score.fouls + "   POTTED " + score.potted + "/" + bodies.length +
-     "   BALLS LEFT " + Math.max(0, S.maxLostBalls - score.lost), score.lost >= S.maxLostBalls - 1 ? "#ff8c70" : "#cfe0ff"],
+     "   BALLS " + ballsLeft(), ballsLeft() <= 1 ? "#ff8c70" : "#cfe0ff"],
     ["T " + simYears.toFixed(2) + " yr" + (score.deaths ? "   SHIP LOST " + score.deaths : ""), "#9fb4cc"],
     ["MODE " + (S.dragMode ? "DRAG (pull back)" : "CHARGE (hold LMB)") + "   Tab swaps", "#8fc3e8"],
     ["ACB " + (acb.mode === "attached" ? "ON THE NOSE" : acb.mode === "capturing" ? "WINCHING IN" :
-              acb.mode === "empty" ? "OUT, go and catch it (Space for a new one)" :
-              score.failed ? "NONE LEFT" : "LOST, new one in " + Math.max(0, S.respawnSeconds - acb.lostT).toFixed(1) + " s")
+              acb.mode === "empty" ? "OUT, go and catch it" + (chamber.length ? " (Space loads the next)" : "") :
+              score.failed ? "NONE LEFT" : chamber.length ? "DESTROYED, next loads in " + Math.max(0, S.respawnSeconds - acb.lostT).toFixed(1) + " s" : "DESTROYED, catch one")
      + (balls.length > 1 || (balls.length === 1 && acb.mode !== "empty") ? "   " + balls.length + " BALL" + (balls.length > 1 ? "S" : "") + " OUT" : ""),
      acb.mode === "attached" ? "#e8f0fa" : acb.mode === "lost" ? "#ff5030" : "#8fe8b0"],
     stab ? ["STABILISER burning, " + stab.err.toFixed(2) + " AU/yr to go.  WASD or Shift to override", "#e8b463"] : null,
   ].filter(Boolean);
   lines.forEach((l, i) => { cx.fillStyle = l[1]; cx.fillText(l[0], 14, 22 + i * 17); });
   notices.forEach((n, i) => { cx.fillStyle = colA(n.color, Math.min(1, (20 - n.t) / 4)); cx.fillText(n.text, 14, H - 20 - (notices.length - 1 - i) * 16); });
+  renderChamber();
   cx.fillStyle = "rgba(120,140,170,0.6)"; cx.textAlign = "right";
   cx.fillText("WASD fly  Shift drift  Q/E time  LMB shoot  Space new ball  Tab mode  C camera  R reset  H panel", W - 14, H - 14);
   cx.textAlign = "left";
@@ -1144,10 +1255,43 @@ function drawHud(W, H) {
     cx.fillStyle = "#ff5030"; cx.font = `20px "Share Tech Mono", monospace`; cx.textAlign = "center";
     cx.fillText("TABLE FAILED", W / 2, H / 2 - 14);
     cx.font = `12px "Share Tech Mono", monospace`;
-    cx.fillText(S.maxLostBalls + " cue balls lost, " + score.potted + " potted.  R to rack again", W / 2, H / 2 + 14);
+    cx.fillText("all three cue balls destroyed, " + score.potted + " potted.  R to rack again", W / 2, H / 2 + 14);
     cx.textAlign = "left";
   }
   if (paused) { cx.fillStyle = "#e8f0fa"; cx.font = `16px "Share Tech Mono", monospace`; cx.textAlign = "center"; cx.fillText("PAUSED", W / 2, 40); cx.textAlign = "left"; }
+}
+
+// ============================== THE CHAMBER MENU ================================
+// Three slots: the nose, then the two chambered. Click a slot's type to cycle it. A ball
+// that is out cannot be changed from here; it is whatever it was when it left.
+let chamberKey = "";
+function renderChamber() {
+  const slots = [];
+  const noseHas = acb.mode === "attached" || acb.mode === "capturing";
+  slots.push(noseHas ? { lbl: "ON THE NOSE", type: acb.type, state: "active", idx: -1 }
+                     : { lbl: "ON THE NOSE", type: null, state: acb.mode === "empty" ? "out" : "none", idx: -1,
+                         text: acb.mode === "empty" ? "ball out" : "empty" });
+  for (let i = 0; i < 2; i++) slots.push(i < chamber.length ? { lbl: "CHAMBER " + (i + 1), type: chamber[i], state: "", idx: i }
+                                                             : { lbl: "CHAMBER " + (i + 1), type: null, state: "none", idx: i, text: balls.length ? "out" : "spent" });
+  const key = JSON.stringify(slots);
+  if (key === chamberKey) return;
+  chamberKey = key;
+  const el = document.getElementById("chamber");
+  el.innerHTML = slots.map((sl, i) => {
+    const T = sl.type ? BALL_TYPES[sl.type] : null;
+    return `<div class="slot ${sl.state}" data-i="${i}"><div class="lbl">${sl.lbl}</div><div class="ball">` +
+      (T ? `<div class="dot" style="background:radial-gradient(circle at 35% 35%, ${T.hi}, ${T.color} 55%, ${T.lo})"></div><span class="type">${T.short}</span>`
+         : `<div class="dot" style="background:#1a2233;border:1px dashed #3a4a66"></div><span class="type">${sl.text}</span>`) +
+      `</div></div>`;
+  }).join("");
+  el.querySelectorAll(".slot .type").forEach((t, i) => t.addEventListener("click", () => cycleSlot(slots[i])));
+}
+function cycleSlot(sl) {
+  if (!sl.type) return;
+  const next = TYPE_ORDER[(TYPE_ORDER.indexOf(sl.type) + 1) % TYPE_ORDER.length];
+  if (sl.idx < 0) { if (acb.mode !== "attached") return; acb.type = next; }
+  else chamber[sl.idx] = next;
+  note((sl.idx < 0 ? "NOSE" : "CHAMBER " + (sl.idx + 1)) + ": " + BALL_TYPES[next].name, "#cfe0ff");
 }
 
 // ============================== INPUT ===========================================
@@ -1181,7 +1325,7 @@ cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { cam.zoom = Math.max(0.4, Math.min(6, cam.zoom * Math.exp(-e.deltaY * 0.0012))); e.preventDefault(); }, { passive: false });
 
 // ============================== TEST PANEL ======================================
-const STORE_KEY = "galaxytable.v12";   // bumped: saved settings would otherwise hide the new default
+const STORE_KEY = "galaxytable.v13";   // bumped: saved settings would otherwise hide the new default
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
   catch { return { ...DEFAULTS }; }
@@ -1232,9 +1376,11 @@ const PANEL = [
   ["r", "captureSpeed", "speed match needed to catch (higher = easier)", 0.5, 20, 0.25],
   ["r", "captureDwellS", "seconds in the ring before catching", 0, 1.5, 0.05],
   ["r", "captureSeconds", "seconds to reel the cue ball in", 0.2, 3, 0.05],
-  ["r", "respawnSeconds", "seconds until a lost cue ball returns", 0, 10, 0.5],
-  ["r", "maxLostBalls", "cue balls you can lose before failing", 1, 10, 1],
-  ["b", "spaceCostsBall", "Space (new ball) costs one of them"],
+  ["r", "respawnSeconds", "seconds until the next ball loads itself", 0, 10, 0.5],
+  ["-"],
+  ["r", "thermoEnergy", "thermonuclear hit (x a normal shot)", 1, 8, 0.25],
+  ["r", "gravPull", "gravitizer pull (solar masses)", 0.005, 0.2, 0.005],
+  ["r", "gravReachAU", "gravitizer reach (AU)", 0.1, 1.5, 0.05],
   ["-"],
   ["l", "thrustAccel", "engine power", 300, 30000],   // log: 3000 sits at the midpoint
   ["r", "linearDamp", "how fast the ship slows when coasting (0 = never)", 0, 4, 0.05],
@@ -1295,11 +1441,12 @@ buildPanel();
 window.RIG = {
   state: () => ({ simYears, sliderT, warp: warpNow(),
                   ship: { x: ship.x, y: ship.y, vx: ship.vx, vy: ship.vy, nose: ship.nose },
-                  acb: { mode: acb.mode, x: acb.x, y: acb.y, vx: acb.vx, vy: acb.vy },
-                  balls: balls.map(k => ({ x: k.x, y: k.y, vx: k.vx, vy: k.vy, dwell: k.dwell, lock: k.lock, flash: !!k.flash })),
+                  acb: { mode: acb.mode, type: acb.type, x: acb.x, y: acb.y, vx: acb.vx, vy: acb.vy },
+                  chamber: [...chamber], ballsLeft: ballsLeft(),
+                  balls: balls.map(k => ({ type: k.type, x: k.x, y: k.y, vx: k.vx, vy: k.vy, dwell: k.dwell, lock: k.lock, flash: !!k.flash })),
                   hitstop: hitstop ? { t: hitstop.t, planet: hitstop.planet.name } : null,
                   fx: { trails: fx.trails.length, shards: fx.shards.length, shocks: fx.shocks.length },
-                  bodies: bodies.map(b => ({ name: b.name, x: b.x, y: b.y, vx: b.vx, vy: b.vy, alive: b.alive, struck: b.struck })),
+                  bodies: bodies.map(b => ({ name: b.name, x: b.x, y: b.y, vx: b.vx, vy: b.vy, alive: b.alive, struck: b.struck, broken: !!b.broken })),
                   pockets: POCKETS.map(p => ({ name: p.name, x: p.x, y: p.y })),
                   score: { ...score }, notices: notices.map(n => n.text),
                   ghost: ghost ? { pts: ghost.pending ? ghost.pending.length : 0, hit: ghost.hit, balls: ghost.balls.length, worlds: ghost.worlds.length } : null }),
@@ -1317,6 +1464,7 @@ window.RIG = {
   key: (k, down) => { keys[k] = down; },
   override: (why) => overrideStabiliser(why),
   newBall: () => newBallNow(),
+  setType: (i, t) => { if (i < 0) acb.type = t; else chamber[i] = t; },
   teleportBody: (i, x, y, vx, vy, struck) => { const b = bodies[i]; b.x = x; b.y = y; b.vx = vx; b.vy = vy; if (struck != null) b.struck = struck; },
   ghostNow: () => { buildGhost(); return ghost ? { pts: ghost.pending ? ghost.pending.length : 0, hit: ghost.hit, balls: ghost.balls.length, worlds: ghost.worlds.length } : null; },
   realTick: (s) => { checkCapture(s); stepCapture(s); stepLost(s); },
