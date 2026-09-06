@@ -79,6 +79,36 @@
   lengths are comparable: near the star's ring gravity is a stub next to the cue, and
   next to a boosted world it is not, which is exactly the thing to see before shooting.
 
+  ANIME STYLE POOL BALL TRAIL (panel toggle). The same shot, but the ball leaves in a
+  flash: animeSpeedAUyr instead of shotPower, a straight burning streak across the table
+  in a tenth of a second, and an IMPACT FRAME at contact: the sim freezes for
+  animeHitstopMs with the two bodies touching, then the energy transfers and the world is
+  shot away. Built from two references in Reference/Flares/Anime style fast pool ball
+  trail/: the video (0.66 s: streak and bloom in two frames, then a frozen cone of
+  shards holding at the impact point) sets the timing; the meteor image sets the trail
+  (blue-white head, green core, orange smoke fringe, thinning to a hairline behind).
+
+  Two honesty decisions, both sliders. The ball FLIES at flash speed but IMPACTS with a
+  normal shot's energy (animeImpactEnergy x shotPower), so the world leaves at a speed
+  the table is tuned for and the ball is catchable afterwards; a flash that hits
+  nothing burns out after animeRangeAU and the ball drops to normal shot speed. At 1600
+  AU/yr a fixed substep of 1e-4 yr moves 0.16 AU, three times a world's radius, so a
+  flash ball is SWEPT: segment against circle, first contact wins, and the ball is
+  placed touching. The forecast sweeps the same way, so the aim line still lands on
+  the real contact point.
+
+  PORT NOTES, for Unity. Each piece maps to one thing:
+    swept contact       Physics2D.CircleCast along the substep, or the same segment maths
+    impact frame        Time.timeScale = 0 for animeHitstopMs, effects on unscaled time
+    burning trail       TrailRenderer, width curve fat at the head, colour gradient
+                        white -> green -> orange -> transparent, time = animeTrailS
+    launch blast        the flare system (Flares/) at the seat, one frame, plus a ring
+    shard cone          ParticleSystem burst of 16 stretched billboards in a 70-degree
+                        cone around the world's departure direction, 1 s lifetime
+    shockwave           a ring mesh scaled up over 0.6 s, additive
+    screen flash        full-screen white quad, alpha decays exp(-12 t)
+    camera shake        Cinemachine impulse, or the offset below: decays exp(-8 t)
+
   THE STABILISER. A shot kicks the ship backwards (recoilFrac), which is honest and
   leaves you slowly falling out of your ring while you watch the ball. So after every
   shot the ship burns itself back onto a circular orbit at whatever radius it is at, with
@@ -182,6 +212,12 @@ const DEFAULTS = {
   arrowNumbers: false,    // label the arrows with values, not just their source
   arrowPxPerAUyr: 12,     // one pixel scale for every arrow, so they compare
   gravityHorizonYr: 0.1,  // gravity is drawn as the velocity it adds over this
+  animeMode: false,       // 'Anime style pool ball trail'. See the header
+  animeSpeedAUyr: 1600,   // flash speed: about 1 AU per 0.1 s real at 200K
+  animeRangeAU: 3.0,      // a miss burns out after this much flight
+  animeHitstopMs: 200,    // the impact frame, real milliseconds, bodies touching
+  animeTrailS: 1.5,       // the trail's linger, real seconds
+  animeImpactEnergy: 1.0, // impact energy as a multiple of a normal shot at this power
   autoStabilise: true,    // burn back to a circular orbit after every shot
   stabiliseDoneAUyr: 0.05,// close enough: remaining velocity error that ends the burn
 };
@@ -235,7 +271,8 @@ function resetWorld() {
   score = { shots: 0, fouls: 0, potted: 0, burned: 0, deaths: 0, lost: 0, won: false, wonAt: 0, failed: false };
   simYears = 0;
   sliderT = 0.5; sliderShown = 0.5;   // open at the centre: 1M, the table's pace
-  charging = false; charge = 0; drag = null; stab = null;
+  charging = false; charge = 0; drag = null; stab = null; hitstop = null;
+  fx.trails = []; fx.shards = []; fx.shocks = []; fx.flashA = 0; fx.shake = 0;
   ghost = null;
 }
 
@@ -245,6 +282,8 @@ let paused = false;
 let charging = false, charge = 0;
 let drag = null;                            // {ax, ay} screen anchor while a DRAG shot is held
 let stab = null;                            // { err } while the post-shot stabiliser burns
+let hitstop = null;                         // { t, ball, planet } during an impact frame
+const fx = { trails: [], shards: [], shocks: [], flashA: 0, shake: 0, shakeX: 0, shakeY: 0 };
 let flashes = [];
 let notices = [];
 const keys = {};
@@ -345,18 +384,58 @@ function resolveContacts(list, freeBalls, events) {
     }
   }
 }
+// A flash ball's step: the segment P0 -> P0 + v h against every world's disc, first
+// contact wins, the ball is placed touching. Returns the world hit or null. Also the
+// forecast's step for the same ball, which is why it takes the list.
+function sweepBall(k, list, h) {
+  const dx = k.vx * h, dy = k.vy * h, L = Math.hypot(dx, dy);
+  if (L < 1e-12) return null;
+  let best = null, bestT = 1;
+  for (const b of list) {
+    if (!b.alive) continue;
+    const R = S.acbRadiusAU + ballR(b);
+    const fx0 = k.x - b.x, fy0 = k.y - b.y;
+    const A = dx * dx + dy * dy, B = 2 * (fx0 * dx + fy0 * dy), C = fx0 * fx0 + fy0 * fy0 - R * R;
+    if (C <= 0) { best = b; bestT = 0; break; }          // already inside: contact now
+    const disc = B * B - 4 * A * C;
+    if (disc < 0) continue;
+    const t = (-B - Math.sqrt(disc)) / (2 * A);
+    if (t >= 0 && t < bestT) { bestT = t; best = b; }
+  }
+  k.x += dx * bestT; k.y += dy * bestT;
+  const flight = L * bestT;
+  if (k.flash) k.flash.remain -= flight;
+  return best;
+}
+// The energy that actually transfers: a normal shot's, along the flight line.
+function impactVelocity(k) {
+  const v = Math.hypot(k.vx, k.vy) || 1;
+  const dv = k.flash.normalDv * Math.sqrt(S.animeImpactEnergy);
+  return [k.vx / v * dv, k.vy / v * dv];
+}
+function burnOut(k) {
+  const v = Math.hypot(k.vx, k.vy) || 1, dv = k.flash.normalDv;
+  k.vx = k.vx / v * dv; k.vy = k.vy / v * dv;
+  k.flash = null;
+}
 function pocketAt(x, y, r) { for (const p of POCKETS) if (dist(x, y, p.x, p.y) < S.pocketRadiusAU + r) return p; return null; }
 
 function simStep(h, offGravity) {
   stepWorlds(bodies, h);
   if (!offGravity) gameGravity(ship, bodies, h, true);
-  for (const k of balls) gameGravity(k, bodies, h, S.acbFeelsWorlds);
+  for (const k of balls) if (!k.flash) gameGravity(k, bodies, h, S.acbFeelsWorlds);   // a flash outruns gravity
   for (const b of bodies) if (b.alive) { b.x += b.vx * h; b.y += b.vy * h; b.spin += h * 40; }
   ship.x += ship.vx * h; ship.y += ship.vy * h;
-  for (const k of balls) { k.x += k.vx * h; k.y += k.vy * h; }
+  for (const k of balls) {
+    if (!k.flash) { k.x += k.vx * h; k.y += k.vy * h; continue; }
+    const hit = sweepBall(k, bodies, h);
+    k.flash.pts.push({ x: k.x, y: k.y, age: 0 });
+    if (hit) { beginImpactFrame(k, hit); return true; }   // the frame freezes here
+    if (k.flash.remain <= 0) { fx.trails.push(k.flash.pts); burnOut(k); note("FLASH BURNED OUT: ball at normal speed", "#e8b463"); }
+  }
 
   const events = [];
-  resolveContacts(bodies, balls, events);
+  resolveContacts(bodies, balls.filter(k => !k.flash), events);
   for (const e of events) {
     if (e.kind === "struck") { flash(e.x, e.y, 0.15, e.b.color); note("STRUCK: " + e.b.name, e.b.color); }
   }
@@ -393,6 +472,7 @@ function simStep(h, offGravity) {
     charging = false; charge = 0; drag = null; stab = null;
   }
   if (!score.won && bodies.every(b => !b.alive)) { score.won = true; score.wonAt = simYears; note("TABLE CLEARED", "#ffe08a"); }
+  return false;
 }
 
 // ============================== THE SHIP ========================================
@@ -453,6 +533,13 @@ function fireAcb(dx, dy, power) {
   const dv = power * S.shotPower;
   placeAcbOnNose();
   const k = { x: acb.x, y: acb.y, vx: ship.vx * S.inheritFrac + dx * dv, vy: ship.vy * S.inheritFrac + dy * dv, trail: [], dwell: 0, lock: S.captureLockoutS };
+  if (S.animeMode) {
+    // the flash: same direction, flash speed, and the normal shot's energy remembered for the impact
+    k.vx = ship.vx * S.inheritFrac + dx * S.animeSpeedAUyr; k.vy = ship.vy * S.inheritFrac + dy * S.animeSpeedAUyr;
+    k.flash = { remain: S.animeRangeAU, normalDv: dv, pts: [{ x: k.x, y: k.y, age: 0 }] };
+    burst(k.x, k.y, 0.12 + power * 0.1, "#dfffe8"); flash(k.x, k.y, 0.2 + power * 0.2, "#8fe8b0");
+    fx.flashA = Math.max(fx.flashA, 0.35); fx.shake = Math.max(fx.shake, 0.4);
+  }
   balls.push(k);
   acb.mode = "empty";
   ship.vx -= dx * dv * S.recoilFrac; ship.vy -= dy * dv * S.recoilFrac;
@@ -554,6 +641,47 @@ function stepLost(realDt) {
 function flash(x, y, r, color) { flashes.push({ x, y, r, t: 0, color, kind: "ring" }); }
 function burst(x, y, r, color) { flashes.push({ x, y, r, t: 0, color, kind: "flare", rot: Math.random() * TAU }); }
 
+// ============================== THE IMPACT FRAME ================================
+// Contact. The sim stops with the ball touching the world; the flash and the shard
+// cone appear on the frozen frame (the video's order: bloom, then the held shards).
+function beginImpactFrame(k, b) {
+  hitstop = { t: S.animeHitstopMs / 1000, ball: k, planet: b };
+  fx.flashA = 0.9; fx.shake = 0.5;
+  const [ivx, ivy] = impactVelocity(k);
+  const dir = Math.atan2(ivy, ivx);
+  const lines = [];
+  for (let i = 0; i < 18; i++) lines.push({ ang: dir + (Math.random() - 0.5) * 1.2, len: 0.12 + Math.random() * 0.4, w: 0.6 + Math.random() * 1.6 });
+  fx.shards.push({ x: k.x, y: k.y, t: 0, lines });
+  note("IMPACT: " + b.name, b.color);
+}
+// The frame ends: the energy transfers, the world leaves, the shockwave goes out.
+function endImpactFrame() {
+  const { ball: k, planet: b } = hitstop; hitstop = null;
+  const [ivx, ivy] = impactVelocity(k);
+  k.vx = ivx; k.vy = ivy;
+  // nudge into contact so collide() sees the overlap, then the ordinary elastic exchange
+  const dx = b.x - k.x, dy = b.y - k.y, d = Math.hypot(dx, dy) || 1, R = S.acbRadiusAU + ballR(b);
+  k.x = b.x - dx / d * R * 0.995; k.y = b.y - dy / d * R * 0.995;
+  collide(k, S.acbMassRatio * b.mass, S.acbRadiusAU, b, b.mass, ballR(b));
+  if (!b.struck) { b.struck = true; note("STRUCK: " + b.name, b.color); }
+  fx.shocks.push({ x: k.x, y: k.y, t: 0 });
+  fx.shake = Math.max(fx.shake, 0.8);
+  fx.trails.push(k.flash.pts); k.flash = null;
+}
+// Effects on the real clock. Trails age even during the frame; that is the point of it.
+function stepFx(realDt) {
+  for (const k of balls) if (k.flash) for (const q of k.flash.pts) q.age += realDt;
+  for (const tr of fx.trails) for (const q of tr) q.age += realDt;
+  fx.trails = fx.trails.filter(tr => tr.some(q => q.age < S.animeTrailS));
+  for (const sh of fx.shards) sh.t += realDt;
+  fx.shards = fx.shards.filter(sh => sh.t < 1.1);
+  for (const sw of fx.shocks) sw.t += realDt;
+  fx.shocks = fx.shocks.filter(sw => sw.t < 0.7);
+  fx.flashA *= Math.exp(-12 * realDt);
+  fx.shake *= Math.exp(-8 * realDt);
+  fx.shakeX = (Math.random() - 0.5) * fx.shake * 24; fx.shakeY = (Math.random() - 0.5) * fx.shake * 24;
+}
+
 // ============================== THE FORECAST ====================================
 // The aim line, and the honest one: the same step, the same contacts, the same masses
 // as the real sim, run ahead from the shot that is pending (or from the ACB where it
@@ -565,15 +693,35 @@ function buildGhost() {
   const p = pendingShot();
   if (p) {
     const [x, y] = noseSeat();
-    pending = { x, y, vx: ship.vx * S.inheritFrac + p[0] * p[2] * S.shotPower, vy: ship.vy * S.inheritFrac + p[1] * p[2] * S.shotPower, pts: [{ x, y }], dead: false };
+    const dv = p[2] * S.shotPower, sp = S.animeMode ? S.animeSpeedAUyr : dv;
+    pending = { x, y, vx: ship.vx * S.inheritFrac + p[0] * sp, vy: ship.vy * S.inheritFrac + p[1] * sp, pts: [{ x, y }], dead: false,
+                flash: S.animeMode ? { remain: S.animeRangeAU, normalDv: dv, pts: [] } : null };
     sim.push(pending);
   }
-  for (const k of balls) sim.push({ x: k.x, y: k.y, vx: k.vx, vy: k.vy, pts: [{ x: k.x, y: k.y }], dead: false });
+  for (const k of balls) sim.push({ x: k.x, y: k.y, vx: k.vx, vy: k.vy, pts: [{ x: k.x, y: k.y }], dead: false,
+                                    flash: k.flash ? { remain: k.flash.remain, normalDv: k.flash.normalDv, pts: [] } : null });
   if (!sim.length) { ghost = null; return; }
   const gb = bodies.map(b => ({ ...b, trail: null }));
   const out = { pending: null, hit: null, balls: [], worlds: [] };
   const track = new Map();
   for (const b of gb) if (b.struck && b.alive) track.set(b.id, { color: b.color, pts: [{ x: b.x, y: b.y }] });
+  // A flash flies straight and first, swept exactly as the sim sweeps it, against the
+  // worlds where they stand now: at 1600 AU/yr they do not move during it.
+  for (const k of sim) {
+    if (!k.flash) continue;
+    const hit = sweepBall(k, gb, S.animeRangeAU / Math.hypot(k.vx, k.vy));
+    k.pts.push({ x: k.x, y: k.y });
+    if (hit) {
+      if (k === pending) out.hit = { x: k.x, y: k.y };
+      const [ivx, ivy] = impactVelocity(k); k.vx = ivx; k.vy = ivy;
+      const dx = hit.x - k.x, dy = hit.y - k.y, d = Math.hypot(dx, dy) || 1, R = S.acbRadiusAU + ballR(hit);
+      k.x = hit.x - dx / d * R * 0.995; k.y = hit.y - dy / d * R * 0.995;
+      collide(k, S.acbMassRatio * hit.mass, S.acbRadiusAU, hit, hit.mass, ballR(hit));
+      hit.struck = true;
+      if (!track.has(hit.id)) track.set(hit.id, { color: hit.color, pts: [{ x: hit.x, y: hit.y }] });
+    } else burnOut(k);
+    k.flash = null;
+  }
   const H = 2e-4, N = 5000;
   for (let i = 0; i < N; i++) {
     stepWorlds(gb, H);
@@ -609,6 +757,12 @@ function frame(now) {
   requestAnimationFrame(frame);
   const realDt = Math.min(0.05, (now - last) / 1000);
   last = now;
+  stepFx(realDt);
+  if (hitstop) {
+    hitstop.t -= realDt;
+    if (hitstop.t <= 0) endImpactFrame();
+    else { draw(realDt); return; }                 // the impact frame: nothing moves
+  }
   if (paused) { draw(realDt); return; }
 
   const SLIDE_RATE = 0.45;
@@ -629,8 +783,9 @@ function frame(now) {
   const dtYr = warp * realDt / SPY;
   const steps = dtYr > MAX_SUBSTEP_YR ? Math.min(MAX_SUBSTEPS, Math.ceil(dtYr / MAX_SUBSTEP_YR)) : 1;
   const h = dtYr / steps;
-  for (let i = 0; i < steps; i++) { applyThrust(h); stabiliseStep(h); simStep(h, offGravity); }
-  simYears += dtYr;
+  let frozenAt = steps;
+  for (let i = 0; i < steps; i++) { applyThrust(h); stabiliseStep(h); if (simStep(h, offGravity)) { frozenAt = i + 1; break; } }
+  simYears += h * frozenAt;
 
   // The settle, once per frame on the real clock, only while off gravity: game feel,
   // not physics, so never inside the substeps and never while the field owns the ship.
@@ -680,7 +835,7 @@ function resize() {
   cv.style.width = innerWidth + "px"; cv.style.height = innerHeight + "px";
 }
 addEventListener("resize", resize); resize();
-function worldToScreen(x, y) { return [(x - cam.x) * cam.scale + cv.clientWidth / 2, (y - cam.y) * cam.scale + cv.clientHeight / 2]; }
+function worldToScreen(x, y) { return [(x - cam.x) * cam.scale + cv.clientWidth / 2 + fx.shakeX, (y - cam.y) * cam.scale + cv.clientHeight / 2 + fx.shakeY]; }
 function screenToWorld(sx, sy) { return [(sx - cv.clientWidth / 2) / cam.scale + cam.x, (sy - cv.clientHeight / 2) / cam.scale + cam.y]; }
 
 const stars = [];
@@ -762,8 +917,10 @@ function draw(realDt) {
   }
   // trails
   strokePts(ship.trail, "#4fc3f7", 0.3, 1);
-  for (const k of balls) strokePts(k.trail, "#ffffff", 0.35, 1);
+  for (const k of balls) if (!k.flash) strokePts(k.trail, "#ffffff", 0.35, 1);
   for (const b of bodies) if (b.alive && b.struck) strokePts(b.trail, b.color, 0.4, 1);
+  for (const k of balls) if (k.flash) drawBurningTrail(k.flash.pts);
+  for (const tr of fx.trails) drawBurningTrail(tr);
   // the forecast
   if (ghost) {
     for (const w of ghost.worlds) strokePts(w.pts, w.color, 0.55, 1, [4, 4]);
@@ -844,8 +1001,55 @@ function draw(realDt) {
       cx.restore();
     }
   }
+  drawImpactFx();
+  if (fx.flashA > 0.01) { cx.fillStyle = `rgba(235,245,255,${Math.min(1, fx.flashA)})`; cx.fillRect(0, 0, W, H); }
   drawTimeBand(W, H);
   drawHud(W, H);
+}
+// The meteor: three passes over the same polyline, fringe, core, hot line. Width and
+// alpha come from each point's age, so the head is fat and bright and the tail is a
+// hairline, and the whole thing dies over animeTrailS.
+function drawBurningTrail(pts) {
+  if (pts.length < 2) return;
+  const T = S.animeTrailS;
+  const n = pts.length - 1;
+  const pass = (color, wMax, aMax) => {
+    for (let i = 1; i < pts.length; i++) {
+      const a = 1 - Math.min(1, pts[i].age / T);
+      if (a <= 0) continue;
+      const taper = 0.15 + 0.85 * (i / n);          // hairline at the tail, fat at the head
+      const [x0, y0] = worldToScreen(pts[i - 1].x, pts[i - 1].y), [x1, y1] = worldToScreen(pts[i].x, pts[i].y);
+      cx.strokeStyle = colA(color, aMax * a); cx.lineWidth = Math.max(0.6, wMax * a * taper); cx.lineCap = "round";
+      cx.beginPath(); cx.moveTo(x0, y0); cx.lineTo(x1, y1); cx.stroke();
+    }
+  };
+  pass("#ff8a3c", 30, 0.30);    // orange smoke fringe
+  pass("#ffb070", 14, 0.35);    // warmer inner smoke
+  pass("#5cff6a", 8, 0.8);      // green core
+  pass("#eaffff", 2.5, 0.95);   // blue-white hot line
+  cx.lineCap = "butt";
+}
+function drawImpactFx() {
+  const sc = cam.scale;
+  for (const sh of fx.shards) {
+    const [sx, sy] = worldToScreen(sh.x, sh.y), a = 1 - sh.t / 1.1;
+    // the shards hold, then thin out: the video's frozen fan
+    const grow = Math.min(1, sh.t / 0.05 + 0.3);
+    for (const l of sh.lines) {
+      const L = l.len * sc * grow;
+      cx.strokeStyle = `rgba(220,245,255,${0.9 * a})`; cx.lineWidth = l.w;
+      cx.beginPath(); cx.moveTo(sx, sy); cx.lineTo(sx + Math.cos(l.ang) * L, sy + Math.sin(l.ang) * L); cx.stroke();
+      cx.fillStyle = `rgba(255,255,255,${a})`; cx.fillRect(sx + Math.cos(l.ang) * L - 1, sy + Math.sin(l.ang) * L - 1, 2, 2);
+    }
+    const g = cx.createRadialGradient(sx, sy, 0, sx, sy, 40 * grow);
+    g.addColorStop(0, `rgba(255,255,255,${0.8 * a})`); g.addColorStop(1, "rgba(200,255,220,0)");
+    circle(sx, sy, 40 * grow, g);
+  }
+  for (const sw of fx.shocks) {
+    const [sx, sy] = worldToScreen(sw.x, sw.y), k = sw.t / 0.7;
+    circle(sx, sy, (0.05 + k * 0.6) * sc, null, `rgba(190,255,210,${(1 - k) * 0.8})`, 6 * (1 - k) + 1);
+    circle(sx, sy, (0.05 + k * 0.6) * sc * 0.8, null, `rgba(255,255,255,${(1 - k) * 0.5})`, 2);
+  }
 }
 
 function arrow(x0, y0, x1, y1, color, width, dash) {
@@ -977,7 +1181,7 @@ cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { cam.zoom = Math.max(0.4, Math.min(6, cam.zoom * Math.exp(-e.deltaY * 0.0012))); e.preventDefault(); }, { passive: false });
 
 // ============================== TEST PANEL ======================================
-const STORE_KEY = "galaxytable.v11";   // bumped: saved settings would otherwise hide the new default
+const STORE_KEY = "galaxytable.v12";   // bumped: saved settings would otherwise hide the new default
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
   catch { return { ...DEFAULTS }; }
@@ -997,6 +1201,14 @@ const PANEL = [
   ["r", "captureLockoutS", "seconds after a shot before you can catch it", 0, 6, 0.25],
   ["r", "inheritFrac", "how much ship speed bends the shot (0 = none, 1 = all)", 0, 1, 0.05],
   ["b", "projections", "show where the shot will go"],
+  ["-"],
+  ["b", "animeMode", "Anime style pool ball trail"],
+  ["l", "animeSpeedAUyr", "flash speed", 200, 8000],
+  ["r", "animeRangeAU", "flash range before it burns out (AU)", 0.5, 6, 0.1],
+  ["r", "animeHitstopMs", "impact frame (ms)", 0, 600, 10],
+  ["r", "animeTrailS", "trail lingers (s)", 0.2, 4, 0.1],
+  ["r", "animeImpactEnergy", "impact energy (x a normal shot)", 0.25, 4, 0.25],
+  ["-"],
   ["b", "forceArrows", "show force arrows while aiming"],
   ["b", "arrowNumbers", "show numbers on the arrows"],
   ["r", "arrowPxPerAUyr", "arrow length per unit of speed (px)", 4, 40, 1],
@@ -1084,7 +1296,9 @@ window.RIG = {
   state: () => ({ simYears, sliderT, warp: warpNow(),
                   ship: { x: ship.x, y: ship.y, vx: ship.vx, vy: ship.vy, nose: ship.nose },
                   acb: { mode: acb.mode, x: acb.x, y: acb.y, vx: acb.vx, vy: acb.vy },
-                  balls: balls.map(k => ({ x: k.x, y: k.y, vx: k.vx, vy: k.vy, dwell: k.dwell, lock: k.lock })),
+                  balls: balls.map(k => ({ x: k.x, y: k.y, vx: k.vx, vy: k.vy, dwell: k.dwell, lock: k.lock, flash: !!k.flash })),
+                  hitstop: hitstop ? { t: hitstop.t, planet: hitstop.planet.name } : null,
+                  fx: { trails: fx.trails.length, shards: fx.shards.length, shocks: fx.shocks.length },
                   bodies: bodies.map(b => ({ name: b.name, x: b.x, y: b.y, vx: b.vx, vy: b.vy, alive: b.alive, struck: b.struck })),
                   pockets: POCKETS.map(p => ({ name: p.name, x: p.x, y: p.y })),
                   score: { ...score }, notices: notices.map(n => n.text),
@@ -1095,7 +1309,10 @@ window.RIG = {
   reset: resetWorld,
   setNose: a => { ship.nose = a; },
   fire: (dx, dy, p) => fireAcb(dx, dy, p),
-  step: (yr) => { const n = Math.ceil(yr / MAX_SUBSTEP_YR), h = yr / n; for (let i = 0; i < n; i++) { stabiliseStep(h); simStep(h, false); } simYears += yr; if (acb.mode === "attached") placeAcbOnNose(); },
+  step: (yr) => { if (hitstop) return; const n = Math.ceil(yr / MAX_SUBSTEP_YR), h = yr / n; for (let i = 0; i < n; i++) { stabiliseStep(h); if (simStep(h, false)) break; } simYears += yr; if (acb.mode === "attached") placeAcbOnNose(); },
+  endImpact: () => { if (hitstop) endImpactFrame(); },
+  fxTick: (s) => stepFx(s),
+  draw: () => draw(0.016),
   teleportShip: (x, y, vx, vy) => { ship.x = x; ship.y = y; ship.vx = vx; ship.vy = vy; },
   key: (k, down) => { keys[k] = down; },
   override: (why) => overrideStabiliser(why),
