@@ -109,6 +109,16 @@
     screen flash        full-screen white quad, alpha decays exp(-12 t)
     camera shake        Cinemachine impulse, or the offset below: decays exp(-8 t)
 
+  THE ASTEROID BELT. A ring of rock on the rim, beltRadiusAU out, turning at the
+  Keplerian rate for that radius so it rides like everything else. It is the cushion:
+  a ball or a struck world that reaches an intact stretch bounces (radial velocity
+  reflected with beltRestitution, tangential kept) and THAT STRETCH IS DESTROYED, so
+  every one of the 48 sections is a one-time cushion. A destroyed stretch is a gap and
+  the next thing through it just leaves. The forecast plays the bounce on a copy of the
+  belt, so the aim line shows the rebound and the sim spends the section only when it
+  really happens. A flash ball sweeps against the belt like anything else. The ship flies
+  through it untouched.
+
   THE STABILISER. A shot kicks the ship backwards (recoilFrac), which is honest and
   leaves you slowly falling out of your ring while you watch the ball. So after every
   shot the ship burns itself back onto a circular orbit at whatever radius it is at, with
@@ -244,6 +254,9 @@ const DEFAULTS = {
   animeHitstopMs: 200,    // the impact frame, real milliseconds, bodies touching
   animeTrailS: 1.5,       // the trail's linger, real seconds
   animeImpactEnergy: 1.0, // impact energy as a multiple of a normal shot at this power
+  beltOn: true,           // the asteroid belt on the rim
+  beltRadiusAU: 2.7,      // outside the pockets' influence (2.09 + 0.5)
+  beltRestitution: 0.85,  // radial bounce
   autoStabilise: true,    // burn back to a circular orbit after every shot
   stabiliseDoneAUyr: 0.05,// close enough: remaining velocity error that ends the burn
 };
@@ -276,7 +289,48 @@ const POCKETS = [
   { name: "Acheron", a: STYX_A + 2 * TAU / 3 },
 ].map(p => ({ name: p.name, x: STYX_R * Math.cos(p.a), y: STYX_R * Math.sin(p.a), color: "#b48cff" }));
 
-let bodies, ship, acb, balls, chamber, score, simYears;
+let bodies, ship, acb, balls, chamber, score, simYears, belt;
+// THE BELT: 48 sections, each intact or gone, and per section a fixed scatter of rocks
+// in belt-frame polar coordinates. The belt's rotation is derived from the clock, never
+// stored: theta = omega * simYears, omega Keplerian at beltRadiusAU.
+const BELT_N = 48, BELT_HALF = 0.07;
+const BELT_ROCKS = [];
+for (let i = 0; i < BELT_N; i++) {
+  const rocks = [];
+  for (let j = 0; j < 9; j++) rocks.push({ da: (j + Math.random()) / 9, dr: (Math.random() - 0.5) * 2, size: 0.6 + Math.random() * 1.4, tint: Math.random() });
+  BELT_ROCKS.push(rocks);
+}
+function beltOmega() { return Math.sqrt(G * STAR.mass / Math.pow(S.beltRadiusAU, 3)); }
+function beltTheta(t) { return beltOmega() * t; }
+function beltSection(x, y, t) {
+  const a = Math.atan2(y - STAR.y, x - STAR.x) - beltTheta(t);
+  return ((Math.floor(a / (TAU / BELT_N)) % BELT_N) + BELT_N) % BELT_N;
+}
+// The cushion test for one object at radius r0 (its own radius): crossing the band from
+// either side into an intact section reflects it and, when `spend` is set, destroys the
+// section. Returns the section hit or -1. Shared with the forecast (spend = false on a copy).
+function beltContact(o, r0, sections, t, spend) {
+  if (!S.beltOn) return -1;
+  const dx = o.x - STAR.x, dy = o.y - STAR.y, r = Math.hypot(dx, dy);
+  if (r < 1e-9) return -1;
+  const inner = S.beltRadiusAU - BELT_HALF - r0, outer = S.beltRadiusAU + BELT_HALF + r0;
+  if (r < inner || r > outer) return -1;
+  const nx = dx / r, ny = dy / r, vr = o.vx * nx + o.vy * ny;
+  const fromInside = r < S.beltRadiusAU;
+  if ((fromInside && vr <= 0) || (!fromInside && vr >= 0)) return -1;   // already leaving the band
+  const i = beltSection(o.x, o.y, t);
+  if (!sections[i]) return -1;
+  o.vx -= (1 + S.beltRestitution) * vr * nx; o.vy -= (1 + S.beltRestitution) * vr * ny;
+  const back = fromInside ? inner - 0.001 : outer + 0.001;
+  o.x = STAR.x + nx * back; o.y = STAR.y + ny * back;
+  if (spend) sections[i] = 0;
+  return i;
+}
+function beltBreak(i, x, y) {
+  burst(x, y, 0.15, "#c8b090"); flash(x, y, 0.2, "#c8b090");
+  for (let j = 0; j < 6; j++) burst(x + (Math.random() - 0.5) * 0.2, y + (Math.random() - 0.5) * 0.2, 0.05, "#8a7a66");
+  note("BELT BREACHED: section " + i + " destroyed", "#c8b090");
+}
 
 function orbitState(r, a, over) {
   const v = Math.sqrt(G * STAR.mass / r) * (over || 1);
@@ -302,6 +356,7 @@ function resetWorld() {
   acb = { mode: "attached", type: "standard", x: 0, y: 0, vx: 0, vy: 0, cap: null, lostT: 0 };
   balls = [];
   chamber = ["standard", "standard"];        // the two behind the nose, next to load first
+  belt = new Array(BELT_N).fill(1);
   placeAcbOnNose();
   score = { shots: 0, fouls: 0, potted: 0, burned: 0, deaths: 0, lost: 0, won: false, wonAt: 0, failed: false };
   simYears = 0;
@@ -443,10 +498,37 @@ function sweepBall(k, list, others, h) {
     const t = (-B - Math.sqrt(disc)) / (2 * A);
     if (t >= 0 && t < bestT) { bestT = t; best = b; }
   }
+  // the belt: the segment against the band's near face, whichever side we start on
+  if (S.beltOn) {
+    const r0 = Math.hypot(k.x - STAR.x, k.y - STAR.y);
+    const inside = r0 < S.beltRadiusAU;
+    const Rf = inside ? S.beltRadiusAU - BELT_HALF - S.acbRadiusAU : S.beltRadiusAU + BELT_HALF + S.acbRadiusAU;
+    const fx0 = k.x - STAR.x, fy0 = k.y - STAR.y;
+    const A = dx * dx + dy * dy, B = 2 * (fx0 * dx + fy0 * dy), C = fx0 * fx0 + fy0 * fy0 - Rf * Rf;
+    const disc = B * B - 4 * A * C;
+    if (disc >= 0) {
+      const sq = Math.sqrt(disc);
+      const t = inside ? (-B + sq) / (2 * A) : (-B - sq) / (2 * A);   // leaving from inside, arriving from outside
+      if (t >= 0 && t < bestT) {
+        const hx = k.x + dx * t, hy = k.y + dy * t;
+        const i = beltSection(hx, hy, sweepTime);
+        if (sweepSections[i]) { bestT = t; best = { belt: true, i, x: hx, y: hy }; }
+      }
+    }
+  }
   k.x += dx * bestT; k.y += dy * bestT;
   const flight = L * bestT;
   if (k.flash) k.flash.remain -= flight;
   return best;
+}
+let sweepTime = 0, sweepSections = null;   // the belt the sweep sees: the sim's, or the forecast's copy
+// A flash ball reaches the cushion: the flash ends there, the normal energy bounces.
+function flashHitsBelt(k, hit, sections, spend) {
+  const [ivx, ivy] = impactVelocity(k); k.vx = ivx; k.vy = ivy;
+  const dx = k.x - STAR.x, dy = k.y - STAR.y, r = Math.hypot(dx, dy) || 1, nx = dx / r, ny = dy / r;
+  const vr = k.vx * nx + k.vy * ny;
+  k.vx -= (1 + S.beltRestitution) * vr * nx; k.vy -= (1 + S.beltRestitution) * vr * ny;
+  if (spend) { sections[hit.i] = 0; }
 }
 // The energy that actually transfers: a normal shot's, along the flight line.
 function impactVelocity(k) {
@@ -490,12 +572,22 @@ function simStep(h, offGravity) {
   ship.x += ship.vx * h; ship.y += ship.vy * h;
   for (const k of balls) {
     if (!k.flash) { k.x += k.vx * h; k.y += k.vy * h; continue; }
+    sweepTime = simYears; sweepSections = belt;
     const hit = sweepBall(k, bodies, balls, h);
     k.flash.pts.push({ x: k.x, y: k.y, age: 0 });
+    if (hit && hit.belt) {
+      flashHitsBelt(k, hit, belt, true); beltBreak(hit.i, k.x, k.y);
+      fx.trails.push(k.flash.pts); k.flash = null; fx.shake = Math.max(fx.shake, 0.5);
+      note("BOUNCED off the belt", "#c8b090");
+      continue;
+    }
     if (hit && hit.ball) { flashHitsBall(k, hit.ball); continue; }
     if (hit) { beginImpactFrame(k, hit); return true; }   // the frame freezes here
     if (k.flash.remain <= 0) { fx.trails.push(k.flash.pts); burnOut(k); note("FLASH BURNED OUT: ball at normal speed", "#e8b463"); }
   }
+
+  for (const k of balls) if (!k.flash) { const i = beltContact(k, S.acbRadiusAU, belt, simYears, true); if (i >= 0) { beltBreak(i, k.x, k.y); note("BOUNCED off the belt", "#c8b090"); } }
+  for (const b of bodies) if (b.alive && b.struck) { const i = beltContact(b, ballR(b), belt, simYears, true); if (i >= 0) { beltBreak(i, b.x, b.y); note(b.name + " BOUNCED off the belt", b.color); } }
 
   const events = [];
   resolveContacts(bodies, balls.filter(k => !k.flash), events);
@@ -800,6 +892,8 @@ function buildGhost() {
                                     flash: k.flash ? { remain: k.flash.remain, normalDv: k.flash.normalDv, pts: [] } : null });
   if (!sim.length) { ghost = null; return; }
   const gb = bodies.map(b => ({ ...b, trail: null }));
+  const gbelt = belt.slice();                       // the forecast spends its own copy
+  let gt = simYears;
   const out = { pending: null, hit: null, balls: [], worlds: [] };
   const track = new Map();
   for (const b of gb) if (b.struck && b.alive) track.set(b.id, { color: b.color, pts: [{ x: b.x, y: b.y }] });
@@ -807,8 +901,10 @@ function buildGhost() {
   // worlds where they stand now: at 1600 AU/yr they do not move during it.
   for (const k of sim) {
     if (!k.flash) continue;
+    sweepTime = gt; sweepSections = gbelt;
     const hit = sweepBall(k, gb, sim, S.animeRangeAU / Math.hypot(k.vx, k.vy));
     k.pts.push({ x: k.x, y: k.y });
+    if (hit && hit.belt) { if (k === pending) out.hit = { x: k.x, y: k.y }; flashHitsBelt(k, hit, gbelt, true); k.flash = null; continue; }
     if (hit && hit.ball) { k.flash = null; continue; }   // ball on ball: the loop below resolves it
     if (hit) {
       if (k === pending) out.hit = { x: k.x, y: k.y };
@@ -831,6 +927,9 @@ function buildGhost() {
     gravitizeAll(live, gb, live, null, H);
     for (const b of gb) if (b.alive) { b.x += b.vx * H; b.y += b.vy * H; }
     for (const k of live) { k.x += k.vx * H; k.y += k.vy * H; }
+    gt += H;
+    for (const k of live) beltContact(k, S.acbRadiusAU, gbelt, gt, true);
+    for (const b of gb) if (b.alive && b.struck) beltContact(b, ballR(b), gbelt, gt, true);
     const events = [];
     resolveContacts(gb, live, events);
     for (const e of events) {
@@ -993,6 +1092,19 @@ function draw(realDt) {
   }
   const sc = cam.scale;
 
+  // the belt: rocks per intact section, turned by the clock
+  if (S.beltOn) {
+    const th = beltTheta(simYears), sec = TAU / BELT_N;
+    for (let i = 0; i < BELT_N; i++) {
+      if (!belt[i]) continue;
+      for (const rk of BELT_ROCKS[i]) {
+        const a = th + (i + rk.da) * sec, r = S.beltRadiusAU + rk.dr * BELT_HALF;
+        const [sx, sy] = worldToScreen(STAR.x + r * Math.cos(a), STAR.y + r * Math.sin(a));
+        const c = rk.tint < 0.5 ? "#8f8478" : "#a89a86";
+        circle(sx, sy, Math.max(1, rk.size * sc * 0.012), c);
+      }
+    }
+  }
   // authored rings, for worlds still on them
   for (const b of bodies) if (b.alive && !b.struck) {
     const [sx, sy] = worldToScreen(STAR.x, STAR.y);
@@ -1325,7 +1437,7 @@ cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { cam.zoom = Math.max(0.4, Math.min(6, cam.zoom * Math.exp(-e.deltaY * 0.0012))); e.preventDefault(); }, { passive: false });
 
 // ============================== TEST PANEL ======================================
-const STORE_KEY = "galaxytable.v13";   // bumped: saved settings would otherwise hide the new default
+const STORE_KEY = "galaxytable.v14";   // bumped: saved settings would otherwise hide the new default
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
   catch { return { ...DEFAULTS }; }
@@ -1358,6 +1470,10 @@ const PANEL = [
   ["r", "arrowPxPerAUyr", "arrow length per unit of speed (px)", 4, 40, 1],
   ["r", "gravityHorizonYr", "gravity arrow looks ahead (years)", 0.02, 0.5, 0.01],
   ["b", "autoStabilise", "auto-correct the orbit after a shot"],
+  ["-"],
+  ["b", "beltOn", "asteroid belt on the rim (one-time cushions)"],
+  ["r", "beltRadiusAU", "belt radius (AU)", 2.3, 3.5, 0.05],
+  ["r", "beltRestitution", "belt bounciness", 0.2, 1, 0.05],
   ["r", "stabiliseDoneAUyr", "how precise the orbit correction is (lower = tighter)", 0.01, 0.5, 0.01],
   ["-"],
   ["r", "acbMassRatio", "cue ball weight vs a planet (1 = same)", 0.2, 10, 0.1],
@@ -1443,6 +1559,7 @@ window.RIG = {
                   ship: { x: ship.x, y: ship.y, vx: ship.vx, vy: ship.vy, nose: ship.nose },
                   acb: { mode: acb.mode, type: acb.type, x: acb.x, y: acb.y, vx: acb.vx, vy: acb.vy },
                   chamber: [...chamber], ballsLeft: ballsLeft(),
+                  belt: { intact: belt.reduce((a, b) => a + b, 0), theta: beltTheta(simYears) },
                   balls: balls.map(k => ({ type: k.type, x: k.x, y: k.y, vx: k.vx, vy: k.vy, dwell: k.dwell, lock: k.lock, flash: !!k.flash })),
                   hitstop: hitstop ? { t: hitstop.t, planet: hitstop.planet.name } : null,
                   fx: { trails: fx.trails.length, shards: fx.shards.length, shocks: fx.shocks.length },
