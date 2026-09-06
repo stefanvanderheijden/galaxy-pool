@@ -126,6 +126,16 @@
   the clock on the cushions: use them before Styx has been round. Off, Styx sits with
   the other two pockets and the belt lasts the rack.
 
+  SOLARIS IS POOLABLE. The star is a body like the worlds: a cue ball that reaches it
+  strikes it (equal-mass exchange at acbMassRatio, like any world, so a square hit on
+  the 0.45-solar star moves it at cue speed: it is the heaviest ball on the table only
+  in the sense that it drags everything else with it). A struck star feels the pockets
+  and the belt cushion, and into a pocket it goes: SOLARIS POTTED. It stays the gravity
+  centre wherever it is, so the worlds follow it, or fail to. The belt and the authored
+  rings stay centred on the origin, where the star started, because they are the
+  table's geometry and not the star's. A ball no longer burns at the star; it bounces.
+  Worlds and the ship still do.
+
   THE STABILISER. A shot kicks the ship backwards (recoilFrac), which is honest and
   leaves you slowly falling out of your ring while you watch the ball. So after every
   shot the ship burns itself back onto a circular orbit at whatever radius it is at, with
@@ -276,7 +286,9 @@ let S = loadSettings();
 // level-01 (Solaris), authored as intent (radius + angle) and derived, the same
 // discipline as Sim.StableOrbit: never store raw state for an orbiting body. Angles
 // are radians in screen convention, +y DOWN, as in the JSON.
-const STAR = { x: 0, y: 0, mass: 0.45, drawR: 0.012, color: "#ff4b2b" };
+const STAR = { id: "star", name: "Solaris", sprite: "sun", x: 0, y: 0, vx: 0, vy: 0, mass: 0.45, drawR: 0.012, color: "#ff4b2b",
+               fragile: false, alive: true, struck: false, trail: [], spin: 0 };
+const ORIGIN = { x: 0, y: 0 };   // the table's centre: where the star starts, and the belt's axis
 const PLANET_DEFS = [
   { id: "smell",   name: "Red",   sprite: "red",       r: 0.55, a: 2.35,  mass: 4.1e-6,  drawR: 0.0068, color: "#d98c4a" },
   { id: "hearing", name: "Terra", sprite: "terra",     r: 0.92, a: 0.62,  mass: 1.55e-6, drawR: 0.0052, color: "#7fa8a0", fragile: true },
@@ -318,7 +330,7 @@ for (let i = 0; i < BELT_N; i++) {
 function beltOmega() { return Math.sqrt(G * STAR.mass / Math.pow(S.beltRadiusAU, 3)); }
 function beltTheta(t) { return beltOmega() * t; }
 function beltSection(x, y, t) {
-  const a = Math.atan2(y - STAR.y, x - STAR.x) - beltTheta(t);
+  const a = Math.atan2(y - ORIGIN.y, x - ORIGIN.x) - beltTheta(t);
   return ((Math.floor(a / (TAU / BELT_N)) % BELT_N) + BELT_N) % BELT_N;
 }
 // The cushion test for one object at radius r0 (its own radius): crossing the band from
@@ -326,7 +338,7 @@ function beltSection(x, y, t) {
 // section. Returns the section hit or -1. Shared with the forecast (spend = false on a copy).
 function beltContact(o, r0, sections, t, spend) {
   if (!S.beltOn) return -1;
-  const dx = o.x - STAR.x, dy = o.y - STAR.y, r = Math.hypot(dx, dy);
+  const dx = o.x - ORIGIN.x, dy = o.y - ORIGIN.y, r = Math.hypot(dx, dy);
   if (r < 1e-9) return -1;
   const inner = S.beltRadiusAU - BELT_HALF - r0, outer = S.beltRadiusAU + BELT_HALF + r0;
   if (r < inner || r > outer) return -1;
@@ -337,7 +349,7 @@ function beltContact(o, r0, sections, t, spend) {
   if (!sections[i]) return -1;
   o.vx -= (1 + S.beltRestitution) * vr * nx; o.vy -= (1 + S.beltRestitution) * vr * ny;
   const back = fromInside ? inner - 0.001 : outer + 0.001;
-  o.x = STAR.x + nx * back; o.y = STAR.y + ny * back;
+  o.x = ORIGIN.x + nx * back; o.y = ORIGIN.y + ny * back;
   if (spend) sections[i] = 0;
   return i;
 }
@@ -347,7 +359,7 @@ function styxEatsBelt(h) {
   for (let i = 0; i < BELT_N; i++) {
     if (!belt[i]) continue;
     const a = th + (i + 0.5) * sec;
-    const x = STAR.x + S.beltRadiusAU * Math.cos(a), y = STAR.y + S.beltRadiusAU * Math.sin(a);
+    const x = ORIGIN.x + S.beltRadiusAU * Math.cos(a), y = ORIGIN.y + S.beltRadiusAU * Math.sin(a);
     if (dist(x, y, st.x, st.y) > S.pocketInfluenceAU) continue;
     beltEat[i] += h / S.styxEatYr;
     if (beltEat[i] >= 1) {
@@ -371,12 +383,14 @@ function derivePlanet(d) {
   return { ...orbitState(d.r, d.a), id: d.id, name: d.name, sprite: d.sprite, mass: d.mass, drawR: d.drawR,
            color: d.color, fragile: !!d.fragile, orbitR: d.r, struck: false, alive: true, trail: [], spin: Math.random() * TAU };
 }
-function ballR(b) { return Math.max(b.drawR * S.ballScale, S.minBallAU); }
+function ballR(b) { return b === STAR || b.id === "star" ? Math.max(b.drawR * S.ballScale, 0.1) : Math.max(b.drawR * S.ballScale, S.minBallAU); }
 function ballsLeft() { return (acb.mode === "attached" || acb.mode === "capturing" ? 1 : 0) + chamber.length + balls.length; }
-function starR() { return Math.max(STAR.drawR * S.ballScale, 0.1); }
+function starR() { return ballR(STAR); }
+function contactList(list, star) { return star.alive ? list.concat([star]) : list; }
 
 function resetWorld() {
   bodies = PLANET_DEFS.map(derivePlanet);
+  Object.assign(STAR, { x: 0, y: 0, vx: 0, vy: 0, alive: true, struck: false, trail: [], broken: false, brokenNoted: false });
   const s = orbitState(SHIP_DEF.r, SHIP_DEF.a, SHIP_DEF.overSpeed);
   ship = { ...s, nose: Math.atan2(s.vy, s.vx), trail: [] };
   // THE NOSE and THE BALLS are separate things. acb is the nose seat: attached (a ball
@@ -391,7 +405,7 @@ function resetWorld() {
   beltEat = new Array(BELT_N).fill(0);       // 0..1 per section, how far Styx has pulled it in
   layoutPockets();
   placeAcbOnNose();
-  score = { shots: 0, fouls: 0, potted: 0, burned: 0, deaths: 0, lost: 0, won: false, wonAt: 0, failed: false };
+  score = { shots: 0, fouls: 0, potted: 0, burned: 0, deaths: 0, lost: 0, won: false, wonAt: 0, failed: false, starPotted: false };
   simYears = 0;
   sliderT = 0.5; sliderShown = 0.5;   // open at the centre: 1M, the table's pace
   charging = false; charge = 0; drag = null; stab = null; hitstop = null;
@@ -440,16 +454,20 @@ function pullPockets(b, h) {
 }
 // The REAL layer: a world feels the star, and the pockets once struck. Never another
 // world's gravity (they collide instead), so an authored ring stays a ring.
-function stepWorlds(list, h) {
+function stepWorlds(list, h, star) {
+  star = star || STAR;
   for (const b of list) {
     if (!b.alive) continue;
-    pull(STAR.x, STAR.y, G * STAR.mass, b, h);
+    if (star.alive) pull(star.x, star.y, G * star.mass, b, h);
     if (b.struck) pullPockets(b, h);
   }
+  // the star itself: nothing moves it but a strike, and then the pockets
+  if (star.alive && star.struck) pullPockets(star, h);
 }
 // The GAME layer: what the ship and the ACB fly on. Star, boosted worlds, pockets.
-function gameGravity(o, list, h, feelWorlds) {
-  pull(STAR.x, STAR.y, G * STAR.mass, o, h);
+function gameGravity(o, list, h, feelWorlds, star) {
+  star = star || STAR;
+  if (star.alive) pull(star.x, star.y, G * star.mass, o, h);
   if (feelWorlds) for (const b of list) if (b.alive) pull(b.x, b.y, G * b.mass * S.planetBoost, o, h);
   pullPockets(o, h);
 }
@@ -460,7 +478,7 @@ function gravityAt(x, y, feelWorlds) {
     const dx = bx - x, dy = by - y, d2 = dx * dx + dy * dy + SOFT2, k = gm / (d2 * Math.sqrt(d2));
     parts.push({ name, ax: dx * k, ay: dy * k, mag: gm / d2 });
   };
-  add("Solaris", STAR.x, STAR.y, G * STAR.mass);
+  if (STAR.alive) add("Solaris", STAR.x, STAR.y, G * STAR.mass);
   if (feelWorlds) for (const b of bodies) if (b.alive) add(b.name, b.x, b.y, G * b.mass * S.planetBoost);
   for (const p of POCKETS) if (dist(x, y, p.x, p.y) < S.pocketInfluenceAU) add(p.name, p.x, p.y, G * S.pocketMass);
   let ax = 0, ay = 0, top = parts[0];
@@ -533,10 +551,10 @@ function sweepBall(k, list, others, h) {
   }
   // the belt: the segment against the band's near face, whichever side we start on
   if (S.beltOn) {
-    const r0 = Math.hypot(k.x - STAR.x, k.y - STAR.y);
+    const r0 = Math.hypot(k.x - ORIGIN.x, k.y - ORIGIN.y);
     const inside = r0 < S.beltRadiusAU;
     const Rf = inside ? S.beltRadiusAU - BELT_HALF - S.acbRadiusAU : S.beltRadiusAU + BELT_HALF + S.acbRadiusAU;
-    const fx0 = k.x - STAR.x, fy0 = k.y - STAR.y;
+    const fx0 = k.x - ORIGIN.x, fy0 = k.y - ORIGIN.y;
     const A = dx * dx + dy * dy, B = 2 * (fx0 * dx + fy0 * dy), C = fx0 * fx0 + fy0 * fy0 - Rf * Rf;
     const disc = B * B - 4 * A * C;
     if (disc >= 0) {
@@ -558,7 +576,7 @@ let sweepTime = 0, sweepSections = null;   // the belt the sweep sees: the sim's
 // A flash ball reaches the cushion: the flash ends there, the normal energy bounces.
 function flashHitsBelt(k, hit, sections, spend) {
   const [ivx, ivy] = impactVelocity(k); k.vx = ivx; k.vy = ivy;
-  const dx = k.x - STAR.x, dy = k.y - STAR.y, r = Math.hypot(dx, dy) || 1, nx = dx / r, ny = dy / r;
+  const dx = k.x - ORIGIN.x, dy = k.y - ORIGIN.y, r = Math.hypot(dx, dy) || 1, nx = dx / r, ny = dy / r;
   const vr = k.vx * nx + k.vy * ny;
   k.vx -= (1 + S.beltRestitution) * vr * nx; k.vy -= (1 + S.beltRestitution) * vr * ny;
   if (spend) { sections[hit.i] = 0; }
@@ -602,11 +620,12 @@ function simStep(h, offGravity) {
   for (const k of balls) if (!k.flash) gameGravity(k, bodies, h, S.acbFeelsWorlds);   // a flash outruns gravity
   gravitizeAll(balls, bodies, balls, offGravity ? null : ship, h);
   for (const b of bodies) if (b.alive) { b.x += b.vx * h; b.y += b.vy * h; b.spin += h * 40; }
+  if (STAR.alive && STAR.struck) { STAR.x += STAR.vx * h; STAR.y += STAR.vy * h; }
   ship.x += ship.vx * h; ship.y += ship.vy * h;
   for (const k of balls) {
     if (!k.flash) { k.x += k.vx * h; k.y += k.vy * h; continue; }
     sweepTime = simYears; sweepSections = belt;
-    const hit = sweepBall(k, bodies, balls, h);
+    const hit = sweepBall(k, contactList(bodies, STAR), balls, h);
     k.flash.pts.push({ x: k.x, y: k.y, age: 0 });
     if (hit && hit.belt) {
       flashHitsBelt(k, hit, belt, true); beltBreak(hit.i, k.x, k.y);
@@ -620,10 +639,10 @@ function simStep(h, offGravity) {
   }
 
   for (const k of balls) if (!k.flash) { const i = beltContact(k, S.acbRadiusAU, belt, simYears, true); if (i >= 0) { beltBreak(i, k.x, k.y); note("BOUNCED off the belt", "#c8b090"); } }
-  for (const b of bodies) if (b.alive && b.struck) { const i = beltContact(b, ballR(b), belt, simYears, true); if (i >= 0) { beltBreak(i, b.x, b.y); note(b.name + " BOUNCED off the belt", b.color); } }
+  for (const b of contactList(bodies, STAR)) if (b.alive && b.struck) { const i = beltContact(b, ballR(b), belt, simYears, true); if (i >= 0) { beltBreak(i, b.x, b.y); note(b.name + " BOUNCED off the belt", b.color); } }
 
   const events = [];
-  resolveContacts(bodies, balls.filter(k => !k.flash), events);
+  resolveContacts(contactList(bodies, STAR), balls.filter(k => !k.flash), events);
   for (const e of events) {
     if (e.kind === "struck") { flash(e.x, e.y, 0.15, e.b.color); note("STRUCK: " + e.b.name, e.b.color); }
     if (e.kind === "balls") { flash(e.x, e.y, 0.08, "#ffffff"); note("CUE BALLS COLLIDE", "#e8f0fa"); }
@@ -637,9 +656,18 @@ function simStep(h, offGravity) {
     if (p) {
       b.alive = false; score.potted++; flash(b.x, b.y, 0.3, "#b48cff"); burst(b.x, b.y, 0.12, "#b48cff");
       note("POTTED: " + b.name + " into " + p.name, "#b48cff");
-    } else if (dist(b.x, b.y, STAR.x, STAR.y) < starR() + ballR(b) * 0.5) {
+    } else if (STAR.alive && dist(b.x, b.y, STAR.x, STAR.y) < starR() + ballR(b) * 0.5) {
       b.alive = false; score.burned++; score.fouls++; flash(b.x, b.y, 0.25, "#ff5030"); burst(b.x, b.y, 0.1, "#ff5030");
       note("BURNED: " + b.name + " (foul)", "#ff5030");
+    }
+  }
+  if (STAR.alive) {
+    const p = pocketAt(STAR.x, STAR.y, 0);
+    if (p) {
+      STAR.alive = false; score.starPotted = true;
+      flash(STAR.x, STAR.y, 0.8, "#ff4b2b"); burst(STAR.x, STAR.y, 0.4, "#ffd9a0"); burst(STAR.x, STAR.y, 0.25, "#ffffff");
+      fx.flashA = Math.max(fx.flashA, 0.8); fx.shake = Math.max(fx.shake, 1);
+      note("SOLARIS POTTED into " + p.name, "#ffe08a");
     }
   }
   for (const b of bodies) if (b.broken && !b.brokenNoted) {
@@ -652,10 +680,10 @@ function simStep(h, offGravity) {
   for (const k of balls) {
     if (k.dead) { gone.push({ k, why: "THERMONUCLEAR SPENT" }); continue; }
     const p = pocketAt(k.x, k.y, 0);
-    if (p || dist(k.x, k.y, STAR.x, STAR.y) < starR()) {
+    if (p) {
       k.dead = true;
       flash(k.x, k.y, 0.2, "#ffffff"); burst(k.x, k.y, 0.08, "#ffffff");
-      gone.push({ k, why: p ? "ACB LOST: pocketed in " + p.name : "ACB LOST: burned" });
+      gone.push({ k, why: "ACB LOST: pocketed in " + p.name });
     }
   }
   if (gone.length) {
@@ -664,7 +692,7 @@ function simStep(h, offGravity) {
     // a bare nose loads the next chambered ball after a moment; a ball already on it stays
     if (acb.mode === "empty" && !score.failed) { acb.mode = "lost"; acb.lostT = 0; }
   }
-  if (pocketAt(ship.x, ship.y, 0) || dist(ship.x, ship.y, STAR.x, STAR.y) < starR()) {
+  if (pocketAt(ship.x, ship.y, 0) || (STAR.alive && dist(ship.x, ship.y, STAR.x, STAR.y) < starR())) {
     score.deaths++; flash(ship.x, ship.y, 0.3, "#ffffff");
     note("SHIP LOST: RESPAWNING", "#ff5030");
     const s = orbitState(SHIP_DEF.r, SHIP_DEF.a, SHIP_DEF.overSpeed);
@@ -772,6 +800,7 @@ function fireAcb(dx, dy, power) {
 // so it sees the same clock the hand's thrust does.
 function stabiliseStep(h) {
   if (!stab) return;
+  if (!STAR.alive) { stab = null; note("STABILISER: no star to orbit", "#e8b463"); return; }
   const dx = ship.x - STAR.x, dy = ship.y - STAR.y, r = Math.hypot(dx, dy);
   if (r < 1e-6) return;
   const v = Math.sqrt(G * STAR.mass / r);
@@ -926,17 +955,18 @@ function buildGhost() {
                                     flash: k.flash ? { remain: k.flash.remain, normalDv: k.flash.normalDv, pts: [] } : null });
   if (!sim.length) { ghost = null; return; }
   const gb = bodies.map(b => ({ ...b, trail: null }));
+  const gstar = { ...STAR, trail: null };
   const gbelt = belt.slice();                       // the forecast spends its own copy
   let gt = simYears;
   const out = { pending: null, hit: null, balls: [], worlds: [] };
   const track = new Map();
-  for (const b of gb) if (b.struck && b.alive) track.set(b.id, { color: b.color, pts: [{ x: b.x, y: b.y }] });
+  for (const b of gb.concat([gstar])) if (b.struck && b.alive) track.set(b.id, { color: b.color, pts: [{ x: b.x, y: b.y }] });
   // A flash flies straight and first, swept exactly as the sim sweeps it, against the
   // worlds where they stand now: at 1600 AU/yr they do not move during it.
   for (const k of sim) {
     if (!k.flash) continue;
     sweepTime = gt; sweepSections = gbelt;
-    const hit = sweepBall(k, gb, sim, S.animeRangeAU / Math.hypot(k.vx, k.vy));
+    const hit = sweepBall(k, contactList(gb, gstar), sim, S.animeRangeAU / Math.hypot(k.vx, k.vy));
     k.pts.push({ x: k.x, y: k.y });
     if (hit && hit.belt) { if (k === pending) out.hit = { x: k.x, y: k.y }; flashHitsBelt(k, hit, gbelt, true); k.flash = null; continue; }
     if (hit && hit.ball) { k.flash = null; continue; }   // ball on ball: the loop below resolves it
@@ -955,17 +985,18 @@ function buildGhost() {
   }
   const H = 2e-4, N = 5000;
   for (let i = 0; i < N; i++) {
-    stepWorlds(gb, H);
+    stepWorlds(gb, H, gstar);
     const live = sim.filter(k => !k.dead);
-    for (const k of live) gameGravity(k, gb, H, S.acbFeelsWorlds);
+    for (const k of live) gameGravity(k, gb, H, S.acbFeelsWorlds, gstar);
     gravitizeAll(live, gb, live, null, H);
     for (const b of gb) if (b.alive) { b.x += b.vx * H; b.y += b.vy * H; }
+    if (gstar.alive && gstar.struck) { gstar.x += gstar.vx * H; gstar.y += gstar.vy * H; }
     for (const k of live) { k.x += k.vx * H; k.y += k.vy * H; }
     gt += H;
     for (const k of live) beltContact(k, S.acbRadiusAU, gbelt, gt, true);
-    for (const b of gb) if (b.alive && b.struck) beltContact(b, ballR(b), gbelt, gt, true);
+    for (const b of contactList(gb, gstar)) if (b.alive && b.struck) beltContact(b, ballR(b), gbelt, gt, true);
     const events = [];
-    resolveContacts(gb, live, events);
+    resolveContacts(contactList(gb, gstar), live, events);
     for (const e of events) {
       if (!out.hit && pending && !pending.dead && dist(e.x, e.y, pending.x, pending.y) < 0.2) out.hit = { x: e.x, y: e.y };
       if (e.b && !track.has(e.b.id)) track.set(e.b.id, { color: e.b.color, pts: [{ x: e.b.x, y: e.b.y }] });
@@ -973,12 +1004,13 @@ function buildGhost() {
     }
     for (const b of gb) {
       if (!b.alive) continue;
-      if (pocketAt(b.x, b.y, 0) || dist(b.x, b.y, STAR.x, STAR.y) < starR() + ballR(b) * 0.5) b.alive = false;
+      if (pocketAt(b.x, b.y, 0) || (gstar.alive && dist(b.x, b.y, gstar.x, gstar.y) < starR() + ballR(b) * 0.5)) b.alive = false;
     }
-    for (const k of live) if (pocketAt(k.x, k.y, 0) || dist(k.x, k.y, STAR.x, STAR.y) < starR()) k.dead = true;
+    if (gstar.alive && pocketAt(gstar.x, gstar.y, 0)) gstar.alive = false;
+    for (const k of live) if (pocketAt(k.x, k.y, 0)) k.dead = true;
     if (i % 8 === 0) {
       for (const k of sim) if (!k.dead) k.pts.push({ x: k.x, y: k.y });
-      for (const b of gb) { const t = track.get(b.id); if (t && b.alive) t.pts.push({ x: b.x, y: b.y }); }
+      for (const b of gb.concat([gstar])) { const t = track.get(b.id); if (t && b.alive) t.pts.push({ x: b.x, y: b.y }); }
     }
   }
   out.pending = pending ? pending.pts : null;
@@ -1038,10 +1070,11 @@ function frame(now) {
   pushTrail(ship.trail, ship.x, ship.y, 500);
   for (const k of balls) pushTrail(k.trail, k.x, k.y, 400);
   for (const b of bodies) if (b.alive && b.struck) pushTrail(b.trail, b.x, b.y, 300);
+  if (STAR.alive && STAR.struck) pushTrail(STAR.trail, STAR.x, STAR.y, 300);
 
   if (S.projections) buildGhost(); else ghost = null;
 
-  const tx = S.camFollow ? ship.x : STAR.x, ty = S.camFollow ? ship.y : STAR.y;
+  const tx = S.camFollow ? ship.x : ORIGIN.x, ty = S.camFollow ? ship.y : ORIGIN.y;
   cam.x += (tx - cam.x) * Math.min(1, realDt * 4);
   cam.y += (ty - cam.y) * Math.min(1, realDt * 4);
   const fit = Math.min(cv.clientWidth, cv.clientHeight) / 2 / S.viewRadiusAU;
@@ -1134,7 +1167,7 @@ function draw(realDt) {
       const e = beltEat[i], st = POCKETS[0];
       for (const rk of BELT_ROCKS[i]) {
         const a = th + (i + rk.da) * sec, r = S.beltRadiusAU + rk.dr * BELT_HALF;
-        let wx = STAR.x + r * Math.cos(a), wy = STAR.y + r * Math.sin(a);
+        let wx = ORIGIN.x + r * Math.cos(a), wy = ORIGIN.y + r * Math.sin(a);
         if (e > 0) { const k = e * e * (0.7 + 0.3 * rk.tint); wx += (st.x - wx) * k; wy += (st.y - wy) * k; }   // the pull, visible
         const [sx, sy] = worldToScreen(wx, wy);
         const c = rk.tint < 0.5 ? "#8f8478" : "#a89a86";
@@ -1144,7 +1177,7 @@ function draw(realDt) {
   }
   // authored rings, for worlds still on them
   for (const b of bodies) if (b.alive && !b.struck) {
-    const [sx, sy] = worldToScreen(STAR.x, STAR.y);
+    const [sx, sy] = worldToScreen(ORIGIN.x, ORIGIN.y);
     circle(sx, sy, b.orbitR * sc, null, "rgba(120,150,200,0.16)", 1);
   }
   // pockets: influence ring, dark well, sprite
@@ -1160,12 +1193,13 @@ function draw(realDt) {
     cx.fillText(p.name.toUpperCase(), sx, sy + R + 14);
   }
   // the star
-  {
+  if (STAR.alive) {
     const [sx, sy] = worldToScreen(STAR.x, STAR.y), R = starR() * sc;
     const g = cx.createRadialGradient(sx, sy, R * 0.8, sx, sy, R * 3);
     g.addColorStop(0, "rgba(255,75,43,0.35)"); g.addColorStop(1, "rgba(255,75,43,0)");
     circle(sx, sy, R * 3, g);
     if (!drawSprite("sun", sx, sy, R, sunTinted)) circle(sx, sy, R, STAR.color);
+    if (STAR.struck) { strokePts(STAR.trail, STAR.color, 0.4, 1); circle(sx, sy, R + 4, null, colA(STAR.color, 0.5), 1); }
   }
   // trails
   strokePts(ship.trail, "#4fc3f7", 0.3, 1);
@@ -1373,7 +1407,7 @@ function drawHud(W, H) {
   const alive = bodies.filter(b => b.alive).length;
   const lines = [
     ["SHOTS " + score.shots + "   FOULS " + score.fouls + "   POTTED " + score.potted + "/" + bodies.length +
-     "   BALLS " + ballsLeft(), ballsLeft() <= 1 ? "#ff8c70" : "#cfe0ff"],
+     "   BALLS " + ballsLeft() + (score.starPotted ? "   SOLARIS POTTED" : ""), ballsLeft() <= 1 ? "#ff8c70" : "#cfe0ff"],
     ["T " + simYears.toFixed(2) + " yr" + (score.deaths ? "   SHIP LOST " + score.deaths : ""), "#9fb4cc"],
     ["MODE " + (S.dragMode ? "DRAG (pull back)" : "CHARGE (hold LMB)") + "   Tab swaps", "#8fc3e8"],
     ["ACB " + (acb.mode === "attached" ? "ON THE NOSE" : acb.mode === "capturing" ? "WINCHING IN" :
@@ -1599,6 +1633,7 @@ window.RIG = {
                   ship: { x: ship.x, y: ship.y, vx: ship.vx, vy: ship.vy, nose: ship.nose },
                   acb: { mode: acb.mode, type: acb.type, x: acb.x, y: acb.y, vx: acb.vx, vy: acb.vy },
                   chamber: [...chamber], ballsLeft: ballsLeft(),
+                  star: { x: STAR.x, y: STAR.y, vx: STAR.vx, vy: STAR.vy, alive: STAR.alive, struck: STAR.struck },
                   belt: { intact: belt.reduce((a, b) => a + b, 0), theta: beltTheta(simYears), eating: beltEat.filter(e => e > 0).length },
                   balls: balls.map(k => ({ type: k.type, x: k.x, y: k.y, vx: k.vx, vy: k.vy, dwell: k.dwell, lock: k.lock, flash: !!k.flash })),
                   hitstop: hitstop ? { t: hitstop.t, planet: hitstop.planet.name } : null,
@@ -1622,6 +1657,7 @@ window.RIG = {
   override: (why) => overrideStabiliser(why),
   newBall: () => newBallNow(),
   setType: (i, t) => { if (i < 0) acb.type = t; else chamber[i] = t; },
+  starTo: (x, y, vx, vy, struck) => { STAR.x = x; STAR.y = y; STAR.vx = vx; STAR.vy = vy; if (struck != null) STAR.struck = struck; },
   teleportBody: (i, x, y, vx, vy, struck) => { const b = bodies[i]; b.x = x; b.y = y; b.vx = vx; b.vy = vy; if (struck != null) b.struck = struck; },
   ghostNow: () => { buildGhost(); return ghost ? { pts: ghost.pending ? ghost.pending.length : 0, hit: ghost.hit, balls: ghost.balls.length, worlds: ghost.worlds.length } : null; },
   realTick: (s) => { checkCapture(s); stepCapture(s); stepLost(s); },
