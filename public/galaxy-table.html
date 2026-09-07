@@ -123,7 +123,10 @@
   belt, so the aim line shows the rebound and the sim spends the section only when it
   really happens. A FLASH BALL REBOUNDS AT FLASH SPEED: the cushion mirrors its radial
   velocity and it carries on with its range intact (the section is spent as for any
-  bounce), so a bounce-off trick shot is a real shot and the aim line shows it. THE SHIP DOES
+  bounce), so a bounce-off trick shot is a real shot and the aim line shows it. The
+  same off a world: after the impact frame and the exchange, the ball leaves along its
+  new direction at flash speed if it has reach left (a square hit that stops it dead
+  ends the flash), so one shot can take two worlds. THE SHIP DOES
   NOT BOUNCE: an intact section wrecks it (beltKillsShip, on), the section goes with
   it, and the ship respawns on its opening orbit like a ship into the star. A gap is
   safe, so the belt is a wall with the doors you and Styx have made in it.
@@ -872,7 +875,7 @@ function sweepBall(k, list, others, h) {
     const R = S.acbRadiusAU + (b.ball ? S.acbRadiusAU : ballR(b));
     const fx0 = k.x - b.x, fy0 = k.y - b.y;
     const A = dx * dx + dy * dy, B = 2 * (fx0 * dx + fy0 * dy), C = fx0 * fx0 + fy0 * fy0 - R * R;
-    if (C <= 0) { best = b; bestT = 0; break; }          // already inside: contact now
+    if (C <= 0) { if (fx0 * dx + fy0 * dy >= 0) continue; best = b; bestT = 0; break; }   // already inside: contact now, unless leaving (a flash carrying on off a world)
     const disc = B * B - 4 * A * C;
     if (disc < 0) continue;
     const t = (-B - Math.sqrt(disc)) / (2 * A);
@@ -1268,8 +1271,19 @@ function endImpactFrame() {
   if (!b.struck) { b.struck = true; note("STRUCK: " + b.name, b.color); }
   fx.shocks.push({ x: k.x, y: k.y, t: 0 });
   fx.shake = Math.max(fx.shake, 0.8);
+  if (k.type === "thermo") { fx.trails.push(k.flash.pts); k.flash = null; thermoGoesOff(k, b); return; }
+  if (flashCarriesOn(k)) { note("FLASH CARRIES ON off " + b.name + ", " + k.flash.remain.toFixed(1) + " AU left", "#8fe8b0"); return; }
   fx.trails.push(k.flash.pts); k.flash = null;
-  if (k.type === "thermo") thermoGoesOff(k, b);
+}
+// After the exchange with a world the ball has a direction: if the flash still has reach
+// it CARRIES ON along that direction at flash speed (a dead-stop square hit, under 15%
+// of the shot's speed, ends it: there is no direction to carry). The trail continues.
+function flashCarriesOn(k) {
+  if (!k.flash || k.flash.remain <= 0.02 || k.type === "thermo") return false;
+  const sp = Math.hypot(k.vx, k.vy);
+  if (sp < 0.15 * k.flash.normalDv) return false;
+  k.vx *= S.animeSpeedAUyr / sp; k.vy *= S.animeSpeedAUyr / sp;
+  return true;
 }
 // Effects on the real clock. Trails age even during the frame; that is the point of it.
 function stepFx(realDt) {
@@ -1317,16 +1331,30 @@ function buildGhost() {
     if (!k.flash) continue;
     sweepTime = gt; sweepSections = gbelt;
     let hit = null, bounces = 0;
-    while (k.flash.remain > 1e-6 && bounces < 8) {
+    while (k.flash && k.flash.remain > 1e-6 && bounces < 8) {
       hit = sweepBall(k, contactList(gb, gstar), sim, k.flash.remain / Math.hypot(k.vx, k.vy));
       k.pts.push({ x: k.x, y: k.y });
-      if (!(hit && hit.belt)) break;
-      flashBounce(k, hit, gbelt, true); bounces++; hit = null;   // the rebound, on the forecast's own belt
+      if (hit && hit.belt) { flashBounce(k, hit, gbelt, true); bounces++; hit = null; continue; }   // the rebound, on the forecast's own belt
+      if (hit && !hit.ball) {
+        // a world: the impact, and the flash carries on off it if it has reach left
+        if (k === pending && !out.hit) out.hit = { x: k.x, y: k.y };
+        const [ivx, ivy] = impactVelocity(k); k.vx = ivx; k.vy = ivy;
+        const dx = hit.x - k.x, dy = hit.y - k.y, d = Math.hypot(dx, dy) || 1, R = S.acbRadiusAU + ballR(hit);
+        k.x = hit.x - dx / d * R * 0.995; k.y = hit.y - dy / d * R * 0.995;
+        const boost = k.type === "thermo" ? Math.sqrt(S.thermoEnergy) : 1; k.vx *= boost; k.vy *= boost;
+        collide(k, S.acbMassRatio * hit.mass, S.acbRadiusAU, hit, hit.mass, ballR(hit));
+        hit.struck = true;
+        if (k.type === "thermo") thermoAftermath(k, hit);
+        if (!track.has(hit.id)) track.set(hit.id, { color: hit.color, direct: true, pts: [{ x: hit.x, y: hit.y }] });
+        if (flashCarriesOn(k)) { k.x += k.vx / S.animeSpeedAUyr * 0.004; k.y += k.vy / S.animeSpeedAUyr * 0.004; bounces++; hit = null; continue; }
+        break;
+      }
+      break;
     }
     if (hit && hit.ball) {
       // ball on ball, as flashHitsBall does it: impact energy, placed touching, equal-mass exchange
       const o = hit.ball;
-      if (k === pending) out.hit = { x: k.x, y: k.y };
+      if (k === pending && !out.hit) out.hit = { x: k.x, y: k.y };
       const [ivx, ivy] = impactVelocity(k); k.vx = ivx; k.vy = ivy;
       const dx = o.x - k.x, dy = o.y - k.y, d = Math.hypot(dx, dy) || 1, R = 2 * S.acbRadiusAU;
       k.x = o.x - dx / d * R * 0.995; k.y = o.y - dy / d * R * 0.995;
@@ -1335,17 +1363,7 @@ function buildGhost() {
       if (k.type === "thermo") k.dead = true;
       continue;
     }
-    if (hit) {
-      if (k === pending) out.hit = { x: k.x, y: k.y };
-      const [ivx, ivy] = impactVelocity(k); k.vx = ivx; k.vy = ivy;
-      const dx = hit.x - k.x, dy = hit.y - k.y, d = Math.hypot(dx, dy) || 1, R = S.acbRadiusAU + ballR(hit);
-      k.x = hit.x - dx / d * R * 0.995; k.y = hit.y - dy / d * R * 0.995;
-      const boost = k.type === "thermo" ? Math.sqrt(S.thermoEnergy) : 1; k.vx *= boost; k.vy *= boost;
-      collide(k, S.acbMassRatio * hit.mass, S.acbRadiusAU, hit, hit.mass, ballR(hit));
-      hit.struck = true;
-      if (k.type === "thermo") thermoAftermath(k, hit);
-      if (!track.has(hit.id)) track.set(hit.id, { color: hit.color, direct: true, pts: [{ x: hit.x, y: hit.y }] });
-    } else {
+    if (!hit && k.flash) {
       // the FLASH TERMINUS: where the flash burns out and the ball drops to coasting
       if (k === pending) out.terminus = { x: k.x, y: k.y, a: Math.atan2(k.vy, k.vx) };
       burnOut(k);
