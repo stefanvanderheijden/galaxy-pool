@@ -117,6 +117,24 @@ export const SKETCHES = [
       square hit stops the cue dead. Flies hyperwarp 2's scheme, Q/E for the clock.`,
     tags: ['cue ball', 'collisions', 'catch', 'two aim modes', 'level-01'],
   },
+  {
+    id: '010',
+    name: '010 Geometry Pool',
+    href: '/geometry-pool.html',
+    tagline: 'The throttle is the clock: fly by making time pass, and the rack runs on while you do.',
+    description: `009's table with the orbit taken away and the flying rebuilt round one idea.
+      The ship feels no gravity and is SLOWER than every world on the table, so it cannot get
+      anywhere by going faster — it gets there by winding the CLOCK, up to 60x, by how far you
+      point away from it. Crossing the table spends a year of the rack: Red laps twice while
+      you are in the air, and the shot you could see when you set off is not the one you have
+      when you arrive. Park the pointer back on the hull and the rack settles. Grab the ship
+      and pull back (or throw the right stick) and time FREEZES to aim; let go and the anime
+      flash leaves in slow motion toward its first contact. The pointer is drawn by the rig,
+      not the OS, so it can be put back on the hull when you shoot. Charybdis sits where
+      Solaris did, drawn as a sun and holding the rack in its rings, and swallows anything
+      that crosses its horizon — worlds, cue balls and the ship alike.`,
+    tags: ['twin stick', 'gamepad', 'time as throttle', 'freeze time to aim', 'no briefing'],
+  },
 ]
 
 /** @param {string} id */
