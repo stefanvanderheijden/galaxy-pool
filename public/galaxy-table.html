@@ -121,7 +121,9 @@
   every one of the 48 sections is a one-time cushion. A destroyed stretch is a gap and
   the next thing through it just leaves. The forecast plays the bounce on a copy of the
   belt, so the aim line shows the rebound and the sim spends the section only when it
-  really happens. A flash ball sweeps against the belt like anything else. THE SHIP DOES
+  really happens. A FLASH BALL REBOUNDS AT FLASH SPEED: the cushion mirrors its radial
+  velocity and it carries on with its range intact (the section is spent as for any
+  bounce), so a bounce-off trick shot is a real shot and the aim line shows it. THE SHIP DOES
   NOT BOUNCE: an intact section wrecks it (beltKillsShip, on), the section goes with
   it, and the ship respawns on its opening orbit like a ship into the star. A gap is
   safe, so the belt is a wall with the doors you and Styx have made in it.
@@ -895,18 +897,23 @@ function sweepBall(k, list, others, h) {
     }
   }
   k.x += dx * bestT; k.y += dy * bestT;
+  k.sweepT = bestT;                                  // the fraction of the step used, for a rebound to continue
   const flight = L * bestT;
   if (k.flash) k.flash.remain -= flight;
   return best;
 }
 let sweepTime = 0, sweepSections = null;   // the belt the sweep sees: the sim's, or the forecast's copy
 // A flash ball reaches the cushion: the flash ends there, the normal energy bounces.
-function flashHitsBelt(k, hit, sections, spend) {
-  const [ivx, ivy] = impactVelocity(k); k.vx = ivx; k.vy = ivy;
+// A flash ball reaches the cushion: it REBOUNDS AT FLASH SPEED, radial velocity mirrored,
+// range kept, so the flash carries on off the belt and a bounce-off trick shot is a shot.
+// The section is spent as for any bounce. The ball is set a hair off the face so the
+// next sweep does not find the same face again.
+function flashBounce(k, hit, sections, spend) {
   const dx = k.x - ORIGIN.x, dy = k.y - ORIGIN.y, r = Math.hypot(dx, dy) || 1, nx = dx / r, ny = dy / r;
   const vr = k.vx * nx + k.vy * ny;
-  k.vx -= (1 + S.beltRestitution) * vr * nx; k.vy -= (1 + S.beltRestitution) * vr * ny;
-  if (spend) { sections[hit.i] = 0; }
+  k.vx -= 2 * vr * nx; k.vy -= 2 * vr * ny;
+  k.x -= nx * Math.sign(vr) * 0.002; k.y -= ny * Math.sign(vr) * 0.002;
+  if (spend) sections[hit.i] = 0;
 }
 // The energy that actually transfers: a normal shot's, along the flight line.
 function impactVelocity(k) {
@@ -952,13 +959,14 @@ function simStep(h, offGravity) {
   for (const k of balls) {
     if (!k.flash) { k.x += k.vx * h; k.y += k.vy * h; continue; }
     sweepTime = simYears; sweepSections = belt;
-    const hit = sweepBall(k, contactList(bodies, STAR), balls, h);
-    k.flash.pts.push({ x: k.x, y: k.y, age: 0 });
-    if (hit && hit.belt) {
-      flashHitsBelt(k, hit, belt, true); beltBreak(hit.i, k.x, k.y);
-      fx.trails.push(k.flash.pts); k.flash = null; fx.shake = Math.max(fx.shake, 0.5);
-      note("BOUNCED off the belt", "#c8b090");
-      continue;
+    let hit = null, hLeft = h, bounces = 0;
+    while (hLeft > 0 && bounces < 8) {
+      hit = sweepBall(k, contactList(bodies, STAR), balls, hLeft);
+      k.flash.pts.push({ x: k.x, y: k.y, age: 0 });
+      if (!(hit && hit.belt)) break;
+      flashBounce(k, hit, belt, true); beltBreak(hit.i, k.x, k.y);
+      fx.shake = Math.max(fx.shake, 0.5); note("FLASH REBOUND off the belt", "#c8b090");
+      hLeft *= 1 - k.sweepT; bounces++; hit = null;
     }
     if (hit && hit.ball) { flashHitsBall(k, hit.ball); continue; }
     if (hit) { beginImpactFrame(k, hit); return true; }   // the frame freezes here
@@ -1308,9 +1316,13 @@ function buildGhost() {
   for (const k of sim) {
     if (!k.flash) continue;
     sweepTime = gt; sweepSections = gbelt;
-    const hit = sweepBall(k, contactList(gb, gstar), sim, k.flash.remain / Math.hypot(k.vx, k.vy));
-    k.pts.push({ x: k.x, y: k.y });
-    if (hit && hit.belt) { if (k === pending) out.hit = { x: k.x, y: k.y }; flashHitsBelt(k, hit, gbelt, true); k.flash = null; continue; }
+    let hit = null, bounces = 0;
+    while (k.flash.remain > 1e-6 && bounces < 8) {
+      hit = sweepBall(k, contactList(gb, gstar), sim, k.flash.remain / Math.hypot(k.vx, k.vy));
+      k.pts.push({ x: k.x, y: k.y });
+      if (!(hit && hit.belt)) break;
+      flashBounce(k, hit, gbelt, true); bounces++; hit = null;   // the rebound, on the forecast's own belt
+    }
     if (hit && hit.ball) {
       // ball on ball, as flashHitsBall does it: impact energy, placed touching, equal-mass exchange
       const o = hit.ball;
@@ -2415,6 +2427,7 @@ window.RIG = {
   override: (why) => overrideStabiliser(why),
   newBall: () => newBallNow(),
   space: () => spaceKey(),
+  charge: (v) => { charging = true; charge = v; },
   setType: (i, t) => { if (i < 0) acb.type = t; else chamber[i] = t; },
   starTo: (x, y, vx, vy, struck) => { STAR.x = x; STAR.y = y; STAR.vx = vx; STAR.vy = vy; if (struck != null) STAR.struck = struck; },
   teleportBody: (i, x, y, vx, vy, struck) => { const b = bodies[i]; b.x = x; b.y = y; b.vx = vx; b.vy = vy; if (struck != null) b.struck = struck; },
