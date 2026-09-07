@@ -136,6 +136,36 @@
   table's geometry and not the star's. A ball no longer burns at the star; it bounces.
   Worlds and the ship still do.
 
+  THE MISSION BRIEFING (panel toggle, on). The table opens with a skippable flyover,
+  Mario Kart style: a 2.5D camera, pitched introPitchDeg down and circling slowly, sweeps
+  from a wide view of the whole system past every body in turn (Solaris, Red, Terra,
+  Vera, Styx, Lethe, Acheron, then the ark) and settles into the top-down view the game
+  is played in. Each stop holds for introDwellS with an INSPECTOR CARD: the body's
+  picture and its properties (mass, density, diameter, travel speed, inhabited,
+  surface temperature, from level-01.json's own numbers), and under them a MISSION
+  NOTE by Robert Cupboard, the advisor, in his voice: what the body is for on this
+  table and nothing about who set the table. Any key or click skips to the game.
+  The sim is frozen for the duration, so the rack the briefing shows is the rack
+  you play.
+
+  The 2.5D is one projection: a perspective camera over the flat table, eye = target
+  minus range along the heading and up by range*sin(pitch), focal = 1.1 * screen
+  height. Every drawing call goes through worldToScreen, so the belt, the rings and
+  the pocket wells come out as ellipses for free; sprites are billboards scaled by
+  their own depth. The handoff is exact: a perspective camera looking straight down at
+  a flat plane IS the orthographic view at scale focal / height, so the outro pitches
+  to 90 degrees and turns to the top-down azimuth, and the game's camera takes over
+  on the same frame without a cut.
+
+  PORT NOTES for the briefing: a Cinemachine dolly (CinemachineSplineDolly) through the
+  stop positions with a CinemachineTargetGroup look-at, per-stop dwell on the timeline;
+  the card is a UI Toolkit panel fed by BodyInfo (classification, diameterKm, tempC)
+  and Body (mass, inhabited), density derived from the two; Robert's notes are
+  TutorialScript-style constants, one per body id, NOT a Storyforge export, for the
+  reason the tutorial's lines are not. Skip is any input via the new Input System's
+  anyKey. The blend to the game's orthographic camera is the same trick: dolly to the
+  straight-down pose, set the ortho size to focal / height, swap cameras that frame.
+
   THE STABILISER. A shot kicks the ship backwards (recoilFrac), which is honest and
   leaves you slowly falling out of your ring while you watch the ball. So after every
   shot the ship burns itself back onto a circular orbit at whatever radius it is at, with
@@ -187,6 +217,7 @@
   #chamber .slot .type:hover { color: #ffffff; }
   #chamber .slot.out .type, #chamber .slot.none .type { cursor: default; border-bottom: 0; color: #6f86a8; }
   #chamber .slot.active { border-color: #4fc3f7; }
+  #cv.briefing { cursor: default; }
   #panel button { background: #182640; color: #cfe0ff; border: 1px solid #2f4468; border-radius: 4px;
     font: inherit; padding: 3px 8px; cursor: pointer; width: 100%; }
 </style>
@@ -221,6 +252,10 @@ const TAU = Math.PI * 2;
 
 // ============================== TUNABLES (test panel) ===========================
 const DEFAULTS = {
+  introFlyover: true,     // the mission briefing flyover at the start of every rack
+  introFlyS: 1.4,         // seconds flying between stops
+  introDwellS: 3.4,       // seconds holding on a body with its card up
+  introPitchDeg: 52,      // camera pitch below horizontal during the flyover
   dragMode: false,        // false: CHARGE (hold LMB), true: DRAG (pull back). Tab swaps
   thrustAntigrav: true,   // the drive lets go of gravity while it burns (hyperwarp 2)
   driftMode: true,        // the time slider springs home to 1M when released
@@ -265,7 +300,7 @@ const DEFAULTS = {
   arrowNumbers: false,    // label the arrows with values, not just their source
   arrowPxPerAUyr: 12,     // one pixel scale for every arrow, so they compare
   gravityHorizonYr: 0.1,  // gravity is drawn as the velocity it adds over this
-  animeMode: false,       // 'Anime style pool ball trail'. See the header
+  animeMode: true,        // 'Anime style pool ball trail'. See the header
   animeSpeedAUyr: 1600,   // flash speed: about 1 AU per 0.1 s real at 200K
   animeRangeAU: 3.0,      // a miss burns out after this much flight
   animeHitstopMs: 200,    // the impact frame, real milliseconds, bodies touching
@@ -411,6 +446,211 @@ function resetWorld() {
   charging = false; charge = 0; drag = null; stab = null; hitstop = null;
   fx.trails = []; fx.shards = []; fx.shocks = []; fx.flashA = 0; fx.shake = 0;
   ghost = null;
+  if (S.introFlyover) startIntro(); else endIntro();
+}
+
+// ============================== THE MISSION BRIEFING ============================
+// Facts are level-01.json's: mass in solar masses, info.diameterKm, info.tempC,
+// inhabited. Density is derived from mass and diameter (the game derives it the same
+// way, Thermal.DensityAt). Travel speed is the body's speed on its ring at the
+// moment of the briefing. Robert's notes are per body id, hand-written, in his
+// register: short, practical, "captain", and never a word about who set the table.
+const BRIEF = {
+  star:    { cls: "M-type main sequence", diameterKm: 625328, tempC: 3126.9, inhabited: false,
+             note: "Red dwarf, captain. Cold system: every world out here is frozen. It is the heaviest ball on the table and it moves if you hit it, so keep the cue off it unless you mean it." },
+  smell:   { cls: "Terrestrial, veiled", diameterKm: 14661, tempC: -9.2, inhabited: false,
+             note: "The heavy one. Sulphur haze over a thick envelope, and it takes a thermonuclear without cracking. It will not go far on a soft shot, so lean in." },
+  hearing: { cls: "Terrestrial", diameterKm: 10472, tempC: -155.2, inhabited: true,
+             note: "Somebody is home. Rock under ice, and it breaks if you put a thermonuclear on it, so don't. There is a pulse coming off it the survey cannot account for. Not our problem today." },
+  touch:   { cls: "Terrestrial, glaciated", diameterKm: 7181, tempC: -205.2, inhabited: false,
+             note: "Light, and already nearest a pocket. This is your opening shot, young cap'n. Those arcs on the surface? No tide in this system makes those. Pool it anyway." },
+  Styx:    { cls: "Singularity", diameterKm: 30, tempC: -270, inhabited: false,
+             note: "The pocket. Pulls from every direction inside half an AU, and it takes the ship as happily as a planet. It sits close to the belt and it is eating it, so the cushions have a clock on them." },
+  Lethe:   { cls: "Singularity", diameterKm: 30, tempC: -270, inhabited: false,
+             note: "Pocket two. Same pull, quieter neighbourhood. A world that goes in does not come back, which is the point." },
+  Acheron: { cls: "Singularity", diameterKm: 30, tempC: -270, inhabited: false,
+             note: "Pocket three. Nothing passes inside its reach on its own, so anything that goes in, you put there." },
+  ship:    { cls: "The ark", diameterKm: null, tempC: null, inhabited: true,
+             note: "That is us. One cue ball on the nose, two in the chamber. Shoot, then go and fetch it. Speed up time when the table is slow, slow it down when it matters. Good hunting, captain." },
+};
+const MSUN_KG = 1.989e30, MEARTH_KG = 5.972e24, KMS_PER_AUYR = 4.7404;
+function densityGcc(massMsun, diameterKm) {
+  const r = diameterKm * 0.5 * 1e5;                  // cm
+  return massMsun * MSUN_KG * 1000 / (4 / 3 * Math.PI * r * r * r);
+}
+// The stops, built at reset so they point at the live bodies. Each has the thing to
+// look at, how far to stand back (so the body fills about the same of the screen
+// whatever its size) and the card to show.
+let intro = null;   // { t, stops, wide, done } while the briefing runs
+let panelWasHidden = false;
+function introStops() {
+  // range is derived per frame from R and px, so a resize mid-briefing reframes
+  const framing = (o, R, px) => ({ o, R, px });
+  const stops = [];
+  stops.push({ ...framing(STAR, starR(), 130), key: "star", name: STAR.name, mass: STAR.mass, unit: "solar masses", speed: 0, sprite: "sun", tint: true });
+  for (const b of bodies) stops.push({ ...framing(b, ballR(b), 110), key: b.id, name: b.name, mass: b.mass / 3.003e-6, unit: "Earth masses", speed: Math.hypot(b.vx, b.vy), sprite: b.sprite });
+  for (const p of POCKETS) stops.push({ ...framing(p, S.pocketRadiusAU, 110), key: p.name, name: p.name, mass: S.pocketMass, unit: "solar masses", speed: 0, sprite: "blackhole", pocket: true });
+  stops.push({ ...framing(ship, HULL_LEN * 2.5, 60), key: "ship", name: "THE ARK", mass: null, unit: "", speed: Math.hypot(ship.vx, ship.vy), sprite: null, ship: true });
+  return stops;
+}
+function introFocal() { return Math.max(1, cv.clientHeight) * 1.1; }
+const INTRO_TITLE_S = 3.0, INTRO_OUTRO_S = 1.8;
+function startIntro() {
+  intro = { t: 0, stops: introStops(), done: false };
+  const p = document.getElementById("panel");
+  panelWasHidden = p.style.display === "none";
+  p.style.display = "none"; document.getElementById("chamber").style.display = "none";
+  cv.classList.add("briefing");
+  charging = false; charge = 0; drag = null;
+}
+function endIntro() {
+  intro = null; persp = null;
+  document.getElementById("panel").style.display = panelWasHidden ? "none" : "";
+  document.getElementById("chamber").style.display = "";
+  cv.classList.remove("briefing");
+  // the handoff: the top-down camera at the fit the outro ended on
+  cam.x = ORIGIN.x; cam.y = ORIGIN.y; cam.zoom = 1;
+  cam.scale = Math.min(cv.clientWidth, cv.clientHeight) / 2 / S.viewRadiusAU;
+}
+function skipIntro() {
+  if (!intro || intro.done) return;
+  // not a cut: jump the clock to the outro, which blends to the game view
+  intro.t = introTotal() - INTRO_OUTRO_S;
+  intro.skipped = true;
+}
+function introTotal() { return INTRO_TITLE_S + intro.stops.length * (S.introFlyS + S.introDwellS) + INTRO_OUTRO_S; }
+function wideRange() { return introFocal() / (Math.max(1, Math.min(cv.clientWidth, cv.clientHeight)) / 2 / S.viewRadiusAU); }
+// The camera pose at time t: target, range, pitch, azimuth. The title holds a wide
+// tilted view of the whole table; each stop flies in over introFlyS and holds for
+// introDwellS; the outro pitches up to top-down at the wide fit. The azimuth turns
+// slowly the whole time, which is the pass-by.
+function introPose(t) {
+  const fly = S.introFlyS, dwell = S.introDwellS, seg = fly + dwell, stops = intro.stops;
+  const wide = { x: ORIGIN.x, y: ORIGIN.y, range: wideRange() * 0.9 };
+  const pitch = S.introPitchDeg * Math.PI / 180;
+  let az = -Math.PI / 2 + 0.6 + t * 0.28;              // the slow circle
+  const total = introTotal();
+  const poseOf = st => ({ x: st.o.x, y: st.o.y, range: Math.max(0.3, st.R * introFocal() / st.px) });
+  let a, b, k, cardIdx = -1, cardA = 0, title = 0, pitchNow = pitch, ease = easeInOutCubic;
+  if (t < INTRO_TITLE_S) { a = wide; b = wide; k = 0; title = 1 - Math.max(0, (t - (INTRO_TITLE_S - 0.5)) / 0.5); }
+  else if (t < total - INTRO_OUTRO_S) {
+    const u = t - INTRO_TITLE_S, i = Math.min(stops.length - 1, Math.floor(u / seg)), f = u - i * seg;
+    a = i === 0 ? wide : poseOf(stops[i - 1]); b = poseOf(stops[i]);
+    k = f < fly ? ease(f / fly) : 1;
+    if (f >= fly) { cardIdx = i; cardA = Math.min(1, (f - fly) / 0.35); }
+  } else {
+    // the outro: from the last stop to the top-down fit, azimuth to the game's own
+    const f = ease(Math.min(1, (t - (total - INTRO_OUTRO_S)) / INTRO_OUTRO_S));
+    a = poseOf(stops[stops.length - 1]); b = { x: ORIGIN.x, y: ORIGIN.y, range: wideRange() }; k = f;
+    pitchNow = pitch + (Math.PI / 2 - pitch) * f;
+    const azEnd = -Math.PI / 2, az0 = ((az - azEnd) % TAU + TAU) % TAU;   // the short way round
+    az = azEnd + (az0 > Math.PI ? az0 - TAU : az0) * (1 - f);
+  }
+  const lerp = (p, q, m) => p + (q - p) * m;
+  // Between stops the camera rises and dives: a flight at card range would cross empty
+  // table with nothing in frame, so the range humps to about 2.6x at the midpoint.
+  const hump = cardIdx < 0 && t < total - INTRO_OUTRO_S ? 1 + 1.6 * Math.sin(Math.PI * k) : 1;
+  return { x: lerp(a.x, b.x, k), y: lerp(a.y, b.y, k), range: Math.exp(lerp(Math.log(a.range), Math.log(b.range), k)) * hump,
+           pitch: pitchNow, az, cardIdx, cardA, title };
+}
+// The projection. persp is set for the frame while the briefing runs and null in play.
+let persp = null;
+function setPersp(pose) {
+  const cp = Math.cos(pose.pitch), sp = Math.sin(pose.pitch), hx = Math.cos(pose.az), hy = Math.sin(pose.az);
+  const eye = [pose.x - pose.range * cp * hx, pose.y - pose.range * cp * hy, pose.range * sp];
+  const f = [cp * hx, cp * hy, -sp], h = [hx, hy, 0];
+  const cross = (p, q) => [p[1] * q[2] - p[2] * q[1], p[2] * q[0] - p[0] * q[2], p[0] * q[1] - p[1] * q[0]];
+  const norm = v => { const l = Math.hypot(v[0], v[1], v[2]); return [v[0] / l, v[1] / l, v[2] / l]; };
+  const r = norm(cross(h, f)), u = cross(f, r);
+  persp = { eye, f, r, u, focal: introFocal() };
+}
+function projPt(x, y, z) {
+  const P = persp, dx = x - P.eye[0], dy = y - P.eye[1], dz = (z || 0) - P.eye[2];
+  const depth = dx * P.f[0] + dy * P.f[1] + dz * P.f[2];
+  if (depth < 0.02) return null;
+  const k = P.focal / depth;
+  return [cv.clientWidth / 2 + (dx * P.r[0] + dy * P.r[1] + dz * P.r[2]) * k,
+          cv.clientHeight / 2 - (dx * P.u[0] + dy * P.u[1] + dz * P.u[2]) * k, k];
+}
+function scAt(x, y) { if (!persp) return cam.scale; const p = projPt(x, y, 0); return p ? p[2] : 0; }
+function stepIntro(realDt) {
+  intro.t += realDt * (intro.skipped ? 2 : 1);      // a skip plays the outro at double speed
+  if (intro.t >= introTotal()) { endIntro(); return; }
+  intro.pose = introPose(intro.t);
+  setPersp(intro.pose);
+}
+// A ring in the table plane: a circle in play, an ellipse (well, a polyline) in the flyover.
+function drawRing(wx, wy, rAU, stroke, width, dash) {
+  if (!persp) { const [sx, sy] = worldToScreen(wx, wy); if (dash) cx.setLineDash(dash); circle(sx, sy, rAU * cam.scale, null, stroke, width); cx.setLineDash([]); return; }
+  const pts = []; for (let i = 0; i <= 96; i++) { const a = i / 96 * TAU; pts.push({ x: wx + rAU * Math.cos(a), y: wy + rAU * Math.sin(a) }); }
+  cx.strokeStyle = stroke; cx.lineWidth = width; cx.setLineDash(dash || []); cx.beginPath();
+  let pen = false;
+  for (const p of pts) { const q = worldToScreen(p.x, p.y); if (!q) { pen = false; continue; } if (pen) cx.lineTo(q[0], q[1]); else cx.moveTo(q[0], q[1]); pen = true; }
+  cx.stroke(); cx.setLineDash([]);
+}
+function wrapText(text, maxW) {
+  const words = text.split(" "), lines = []; let line = "";
+  for (const w of words) { const t = line ? line + " " + w : w; if (cx.measureText(t).width > maxW && line) { lines.push(line); line = w; } else line = t; }
+  if (line) lines.push(line);
+  return lines;
+}
+function drawBriefing(W, H) {
+  const pose = intro.pose; if (!pose) return;
+  // letterbox
+  const bar = Math.round(H * 0.07);
+  cx.fillStyle = "#000"; cx.fillRect(0, 0, W, bar); cx.fillRect(0, H - bar, W, bar);
+  cx.textAlign = "center";
+  if (pose.title > 0) {
+    cx.fillStyle = `rgba(232,240,250,${pose.title})`; cx.font = `26px "Share Tech Mono", monospace`;
+    cx.fillText("MISSION BRIEFING", W / 2, H * 0.36);
+    cx.font = `13px "Share Tech Mono", monospace`; cx.fillStyle = `rgba(159,180,204,${pose.title})`;
+    cx.fillText("SOLARIS SYSTEM   .   TABLE 01", W / 2, H * 0.36 + 26);
+    cx.fillText("mission notes by Robert Cupboard", W / 2, H * 0.36 + 46);
+  }
+  cx.font = `11px "Share Tech Mono", monospace`; cx.fillStyle = "rgba(160,185,215,0.7)"; cx.textAlign = "right";
+  cx.fillText("any key to skip", W - 16, H - bar - 12);
+  cx.textAlign = "left";
+  if (pose.cardIdx >= 0) drawCard(intro.stops[pose.cardIdx], pose.cardA, W, H);
+}
+function drawCard(st, a, W, H) {
+  const B = BRIEF[st.key] || {};
+  const cw = 330, x0 = W - cw - 28 - (1 - a) * 30, y0 = Math.round(H * 0.2);
+  const rows = [
+    ["mass", st.mass == null ? "classified" : st.mass >= 100 ? st.mass.toFixed(0) + " " + st.unit : st.mass.toFixed(2) + " " + st.unit],
+    ["density", st.ship ? "classified" : st.pocket ? "off the scale" : densityGcc(st.mass * (st.unit.startsWith("Earth") ? MEARTH_KG / MSUN_KG : 1), B.diameterKm).toFixed(1) + " g/cm3"],
+    ["diameter", B.diameterKm == null ? "0.4 AU, hull" : B.diameterKm.toLocaleString("en-US") + " km"],
+    ["travel speed", st.speed ? (st.speed * KMS_PER_AUYR).toFixed(1) + " km/s  (" + st.speed.toFixed(2) + " AU/yr)" : st.pocket ? "fixed" : "at rest, the centre"],
+    ["inhabited", B.inhabited ? "YES" : "no"],
+    ["surface temp", B.tempC == null ? "21 C, cabin" : B.tempC.toFixed(0) + " C"],
+  ];
+  cx.font = `11px "Share Tech Mono", monospace`;
+  const noteLines = wrapText(B.note || "", cw - 24);
+  const ch = 96 + rows.length * 17 + 30 + noteLines.length * 15 + 16;
+  cx.globalAlpha = a;
+  cx.fillStyle = "rgba(8,12,22,0.88)"; cx.fillRect(x0, y0, cw, ch);
+  cx.strokeStyle = "#2a3a55"; cx.lineWidth = 1; cx.strokeRect(x0 + 0.5, y0 + 0.5, cw - 1, ch - 1);
+  // picture
+  const px = x0 + 46, py = y0 + 46, R = 30;
+  cx.save(); cx.beginPath(); cx.rect(x0 + 8, y0 + 8, 76, 76); cx.clip();
+  if (st.sprite) { if (!drawSprite(st.sprite, px, py, R, st.tint ? sunTinted : null, a)) circle(px, py, R, st.o.color); }
+  else { cx.save(); cx.translate(px, py); cx.rotate(-0.6); cx.beginPath(); cx.moveTo(24, 0); cx.lineTo(-13, 12); cx.lineTo(-7, 0); cx.lineTo(-13, -12); cx.closePath(); cx.fillStyle = "#4fc3f7"; cx.fill(); cx.restore(); }
+  cx.restore();
+  cx.globalAlpha = a;
+  cx.textAlign = "left"; cx.fillStyle = "#e8f0fa"; cx.font = `18px "Share Tech Mono", monospace`;
+  cx.fillText(st.name.toUpperCase(), x0 + 96, y0 + 36);
+  cx.fillStyle = "#8fc3e8"; cx.font = `11px "Share Tech Mono", monospace`;
+  cx.fillText(B.cls || "", x0 + 96, y0 + 56);
+  let y = y0 + 100;
+  for (const [k, v] of rows) {
+    cx.fillStyle = "#6f86a8"; cx.fillText(k.toUpperCase(), x0 + 14, y);
+    cx.fillStyle = k === "inhabited" && B.inhabited ? "#8fe8b0" : "#cfe0ff"; cx.textAlign = "right"; cx.fillText(v, x0 + cw - 14, y); cx.textAlign = "left";
+    y += 17;
+  }
+  y += 6; cx.strokeStyle = "#22304a"; cx.beginPath(); cx.moveTo(x0 + 12, y); cx.lineTo(x0 + cw - 12, y); cx.stroke(); y += 18;
+  cx.fillStyle = "#e8b463"; cx.fillText("MISSION NOTE  .  R. CUPBOARD", x0 + 14, y); y += 16;
+  cx.fillStyle = "#cfe0ff";
+  for (const l of noteLines) { cx.fillText(l, x0 + 14, y); y += 15; }
+  cx.globalAlpha = 1;
 }
 
 // ============================== STATE ===========================================
@@ -1026,6 +1266,7 @@ function frame(now) {
   const realDt = Math.min(0.05, (now - last) / 1000);
   last = now;
   stepFx(realDt); layoutPockets();
+  if (intro) { stepIntro(realDt); if (intro) { draw(realDt); return; } }   // the briefing: nothing moves
   if (hitstop) {
     hitstop.t -= realDt;
     if (hitstop.t <= 0) endImpactFrame();
@@ -1104,7 +1345,10 @@ function resize() {
   cv.style.width = innerWidth + "px"; cv.style.height = innerHeight + "px";
 }
 addEventListener("resize", resize); resize();
-function worldToScreen(x, y) { return [(x - cam.x) * cam.scale + cv.clientWidth / 2 + fx.shakeX, (y - cam.y) * cam.scale + cv.clientHeight / 2 + fx.shakeY]; }
+function worldToScreen(x, y) {
+  if (persp) return projPt(x, y, 0);                    // null behind the flyover camera
+  return [(x - cam.x) * cam.scale + cv.clientWidth / 2 + fx.shakeX, (y - cam.y) * cam.scale + cv.clientHeight / 2 + fx.shakeY];
+}
 function screenToWorld(sx, sy) { return [(sx - cv.clientWidth / 2) / cam.scale + cam.x, (sy - cv.clientHeight / 2) / cam.scale + cam.y]; }
 
 const stars = [];
@@ -1140,7 +1384,8 @@ function strokePts(pts, color, alpha, width, dash) {
   if (pts.length < 2) return;
   cx.strokeStyle = colA(color, alpha); cx.lineWidth = width; cx.setLineDash(dash || []);
   cx.beginPath();
-  for (let i = 0; i < pts.length; i++) { const [sx, sy] = worldToScreen(pts[i].x, pts[i].y); if (i) cx.lineTo(sx, sy); else cx.moveTo(sx, sy); }
+  let pen = false;
+  for (let i = 0; i < pts.length; i++) { const q = worldToScreen(pts[i].x, pts[i].y); if (!q) { pen = false; continue; } if (pen) cx.lineTo(q[0], q[1]); else cx.moveTo(q[0], q[1]); pen = true; }
   cx.stroke(); cx.setLineDash([]);
 }
 function circle(sx, sy, r, fill, stroke, width) {
@@ -1154,7 +1399,8 @@ function draw(realDt) {
   cx.setTransform(DPR, 0, 0, DPR, 0, 0);
   cx.fillStyle = "#05070d"; cx.fillRect(0, 0, W, H);
   for (const s of stars) {
-    const px = ((s.x * W - cam.x * cam.scale * 0.05) % W + W) % W, py = ((s.y * H - cam.y * cam.scale * 0.05) % H + H) % H;
+    const parX = persp ? persp.eye[0] * 60 : cam.x * cam.scale * 0.05, parY = persp ? persp.eye[1] * 60 : cam.y * cam.scale * 0.05;
+    const px = ((s.x * W - parX) % W + W) % W, py = ((s.y * H - parY) % H + H) % H;
     cx.fillStyle = `rgba(200,215,255,${s.a})`; cx.fillRect(px, py, s.r, s.r);
   }
   const sc = cam.scale;
@@ -1169,22 +1415,19 @@ function draw(realDt) {
         const a = th + (i + rk.da) * sec, r = S.beltRadiusAU + rk.dr * BELT_HALF;
         let wx = ORIGIN.x + r * Math.cos(a), wy = ORIGIN.y + r * Math.sin(a);
         if (e > 0) { const k = e * e * (0.7 + 0.3 * rk.tint); wx += (st.x - wx) * k; wy += (st.y - wy) * k; }   // the pull, visible
-        const [sx, sy] = worldToScreen(wx, wy);
+        const q = worldToScreen(wx, wy); if (!q) continue;
         const c = rk.tint < 0.5 ? "#8f8478" : "#a89a86";
-        circle(sx, sy, Math.max(1, rk.size * sc * 0.012 * (1 - e * 0.6)), e > 0 ? colA("#b48cff", 0.5 + 0.5 * (1 - e)) : c);
+        circle(q[0], q[1], Math.max(1, rk.size * (persp ? q[2] : sc) * 0.012 * (1 - e * 0.6)), e > 0 ? colA("#b48cff", 0.5 + 0.5 * (1 - e)) : c);
       }
     }
   }
   // authored rings, for worlds still on them
-  for (const b of bodies) if (b.alive && !b.struck) {
-    const [sx, sy] = worldToScreen(ORIGIN.x, ORIGIN.y);
-    circle(sx, sy, b.orbitR * sc, null, "rgba(120,150,200,0.16)", 1);
-  }
+  for (const b of bodies) if (b.alive && !b.struck) drawRing(ORIGIN.x, ORIGIN.y, b.orbitR, "rgba(120,150,200,0.16)", 1);
   // pockets: influence ring, dark well, sprite
   for (const p of POCKETS) {
-    const [sx, sy] = worldToScreen(p.x, p.y);
-    cx.setLineDash([3, 6]); circle(sx, sy, S.pocketInfluenceAU * sc, null, "rgba(180,140,255,0.18)", 1); cx.setLineDash([]);
-    const R = S.pocketRadiusAU * sc;
+    drawRing(p.x, p.y, S.pocketInfluenceAU, "rgba(180,140,255,0.18)", 1, [3, 6]);
+    const q = worldToScreen(p.x, p.y); if (!q) continue;
+    const [sx, sy] = q, R = S.pocketRadiusAU * (persp ? q[2] : sc);
     const g = cx.createRadialGradient(sx, sy, R * 0.6, sx, sy, R * 2.4);
     g.addColorStop(0, "rgba(120,80,200,0.35)"); g.addColorStop(1, "rgba(120,80,200,0)");
     circle(sx, sy, R * 2.4, g);
@@ -1194,7 +1437,7 @@ function draw(realDt) {
   }
   // the star
   if (STAR.alive) {
-    const [sx, sy] = worldToScreen(STAR.x, STAR.y), R = starR() * sc;
+    const [sx, sy] = worldToScreen(STAR.x, STAR.y) || [-1e4, -1e4], R = starR() * scAt(STAR.x, STAR.y);
     const g = cx.createRadialGradient(sx, sy, R * 0.8, sx, sy, R * 3);
     g.addColorStop(0, "rgba(255,75,43,0.35)"); g.addColorStop(1, "rgba(255,75,43,0)");
     circle(sx, sy, R * 3, g);
@@ -1217,13 +1460,14 @@ function draw(realDt) {
   // worlds
   for (const b of bodies) {
     if (!b.alive) continue;
-    const [sx, sy] = worldToScreen(b.x, b.y), R = ballR(b) * sc;
+    const q = worldToScreen(b.x, b.y); if (!q) continue;
+    const [sx, sy] = q, R = ballR(b) * (persp ? q[2] : sc);
     if (!drawSprite(b.sprite, sx, sy, R)) circle(sx, sy, R, b.color);
     if (b.struck) circle(sx, sy, R + 3, null, colA(b.color, 0.5), 1);
   }
   // the balls: every free one with its catch ring, then the one on the nose
   const drawBall = (x, y, type, live) => {
-    const T = BALL_TYPES[type || "standard"], R = S.acbRadiusAU * sc;
+    const T = BALL_TYPES[type || "standard"], R = S.acbRadiusAU * (persp ? scAt(acb.x, acb.y) : sc);
     if (type === "grav" && live) {
       // the pull made visible: rings that shrink into the ball, subtle
       const now = performance.now() / 1000;
@@ -1253,11 +1497,11 @@ function draw(realDt) {
     }
     drawBall(sx, sy, k.type, true);
   }
-  if (acb.mode === "attached" || acb.mode === "capturing") { const [sx, sy] = worldToScreen(acb.x, acb.y); drawBall(sx, sy, acb.type, false); }
+  if (acb.mode === "attached" || acb.mode === "capturing") { const q = worldToScreen(acb.x, acb.y); if (q) drawBall(q[0], q[1], acb.type, false); }
   // the ship
-  {
+  if (worldToScreen(ship.x, ship.y)) {
     const [sx, sy] = worldToScreen(ship.x, ship.y);
-    const L = Math.max(HULL_LEN * sc, 9);
+    const L = Math.max(HULL_LEN * scAt(ship.x, ship.y), 9);
     cx.save(); cx.translate(sx, sy); cx.rotate(ship.nose);
     const f = thrustVector();
     if (f) {
@@ -1296,6 +1540,7 @@ function draw(realDt) {
   }
   drawImpactFx();
   if (fx.flashA > 0.01) { cx.fillStyle = `rgba(235,245,255,${Math.min(1, fx.flashA)})`; cx.fillRect(0, 0, W, H); }
+  if (intro) { drawBriefing(W, H); return; }
   drawTimeBand(W, H);
   drawHud(W, H);
 }
@@ -1481,6 +1726,7 @@ function cycleSlot(sl) {
 const KEYMAP = { KeyW: "w", KeyA: "a", KeyS: "s", KeyD: "d", KeyQ: "q", KeyE: "e", ShiftLeft: "shift", ShiftRight: "shift" };
 addEventListener("keydown", e => {
   if (e.target.tagName === "INPUT") return;
+  if (intro) { skipIntro(); e.preventDefault(); return; }
   if (KEYMAP[e.code]) { keys[KEYMAP[e.code]] = true; e.preventDefault(); }
   if (e.code === "Tab") { S.dragMode = !S.dragMode; charging = false; charge = 0; drag = null; saveSettings(); buildPanel(); e.preventDefault(); }
   if (e.code === "KeyC") { S.camFollow = !S.camFollow; saveSettings(); buildPanel(); }
@@ -1494,6 +1740,7 @@ addEventListener("keyup", e => { if (KEYMAP[e.code]) keys[KEYMAP[e.code]] = fals
 addEventListener("blur", () => { for (const k in keys) keys[k] = false; });
 cv.addEventListener("mousemove", e => { mouse.sx = e.clientX; mouse.sy = e.clientY; });
 cv.addEventListener("mousedown", e => {
+  if (intro) { skipIntro(); return; }
   if (e.button !== 0 || acb.mode !== "attached") return;
   if (S.dragMode) drag = { ax: e.clientX, ay: e.clientY };
   else { charging = true; charge = 0; }
@@ -1508,7 +1755,7 @@ cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { cam.zoom = Math.max(0.4, Math.min(6, cam.zoom * Math.exp(-e.deltaY * 0.0012))); e.preventDefault(); }, { passive: false });
 
 // ============================== TEST PANEL ======================================
-const STORE_KEY = "galaxytable.v15";   // bumped: saved settings would otherwise hide the new default
+const STORE_KEY = "galaxytable.v16";   // bumped: saved settings would otherwise hide the new default
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
   catch { return { ...DEFAULTS }; }
@@ -1578,6 +1825,10 @@ const PANEL = [
   ["b", "thrustAntigrav", "gravity switches off while the engine runs"],
   ["r", "planetBoost", "planet gravity on the ship and cue ball", 100, 30000, 100],
   ["-"],
+  ["b", "introFlyover", "mission briefing flyover at the start"],
+  ["r", "introFlyS", "briefing: seconds flying between bodies", 0.4, 4, 0.1],
+  ["r", "introDwellS", "briefing: seconds on each body", 1, 8, 0.2],
+  ["r", "introPitchDeg", "briefing: camera tilt (90 = top-down)", 25, 90, 1],
   ["b", "camFollow", "camera follows the ship  [C]"],
   ["r", "viewRadiusAU", "how much of the table you see", 1.5, 5, 0.1],
 ];
@@ -1661,6 +1912,12 @@ window.RIG = {
   teleportBody: (i, x, y, vx, vy, struck) => { const b = bodies[i]; b.x = x; b.y = y; b.vx = vx; b.vy = vy; if (struck != null) b.struck = struck; },
   ghostNow: () => { buildGhost(); return ghost ? { pts: ghost.pending ? ghost.pending.length : 0, hit: ghost.hit, balls: ghost.balls.length, worlds: ghost.worlds.length } : null; },
   realTick: (s) => { checkCapture(s); stepCapture(s); stepLost(s); },
+  intro: () => intro ? { t: intro.t, total: introTotal(), stops: intro.stops.map(s => s.key), pose: intro.pose, skipped: !!intro.skipped } : null,
+  introTo: (t) => { if (!intro) startIntro(); intro.t = t; intro.pose = introPose(t); setPersp(intro.pose); },
+  introTick: (s) => { if (intro) stepIntro(s); },
+  skipIntro: () => skipIntro(),
+  project: (x, y) => worldToScreen(x, y),
+  cam: () => ({ ...cam }),
 };
 
 resetWorld();
