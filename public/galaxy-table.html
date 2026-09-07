@@ -1308,7 +1308,7 @@ function buildGhost() {
   const gstar = { ...STAR, trail: null };
   const gbelt = belt.slice();                       // the forecast spends its own copy
   let gt = simYears;
-  const out = { pending: null, hit: null, balls: [], worlds: [] };
+  const out = { pending: null, hit: null, terminus: null, balls: [], worlds: [] };
   const track = new Map();
   for (const b of gb.concat([gstar])) if (b.struck && b.alive) track.set(b.id, { color: b.color, pts: [{ x: b.x, y: b.y }] });
   // A flash flies straight and first, swept exactly as the sim sweeps it, against the
@@ -1345,7 +1345,11 @@ function buildGhost() {
       hit.struck = true;
       if (k.type === "thermo") thermoAftermath(k, hit);
       if (!track.has(hit.id)) track.set(hit.id, { color: hit.color, pts: [{ x: hit.x, y: hit.y }] });
-    } else burnOut(k);
+    } else {
+      // the FLASH TERMINUS: where the flash burns out and the ball drops to coasting
+      if (k === pending) out.terminus = { x: k.x, y: k.y, a: Math.atan2(k.vy, k.vx) };
+      burnOut(k);
+    }
     k.flash = null;
   }
   const H = 2e-4, N = 5000;
@@ -1972,6 +1976,18 @@ function draw(realDt) {
     for (const pts of ghost.balls) strokePts(pts, "#ffffff", 0.3, 1, [3, 5]);
     if (ghost.pending) strokePts(ghost.pending, "#ffffff", 0.45, 1, [3, 5]);
     if (ghost.hit) { const [sx, sy] = worldToScreen(ghost.hit.x, ghost.hit.y); circle(sx, sy, 6, null, "rgba(255,255,255,0.7)", 1); }
+    if (ghost.terminus) {
+      // a short tick across the aim line where the flash ends and coasting starts
+      const q = worldToScreen(ghost.terminus.x, ghost.terminus.y);
+      if (q) {
+        const px = -Math.sin(ghost.terminus.a), py = Math.cos(ghost.terminus.a), L = 7;
+        cx.strokeStyle = "rgba(255,255,255,0.8)"; cx.lineWidth = 1.5; cx.beginPath();
+        cx.moveTo(q[0] - px * L, q[1] - py * L); cx.lineTo(q[0] + px * L, q[1] + py * L); cx.stroke();
+        cx.fillStyle = "rgba(255,255,255,0.55)"; cx.font = `9px "Share Tech Mono", monospace`; cx.textAlign = "center";
+        cx.fillText("FLASH TERMINUS", q[0] + px * 16, q[1] + py * 16 + 3);
+        cx.textAlign = "left";
+      }
+    }
   }
   // worlds
   for (const b of bodies) {
