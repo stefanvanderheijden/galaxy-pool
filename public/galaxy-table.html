@@ -1391,8 +1391,39 @@ function buildGhost() {
   }
   out.pending = pending ? pending.pts : null;
   out.balls = sim.filter(k => k !== pending).map(k => k.pts);
-  out.worlds = [...track.values()];
+  out.worlds = [...track.entries()].map(([id, t]) => ({ id, ...t }));
+  out.starStruck = starStruckAt < Infinity;
   ghost = out;
+}
+
+// The world forecasts EASE toward each new build rather than snapping: resampled to a
+// fixed count and blended point by point on the real clock, 10/s when the rack is
+// only bending, 2.5/s once Solaris is struck in the forecast and the future is chaotic,
+// so what the eye sees is the shot's tendency and not every frame's throw of the dice.
+// The cue ball's own line is not eased: the hand is aiming it.
+const GHOST_N = 120;
+const ghostShown = new Map();   // id -> the eased points
+function resample(pts, n) {
+  const out = [];
+  if (pts.length === 1) { for (let i = 0; i < n; i++) out.push({ x: pts[0].x, y: pts[0].y }); return out; }
+  for (let i = 0; i < n; i++) {
+    const f = i / (n - 1) * (pts.length - 1), j = Math.min(pts.length - 2, Math.floor(f)), t = f - j;
+    out.push({ x: pts[j].x + (pts[j + 1].x - pts[j].x) * t, y: pts[j].y + (pts[j + 1].y - pts[j].y) * t });
+  }
+  return out;
+}
+function easeGhost(realDt) {
+  if (!ghost) { ghostShown.clear(); return; }
+  const rate = ghost.starStruck ? 2.5 : 10, k = Math.min(1, realDt * rate), seen = new Set();
+  for (const w of ghost.worlds) {
+    seen.add(w.id);
+    const target = resample(w.pts, GHOST_N);
+    let sh = ghostShown.get(w.id);
+    if (!sh) { sh = target; ghostShown.set(w.id, sh); }
+    else for (let i = 0; i < GHOST_N; i++) { sh[i].x += (target[i].x - sh[i].x) * k; sh[i].y += (target[i].y - sh[i].y) * k; }
+    w.shown = sh;
+  }
+  for (const id of [...ghostShown.keys()]) if (!seen.has(id)) ghostShown.delete(id);
 }
 
 // ============================== FRAME ===========================================
@@ -1449,7 +1480,7 @@ function frame(now) {
   for (const b of bodies) if (b.alive && b.struck) pushTrail(b.trail, b.x, b.y, 300);
   if (STAR.alive && STAR.struck) pushTrail(STAR.trail, STAR.x, STAR.y, 300);
 
-  if (S.projections) buildGhost(); else ghost = null;
+  if (S.projections) { buildGhost(); easeGhost(realDt); } else ghost = null;
 
   const tx = S.camFollow ? ship.x : ORIGIN.x, ty = S.camFollow ? ship.y : ORIGIN.y;
   cam.x += (tx - cam.x) * Math.min(1, realDt * 4);
@@ -1988,7 +2019,7 @@ function draw(realDt) {
   // the forecast
   if (ghost) {
     // a struck world's forecast is thick and solid-ish in its colour; the cue ball's stays a thin white dash
-    for (const w of ghost.worlds) strokePtsFade(w.pts, w.color, w.direct ? 0.75 : 0.45, w.direct ? 3 : 1.5, [10, 5]);
+    for (const w of ghost.worlds) strokePtsFade(w.shown || w.pts, w.color, w.direct ? 0.75 : 0.45, w.direct ? 2.2 : 1.2, [10, 5]);
     for (const pts of ghost.balls) strokePts(pts, "#ffffff", 0.3, 1, [3, 5]);
     if (ghost.pending) strokePts(ghost.pending, "#ffffff", 0.45, 1, [3, 5]);
     if (ghost.hit) { const [sx, sy] = worldToScreen(ghost.hit.x, ghost.hit.y); circle(sx, sy, 6, null, "rgba(255,255,255,0.7)", 1); }
@@ -2461,6 +2492,7 @@ window.RIG = {
   newBall: () => newBallNow(),
   space: () => spaceKey(),
   charge: (v) => { charging = true; charge = v; },
+  ease: (s) => easeGhost(s),
   setType: (i, t) => { if (i < 0) acb.type = t; else chamber[i] = t; },
   starTo: (x, y, vx, vy, struck) => { STAR.x = x; STAR.y = y; STAR.vx = vx; STAR.vy = vy; if (struck != null) STAR.struck = struck; },
   teleportBody: (i, x, y, vx, vy, struck) => { const b = bodies[i]; b.x = x; b.y = y; b.vx = vx; b.vy = vy; if (struck != null) b.struck = struck; },
