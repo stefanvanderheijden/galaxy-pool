@@ -254,7 +254,7 @@ const TAU = Math.PI * 2;
 // ============================== TUNABLES (test panel) ===========================
 const DEFAULTS = {
   introFlyover: true,     // the mission briefing flyover at the start of every rack
-  introFlyS: 3.2,         // seconds per body: the camera never stops
+  introFlyS: 3.6,         // seconds per body: the camera never stops
   introSlow: 0.7,         // how much it slows past a body (0 = constant speed, 1 = a stop)
   introPitchDeg: 52,      // camera pitch below horizontal during the flyover
   dragMode: false,        // false: CHARGE (hold LMB), true: DRAG (pull back). Tab swaps
@@ -555,13 +555,14 @@ function introPose(t) {
   const p0 = P(i0 - 1), p1 = P(i0), p2 = P(i0 + 1), p3 = P(i0 + 2);
   const cr = (a, b, c, d) => 0.5 * (2 * b + (-a + c) * k + (2 * a - 5 * b + 4 * c - d) * k * k + (-a + 3 * b - 3 * c + d) * k * k * k);
   const x = cr(p0.x, p1.x, p2.x, p3.x), y = cr(p0.y, p1.y, p2.y, p3.y);
-  let range = Math.exp(cr(p0.lr, p1.lr, p2.lr, p3.lr));
-  // between bodies the camera rises so the table stays in frame, and dives onto the next
-  if (u >= 1 && u <= N) range *= 1 + 1.2 * Math.sin(Math.PI * k);
-  // the card: nearest stop, faded by distance along the path
+  // range blends log-linearly per segment, not on the spline: a spline overshoots, and
+  // an overshoot here is a zoom out between two bodies
+  let range = Math.exp(p1.lr + (p2.lr - p1.lr) * k);
+  // the card: the nearest body's, up for most of the way and crossfading at the
+  // midpoint between two bodies, so it is readable for the whole slow pass
   let cardIdx = -1, cardA = 0;
   const near = Math.round(u) - 1;
-  if (near >= 0 && near < N) { const d = Math.abs(u - (near + 1)); cardA = Math.max(0, Math.min(1, (0.42 - d) / 0.12)); if (cardA > 0) cardIdx = near; }
+  if (near >= 0 && near < N) { const d = Math.abs(u - (near + 1)); cardA = Math.max(0, Math.min(1, (0.5 - d) / 0.08)); if (cardA > 0) cardIdx = near; }
   return { x, y, range, pitch: pitchNow, az, cardIdx, cardA, title };
 }
 // The projection. persp is set for the frame while the briefing runs and null in play.
@@ -1220,7 +1221,18 @@ function buildGhost() {
     const hit = sweepBall(k, contactList(gb, gstar), sim, S.animeRangeAU / Math.hypot(k.vx, k.vy));
     k.pts.push({ x: k.x, y: k.y });
     if (hit && hit.belt) { if (k === pending) out.hit = { x: k.x, y: k.y }; flashHitsBelt(k, hit, gbelt, true); k.flash = null; continue; }
-    if (hit && hit.ball) { k.flash = null; continue; }   // ball on ball: the loop below resolves it
+    if (hit && hit.ball) {
+      // ball on ball, as flashHitsBall does it: impact energy, placed touching, equal-mass exchange
+      const o = hit.ball;
+      if (k === pending) out.hit = { x: k.x, y: k.y };
+      const [ivx, ivy] = impactVelocity(k); k.vx = ivx; k.vy = ivy;
+      const dx = o.x - k.x, dy = o.y - k.y, d = Math.hypot(dx, dy) || 1, R = 2 * S.acbRadiusAU;
+      k.x = o.x - dx / d * R * 0.995; k.y = o.y - dy / d * R * 0.995;
+      collide(k, 1, S.acbRadiusAU, o, 1, S.acbRadiusAU);
+      k.flash = null;
+      if (k.type === "thermo") k.dead = true;
+      continue;
+    }
     if (hit) {
       if (k === pending) out.hit = { x: k.x, y: k.y };
       const [ivx, ivy] = impactVelocity(k); k.vx = ivx; k.vy = ivy;
@@ -1766,7 +1778,7 @@ cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { cam.zoom = Math.max(0.4, Math.min(6, cam.zoom * Math.exp(-e.deltaY * 0.0012))); e.preventDefault(); }, { passive: false });
 
 // ============================== TEST PANEL ======================================
-const STORE_KEY = "galaxytable.v17";   // bumped: saved settings would otherwise hide the new default
+const STORE_KEY = "galaxytable.v18";   // bumped: saved settings would otherwise hide the new default
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
   catch { return { ...DEFAULTS }; }
