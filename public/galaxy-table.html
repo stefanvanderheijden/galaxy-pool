@@ -92,6 +92,13 @@
   shards holding at the impact point) sets the timing; the meteor image sets the trail
   (blue-white head, green core, orange smoke fringe, thinning to a hairline behind).
 
+  FLASH TERMINUS (panel toggle, OFF by default). On, the flash burns out by range and a
+  tick on the aim line marks where; off, nothing but a ball ends the flash: it rebounds
+  off the belt for as long as the belt holds, and only flying off the table (past the
+  belt by 0.6 AU) drops it to coasting, so a miss can still be fetched. TIME HOLDS while
+  LMB is down (pauseWhileAiming, on): the table is still under the hand, the forecast
+  is of this exact rack, and the shot goes on release.
+
   Two honesty decisions, both sliders. The ball FLIES at flash speed but IMPACTS with a
   normal shot's energy (animeImpactEnergy x shotPower), so the world leaves at a speed
   the table is tuned for and the ball is catchable afterwards; a flash that hits
@@ -123,10 +130,7 @@
   belt, so the aim line shows the rebound and the sim spends the section only when it
   really happens. A FLASH BALL REBOUNDS AT FLASH SPEED: the cushion mirrors its radial
   velocity and it carries on with its range intact (the section is spent as for any
-  bounce), so a bounce-off trick shot is a real shot and the aim line shows it. The
-  same off a world: after the impact frame and the exchange, the ball leaves along its
-  new direction at flash speed if it has reach left (a square hit that stops it dead
-  ends the flash), so one shot can take two worlds. THE SHIP DOES
+  bounce), so a bounce-off trick shot is a real shot and the aim line shows it. THE SHIP DOES
   NOT BOUNCE: an intact section wrecks it (beltKillsShip, on), the section goes with
   it, and the ship respawns on its opening orbit like a ship into the star. A gap is
   safe, so the belt is a wall with the doors you and Styx have made in it.
@@ -336,7 +340,9 @@ const DEFAULTS = {
   gravityHorizonYr: 0.1,  // gravity is drawn as the velocity it adds over this
   animeMode: true,        // 'Anime style pool ball trail'. See the header
   animeSpeedAUyr: 1600,   // flash speed: about 1 AU per 0.1 s real at 200K
-  animeRangeAU: 6.0,      // a full-power miss burns out after this much flight
+  animeRangeAU: 6.0,      // a full-power miss burns out after this much flight (with flashTerminus)
+  flashTerminus: false,   // off: the flash never burns out by range, it ends only on a ball (or off the table)
+  pauseWhileAiming: true, // time holds while LMB is down: aim on a still table
   animeHitstopMs: 200,    // the impact frame, real milliseconds, bodies touching
   animeTrailS: 1.5,       // the trail's linger, real seconds
   animeImpactEnergy: 1.0, // impact energy as a multiple of a normal shot at this power
@@ -875,7 +881,7 @@ function sweepBall(k, list, others, h) {
     const R = S.acbRadiusAU + (b.ball ? S.acbRadiusAU : ballR(b));
     const fx0 = k.x - b.x, fy0 = k.y - b.y;
     const A = dx * dx + dy * dy, B = 2 * (fx0 * dx + fy0 * dy), C = fx0 * fx0 + fy0 * fy0 - R * R;
-    if (C <= 0) { if (fx0 * dx + fy0 * dy >= 0) continue; best = b; bestT = 0; break; }   // already inside: contact now, unless leaving (a flash carrying on off a world)
+    if (C <= 0) { best = b; bestT = 0; break; }          // already inside: contact now
     const disc = B * B - 4 * A * C;
     if (disc < 0) continue;
     const t = (-B - Math.sqrt(disc)) / (2 * A);
@@ -917,6 +923,20 @@ function flashBounce(k, hit, sections, spend) {
   k.vx -= 2 * vr * nx; k.vy -= 2 * vr * ny;
   k.x -= nx * Math.sign(vr) * 0.002; k.y -= ny * Math.sign(vr) * 0.002;
   if (spend) sections[hit.i] = 0;
+}
+// The flash's reach. With the terminus on, animeRangeAU times the shot's power; off, it
+// never burns out on its own: only a ball ends it, or flying off the table (past the
+// belt by OFF_TABLE_AU, where there is nothing left to hit and the ball is as good as
+// lost at 1600 AU/yr), which drops it to coasting so it can be fetched.
+const OFF_TABLE_AU = 0.6;
+function flashRange(power) { return S.flashTerminus ? S.animeRangeAU * Math.max(0.1, power) : 1e6; }
+function offTable(k) { return Math.hypot(k.x - ORIGIN.x, k.y - ORIGIN.y) > S.beltRadiusAU + OFF_TABLE_AU; }
+// Distance along the ball's heading to the off-table circle (the far crossing).
+function exitDistance(k) {
+  const sp = Math.hypot(k.vx, k.vy) || 1, ux = k.vx / sp, uy = k.vy / sp, R = S.beltRadiusAU + OFF_TABLE_AU;
+  const fx0 = k.x - ORIGIN.x, fy0 = k.y - ORIGIN.y, B = fx0 * ux + fy0 * uy, C = fx0 * fx0 + fy0 * fy0 - R * R;
+  const disc = B * B - C; if (disc < 0) return 0;
+  return Math.max(0, -B + Math.sqrt(disc));
 }
 // The energy that actually transfers: a normal shot's, along the flight line.
 function impactVelocity(k) {
@@ -974,6 +994,7 @@ function simStep(h, offGravity) {
     if (hit && hit.ball) { flashHitsBall(k, hit.ball); continue; }
     if (hit) { beginImpactFrame(k, hit); return true; }   // the frame freezes here
     if (k.flash.remain <= 0) { fx.trails.push(k.flash.pts); burnOut(k); note("FLASH BURNED OUT: ball at normal speed", "#e8b463"); }
+    else if (offTable(k)) { fx.trails.push(k.flash.pts); burnOut(k); note("FLASH LEFT THE TABLE: ball at normal speed", "#e8b463"); }
   }
 
   for (const k of balls) if (!k.flash) { const i = beltContact(k, S.acbRadiusAU, belt, simYears, true); if (i >= 0) { beltBreak(i, k.x, k.y); note("BOUNCED off the belt", "#c8b090"); } }
@@ -1124,7 +1145,7 @@ function fireAcb(dx, dy, power) {
     // the flash: same direction, flash speed, and the normal shot's energy remembered for the impact
     k.vx = ship.vx * S.inheritFrac + dx * S.animeSpeedAUyr; k.vy = ship.vy * S.inheritFrac + dy * S.animeSpeedAUyr;
     // the blast sets the range: a full-power flash crosses animeRangeAU, a soft one less
-    k.flash = { remain: S.animeRangeAU * Math.max(0.1, power), normalDv: dv, pts: [{ x: k.x, y: k.y, age: 0 }] };
+    k.flash = { remain: flashRange(power), normalDv: dv, pts: [{ x: k.x, y: k.y, age: 0 }] };
     burst(k.x, k.y, 0.12 + power * 0.1, "#dfffe8"); flash(k.x, k.y, 0.2 + power * 0.2, "#8fe8b0");
     fx.flashA = Math.max(fx.flashA, 0.35); fx.shake = Math.max(fx.shake, 0.4);
   }
@@ -1271,19 +1292,8 @@ function endImpactFrame() {
   if (!b.struck) { b.struck = true; note("STRUCK: " + b.name, b.color); }
   fx.shocks.push({ x: k.x, y: k.y, t: 0 });
   fx.shake = Math.max(fx.shake, 0.8);
-  if (k.type === "thermo") { fx.trails.push(k.flash.pts); k.flash = null; thermoGoesOff(k, b); return; }
-  if (flashCarriesOn(k)) { note("FLASH CARRIES ON off " + b.name + ", " + k.flash.remain.toFixed(1) + " AU left", "#8fe8b0"); return; }
   fx.trails.push(k.flash.pts); k.flash = null;
-}
-// After the exchange with a world the ball has a direction: if the flash still has reach
-// it CARRIES ON along that direction at flash speed (a dead-stop square hit, under 15%
-// of the shot's speed, ends it: there is no direction to carry). The trail continues.
-function flashCarriesOn(k) {
-  if (!k.flash || k.flash.remain <= 0.02 || k.type === "thermo") return false;
-  const sp = Math.hypot(k.vx, k.vy);
-  if (sp < 0.15 * k.flash.normalDv) return false;
-  k.vx *= S.animeSpeedAUyr / sp; k.vy *= S.animeSpeedAUyr / sp;
-  return true;
+  if (k.type === "thermo") thermoGoesOff(k, b);
 }
 // Effects on the real clock. Trails age even during the frame; that is the point of it.
 function stepFx(realDt) {
@@ -1312,7 +1322,7 @@ function buildGhost() {
     const [x, y] = noseSeat();
     const dv = p[2] * S.shotPower, sp = S.animeMode ? S.animeSpeedAUyr : dv;
     pending = { type: acb.type, x, y, vx: ship.vx * S.inheritFrac + p[0] * sp, vy: ship.vy * S.inheritFrac + p[1] * sp, pts: [{ x, y }], dead: false,
-                flash: S.animeMode ? { remain: S.animeRangeAU * Math.max(0.1, p[2]), normalDv: dv, pts: [] } : null };
+                flash: S.animeMode ? { remain: flashRange(p[2]), normalDv: dv, pts: [] } : null };
     sim.push(pending);
   }
   for (const k of balls) sim.push({ type: k.type, x: k.x, y: k.y, vx: k.vx, vy: k.vy, pts: [{ x: k.x, y: k.y }], dead: false,
@@ -1331,30 +1341,17 @@ function buildGhost() {
     if (!k.flash) continue;
     sweepTime = gt; sweepSections = gbelt;
     let hit = null, bounces = 0;
-    while (k.flash && k.flash.remain > 1e-6 && bounces < 8) {
-      hit = sweepBall(k, contactList(gb, gstar), sim, k.flash.remain / Math.hypot(k.vx, k.vy));
+    while (k.flash.remain > 1e-6 && bounces < 8 && !offTable(k)) {
+      // straight flight only as far as the off-table circle, so an endless flash ends where the sim's does
+      hit = sweepBall(k, contactList(gb, gstar), sim, Math.min(k.flash.remain, exitDistance(k) + 1e-3) / Math.hypot(k.vx, k.vy));
       k.pts.push({ x: k.x, y: k.y });
-      if (hit && hit.belt) { flashBounce(k, hit, gbelt, true); bounces++; hit = null; continue; }   // the rebound, on the forecast's own belt
-      if (hit && !hit.ball) {
-        // a world: the impact, and the flash carries on off it if it has reach left
-        if (k === pending && !out.hit) out.hit = { x: k.x, y: k.y };
-        const [ivx, ivy] = impactVelocity(k); k.vx = ivx; k.vy = ivy;
-        const dx = hit.x - k.x, dy = hit.y - k.y, d = Math.hypot(dx, dy) || 1, R = S.acbRadiusAU + ballR(hit);
-        k.x = hit.x - dx / d * R * 0.995; k.y = hit.y - dy / d * R * 0.995;
-        const boost = k.type === "thermo" ? Math.sqrt(S.thermoEnergy) : 1; k.vx *= boost; k.vy *= boost;
-        collide(k, S.acbMassRatio * hit.mass, S.acbRadiusAU, hit, hit.mass, ballR(hit));
-        hit.struck = true;
-        if (k.type === "thermo") thermoAftermath(k, hit);
-        if (!track.has(hit.id)) track.set(hit.id, { color: hit.color, direct: true, pts: [{ x: hit.x, y: hit.y }] });
-        if (flashCarriesOn(k)) { k.x += k.vx / S.animeSpeedAUyr * 0.004; k.y += k.vy / S.animeSpeedAUyr * 0.004; bounces++; hit = null; continue; }
-        break;
-      }
-      break;
+      if (!(hit && hit.belt)) { if (!hit && !offTable(k) && k.flash.remain > 1e-6) continue; break; }
+      flashBounce(k, hit, gbelt, true); bounces++; hit = null;   // the rebound, on the forecast's own belt
     }
     if (hit && hit.ball) {
       // ball on ball, as flashHitsBall does it: impact energy, placed touching, equal-mass exchange
       const o = hit.ball;
-      if (k === pending && !out.hit) out.hit = { x: k.x, y: k.y };
+      if (k === pending) out.hit = { x: k.x, y: k.y };
       const [ivx, ivy] = impactVelocity(k); k.vx = ivx; k.vy = ivy;
       const dx = o.x - k.x, dy = o.y - k.y, d = Math.hypot(dx, dy) || 1, R = 2 * S.acbRadiusAU;
       k.x = o.x - dx / d * R * 0.995; k.y = o.y - dy / d * R * 0.995;
@@ -1363,7 +1360,17 @@ function buildGhost() {
       if (k.type === "thermo") k.dead = true;
       continue;
     }
-    if (!hit && k.flash) {
+    if (hit) {
+      if (k === pending) out.hit = { x: k.x, y: k.y };
+      const [ivx, ivy] = impactVelocity(k); k.vx = ivx; k.vy = ivy;
+      const dx = hit.x - k.x, dy = hit.y - k.y, d = Math.hypot(dx, dy) || 1, R = S.acbRadiusAU + ballR(hit);
+      k.x = hit.x - dx / d * R * 0.995; k.y = hit.y - dy / d * R * 0.995;
+      const boost = k.type === "thermo" ? Math.sqrt(S.thermoEnergy) : 1; k.vx *= boost; k.vy *= boost;
+      collide(k, S.acbMassRatio * hit.mass, S.acbRadiusAU, hit, hit.mass, ballR(hit));
+      hit.struck = true;
+      if (k.type === "thermo") thermoAftermath(k, hit);
+      if (!track.has(hit.id)) track.set(hit.id, { color: hit.color, direct: true, pts: [{ x: hit.x, y: hit.y }] });
+    } else {
       // the FLASH TERMINUS: where the flash burns out and the ball drops to coasting
       if (k === pending) out.terminus = { x: k.x, y: k.y, a: Math.atan2(k.vy, k.vx) };
       burnOut(k);
@@ -1446,8 +1453,9 @@ function easeGhost(realDt) {
 
 // ============================== FRAME ===========================================
 let last = performance.now();
+let manualFrame = false;   // RIG.frame drives one frame by hand without spawning a second rAF chain
 function frame(now) {
-  requestAnimationFrame(frame);
+  if (!manualFrame) requestAnimationFrame(frame);
   const realDt = Math.min(0.05, (now - last) / 1000);
   last = now;
   stepFx(realDt); layoutPockets();
@@ -1474,7 +1482,8 @@ function frame(now) {
   if (stab && keys.shift) overrideStabiliser("zero gravity drift");
   const offGravity = keys.shift || (thrusting && S.thrustAntigrav);
 
-  const dtYr = warp * realDt / SPY;
+  const aiming = S.pauseWhileAiming && (charging || !!drag);   // time holds under the hand
+  const dtYr = aiming ? 0 : warp * realDt / SPY;
   const steps = dtYr > MAX_SUBSTEP_YR ? Math.min(MAX_SUBSTEPS, Math.ceil(dtYr / MAX_SUBSTEP_YR)) : 1;
   const h = dtYr / steps;
   let frozenAt = steps;
@@ -2258,6 +2267,7 @@ function drawHud(W, H) {
      + (balls.length > 1 || (balls.length === 1 && acb.mode !== "empty") ? "   " + balls.length + " BALL" + (balls.length > 1 ? "S" : "") + " OUT" : ""),
      acb.mode === "attached" ? "#e8f0fa" : acb.mode === "lost" ? "#ff5030" : "#8fe8b0"],
     stab ? ["STABILISER burning, " + stab.err.toFixed(2) + " AU/yr to go.  WASD or Shift to override", "#e8b463"] : null,
+    S.pauseWhileAiming && (charging || drag) ? ["TIME HELD while aiming", "#8fc3e8"] : null,
   ].filter(Boolean);
   lines.forEach((l, i) => { cx.fillStyle = l[1]; cx.fillText(l[0], 14, 22 + i * 17); });
   notices.forEach((n, i) => { cx.fillStyle = colA(n.color, Math.min(1, (20 - n.t) / 4)); cx.fillText(n.text, 14, H - 20 - (notices.length - 1 - i) * 16); });
@@ -2352,7 +2362,7 @@ cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { cam.zoom = Math.max(0.4, Math.min(6, cam.zoom * Math.exp(-e.deltaY * 0.0012))); e.preventDefault(); }, { passive: false });
 
 // ============================== TEST PANEL ======================================
-const STORE_KEY = "galaxytable.v22";   // bumped: saved settings would otherwise hide the new default
+const STORE_KEY = "galaxytable.v23";   // bumped: saved settings would otherwise hide the new default
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
   catch { return { ...DEFAULTS }; }
@@ -2372,10 +2382,12 @@ const PANEL = [
   ["r", "captureLockoutS", "seconds after a shot before you can catch it", 0, 6, 0.25],
   ["r", "inheritFrac", "how much ship speed bends the shot (0 = none, 1 = all)", 0, 1, 0.05],
   ["b", "projections", "show where the shot will go"],
+  ["b", "pauseWhileAiming", "time holds while aiming (LMB down)"],
   ["-"],
   ["b", "animeMode", "Anime style pool ball trail"],
   ["l", "animeSpeedAUyr", "flash speed", 200, 8000],
-  ["r", "animeRangeAU", "flash range at full power (AU); softer shots go less far", 0.5, 12, 0.1],
+  ["b", "flashTerminus", "flash terminus: the flash burns out by range (off = only a ball stops it)"],
+  ["r", "animeRangeAU", "flash range at full power (AU), with the terminus on", 0.5, 12, 0.1],
   ["r", "animeHitstopMs", "impact frame (ms)", 0, 600, 10],
   ["r", "animeTrailS", "trail lingers (s)", 0.2, 4, 0.1],
   ["r", "animeImpactEnergy", "impact energy (x a normal shot)", 0.25, 4, 0.25],
@@ -2511,6 +2523,7 @@ window.RIG = {
   space: () => spaceKey(),
   charge: (v) => { charging = true; charge = v; },
   ease: (s) => easeGhost(s),
+  frame: (dtMs) => { manualFrame = true; last = performance.now() - dtMs; frame(performance.now()); manualFrame = false; },
   setType: (i, t) => { if (i < 0) acb.type = t; else chamber[i] = t; },
   starTo: (x, y, vx, vy, struck) => { STAR.x = x; STAR.y = y; STAR.vx = vx; STAR.vy = vy; if (struck != null) STAR.struck = struck; },
   teleportBody: (i, x, y, vx, vy, struck) => { const b = bodies[i]; b.x = x; b.y = y; b.vx = vx; b.vy = vy; if (struck != null) b.struck = struck; },
