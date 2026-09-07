@@ -95,7 +95,8 @@
   Two honesty decisions, both sliders. The ball FLIES at flash speed but IMPACTS with a
   normal shot's energy (animeImpactEnergy x shotPower), so the world leaves at a speed
   the table is tuned for and the ball is catchable afterwards; a flash that hits
-  nothing burns out after animeRangeAU and the ball drops to normal shot speed. At 1600
+  nothing burns out after animeRangeAU times the shot's power (so the blast sets how
+  far the ball goes, as it does in a normal shot) and drops to normal shot speed. At 1600
   AU/yr a fixed substep of 1e-4 yr moves 0.16 AU, three times a world's radius, so a
   flash ball is SWEPT: segment against circle, first contact wins, and the ball is
   placed touching. The forecast sweeps the same way, so the aim line still lands on
@@ -147,8 +148,8 @@
   from a wide view of the whole system past every body in turn (Solaris, Red, Terra,
   Vera, Styx, Lethe, Acheron, then the ark) and settles into the top-down view the game
   is played in. The camera never stops: one spline through every body, introFlyS
-  seconds per body at constant speed along the path (arc length, so no pause at a
-  turn) while each body's INSPECTOR CARD fades in and out: the body's picture and its properties (mass, density, diameter, travel speed, inhabited,
+  seconds per body whatever the hop, slowing past each body to (1 - introSlow) of
+  the mean pace and never stopping, while each body's INSPECTOR CARD fades in and out: the body's picture and its properties (mass, density, diameter, travel speed, inhabited,
   surface temperature, from level-01.json's own numbers), and under them a MISSION
   NOTE by Robert Cupboard, the advisor, in his voice: what the body is for on this
   table and nothing about who set the table. Any key or click skips to the game.
@@ -260,7 +261,8 @@ const TAU = Math.PI * 2;
 // ============================== TUNABLES (test panel) ===========================
 const DEFAULTS = {
   introFlyover: true,     // the mission briefing flyover at the start of every rack
-  introFlyS: 3.6,         // seconds per body: the camera never stops
+  introFlyS: 4.6,         // seconds per body, whatever the hop: the camera never stops
+  introSlow: 0.45,        // slow-down past a body: speed there is (1 - this) of the mean
   introPitchDeg: 52,      // camera pitch below horizontal during the flyover
   dragMode: false,        // false: CHARGE (hold LMB), true: DRAG (pull back). Tab swaps
   thrustAntigrav: true,   // the drive lets go of gravity while it burns (hyperwarp 2)
@@ -538,8 +540,8 @@ function introTotal() { return INTRO_TITLE_S + intro.stops.length * S.introFlyS 
 function wideRange() { return introFocal() / (Math.max(1, Math.min(cv.clientWidth, cv.clientHeight)) / 2 / S.viewRadiusAU); }
 // The camera pose at time t. One continuous path: a Catmull-Rom spline through the
 // wide opening view, every stop in order, and the top-down finish, so the camera
-// never stops and never corners. It moves at constant speed along that path (see
-// introArc), so a turn past a body keeps its momentum; the card is up for most of
+// never stops and never corners. The same time per body, slowing past each one
+// but keeping its momentum (introSlow); the card is up for most of
 // each pass and crossfades at the midpoint between two bodies. The
 // azimuth turns slowly the whole time, which is the pass-by. The last segment is
 // the outro: pitch to 90 degrees, azimuth to the game's own.
@@ -552,15 +554,16 @@ function introPose(t) {
   for (const st of stops) pts.push({ x: st.o.x, y: st.o.y, lr: Math.log(Math.max(0.3, st.R * introFocal() / st.px)) });
   pts.push({ x: ORIGIN.x, y: ORIGIN.y, lr: Math.log(wideRange()) });
   // path parameter u: 0 at the wide view, i+1 at stop i, N+1 at the top-down finish.
-  // The tour runs at CONSTANT SPEED along the path, by arc length (a zoom counts as
-  // distance too, so the opening dive onto the star takes time): an ease at each body
-  // read as a pause, and a per-segment clock made the long hops fast and the short
-  // ones slow. Momentum is kept through every turn.
+  // The same time per body, whatever the hop. Past a body the camera SLOWS but never
+  // stops: the speed profile is a blend of linear and an ease, introSlow of the way
+  // to the ease, so at a body it still moves at (1 - introSlow) of the mean pace. A
+  // full ease (introSlow 1) reached zero there and read as a pause.
   let u, title = 0, pitchNow = pitch;
   if (t < INTRO_TITLE_S) { u = 0; title = 1 - Math.max(0, (t - (INTRO_TITLE_S - 0.5)) / 0.5); }
   else if (t < total - INTRO_OUTRO_S) {
-    const arc = introArc(pts, N);
-    u = arcToU(arc, (t - INTRO_TITLE_S) / (N * per) * arc.total);
+    const w = t - INTRO_TITLE_S, i = Math.min(N - 1, Math.floor(w / per)), f = Math.min(1, w / per - i);
+    const g = S.introSlow * easeInOutCubic(f) + (1 - S.introSlow) * f;   // fraction of the hop's LENGTH
+    u = segArcU(pts, i, g);
   } else {
     const f = easeInOutCubic(Math.min(1, (t - (total - INTRO_OUTRO_S)) / INTRO_OUTRO_S));
     u = N + f;
@@ -584,29 +587,34 @@ function introPose(t) {
   if (near >= 0 && near < N) { const d = Math.abs(u - (near + 1)); cardA = Math.max(0, Math.min(1, (0.5 - d) / 0.08)); if (cardA > 0) cardIdx = near; }
   return { x, y, range, pitch: pitchNow, az, cardIdx, cardA, title };
 }
-// The arc-length table for the tour, u in [0, N], cached per briefing (the path is
-// fixed once the sim freezes). Path metric: table distance plus 0.6 AU per e-fold of
-// range, so a pure zoom is not free.
-function introArc(pts, N) {
-  if (intro.arc) return intro.arc;
+// The spline's own parameter crawls through the tight turn at a body (the tangent
+// there is short), which read as a stop however the clock ran. So within each hop the
+// camera moves by DISTANCE: an arc-length table per hop, cached for the briefing, maps
+// a fraction of the hop's length back to the spline parameter.
+function splineAt(pts, u) {
   const cr = (a, b, c, d, k) => 0.5 * (2 * b + (-a + c) * k + (2 * a - 5 * b + 4 * c - d) * k * k + (-a + 3 * b - 3 * c + d) * k * k * k);
   const P = j => pts[Math.max(0, Math.min(pts.length - 1, j))];
-  const at = u => { const i0 = Math.min(pts.length - 2, Math.floor(u)), k = u - i0, p0 = P(i0 - 1), p1 = P(i0), p2 = P(i0 + 1), p3 = P(i0 + 2);
-                    return [cr(p0.x, p1.x, p2.x, p3.x, k), cr(p0.y, p1.y, p2.y, p3.y, k), p1.lr + (p2.lr - p1.lr) * k]; };
-  const M = 200, us = [], ss = []; let acc = 0, prev = at(0);
-  for (let j = 0; j <= N * M; j++) {
-    const u = j / M, q = at(u);
-    acc += Math.hypot(q[0] - prev[0], q[1] - prev[1]) + 0.6 * Math.abs(q[2] - prev[2]);
-    us.push(u); ss.push(acc); prev = q;
-  }
-  return intro.arc = { us, ss, total: acc };
+  const i0 = Math.min(pts.length - 2, Math.floor(u)), k = u - i0, p0 = P(i0 - 1), p1 = P(i0), p2 = P(i0 + 1), p3 = P(i0 + 2);
+  return [cr(p0.x, p1.x, p2.x, p3.x, k), cr(p0.y, p1.y, p2.y, p3.y, k), p1.lr + (p2.lr - p1.lr) * k];
 }
-function arcToU(arc, sTarget) {
-  const ss = arc.ss; let lo = 0, hi = ss.length - 1;
-  if (sTarget >= arc.total) return arc.us[hi];
-  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (ss[m] <= sTarget) lo = m; else hi = m; }
-  const f = (sTarget - ss[lo]) / Math.max(1e-9, ss[hi] - ss[lo]);
-  return arc.us[lo] + (arc.us[hi] - arc.us[lo]) * f;
+function segArcU(pts, i, g) {
+  intro.segArc = intro.segArc || [];
+  let arc = intro.segArc[i];
+  if (!arc) {
+    const M = 200, ss = [0]; let acc = 0, prev = splineAt(pts, i);
+    for (let j = 1; j <= M; j++) {
+      const q = splineAt(pts, i + j / M);
+      acc += Math.hypot(q[0] - prev[0], q[1] - prev[1]) + 0.6 * Math.abs(q[2] - prev[2]);   // a zoom is distance too
+      ss.push(acc); prev = q;
+    }
+    arc = intro.segArc[i] = { ss, total: acc, M };
+  }
+  const target = g * arc.total, ss = arc.ss;
+  let lo = 0, hi = arc.M;
+  if (target >= arc.total) return i + 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (ss[m] <= target) lo = m; else hi = m; }
+  const f = (target - ss[lo]) / Math.max(1e-9, ss[hi] - ss[lo]);
+  return i + (lo + f) / arc.M;
 }
 // The projection. persp is set for the frame while the briefing runs and null in play.
 let persp = null;
@@ -1080,7 +1088,8 @@ function fireAcb(dx, dy, power) {
   if (S.animeMode) {
     // the flash: same direction, flash speed, and the normal shot's energy remembered for the impact
     k.vx = ship.vx * S.inheritFrac + dx * S.animeSpeedAUyr; k.vy = ship.vy * S.inheritFrac + dy * S.animeSpeedAUyr;
-    k.flash = { remain: S.animeRangeAU, normalDv: dv, pts: [{ x: k.x, y: k.y, age: 0 }] };
+    // the blast sets the range: a full-power flash crosses animeRangeAU, a soft one less
+    k.flash = { remain: S.animeRangeAU * Math.max(0.1, power), normalDv: dv, pts: [{ x: k.x, y: k.y, age: 0 }] };
     burst(k.x, k.y, 0.12 + power * 0.1, "#dfffe8"); flash(k.x, k.y, 0.2 + power * 0.2, "#8fe8b0");
     fx.flashA = Math.max(fx.flashA, 0.35); fx.shake = Math.max(fx.shake, 0.4);
   }
@@ -1257,7 +1266,7 @@ function buildGhost() {
     const [x, y] = noseSeat();
     const dv = p[2] * S.shotPower, sp = S.animeMode ? S.animeSpeedAUyr : dv;
     pending = { type: acb.type, x, y, vx: ship.vx * S.inheritFrac + p[0] * sp, vy: ship.vy * S.inheritFrac + p[1] * sp, pts: [{ x, y }], dead: false,
-                flash: S.animeMode ? { remain: S.animeRangeAU, normalDv: dv, pts: [] } : null };
+                flash: S.animeMode ? { remain: S.animeRangeAU * Math.max(0.1, p[2]), normalDv: dv, pts: [] } : null };
     sim.push(pending);
   }
   for (const k of balls) sim.push({ type: k.type, x: k.x, y: k.y, vx: k.vx, vy: k.vy, pts: [{ x: k.x, y: k.y }], dead: false,
@@ -1275,7 +1284,7 @@ function buildGhost() {
   for (const k of sim) {
     if (!k.flash) continue;
     sweepTime = gt; sweepSections = gbelt;
-    const hit = sweepBall(k, contactList(gb, gstar), sim, S.animeRangeAU / Math.hypot(k.vx, k.vy));
+    const hit = sweepBall(k, contactList(gb, gstar), sim, k.flash.remain / Math.hypot(k.vx, k.vy));
     k.pts.push({ x: k.x, y: k.y });
     if (hit && hit.belt) { if (k === pending) out.hit = { x: k.x, y: k.y }; flashHitsBelt(k, hit, gbelt, true); k.flash = null; continue; }
     if (hit && hit.ball) {
@@ -1835,7 +1844,7 @@ cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { cam.zoom = Math.max(0.4, Math.min(6, cam.zoom * Math.exp(-e.deltaY * 0.0012))); e.preventDefault(); }, { passive: false });
 
 // ============================== TEST PANEL ======================================
-const STORE_KEY = "galaxytable.v20";   // bumped: saved settings would otherwise hide the new default
+const STORE_KEY = "galaxytable.v21";   // bumped: saved settings would otherwise hide the new default
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
   catch { return { ...DEFAULTS }; }
@@ -1858,7 +1867,7 @@ const PANEL = [
   ["-"],
   ["b", "animeMode", "Anime style pool ball trail"],
   ["l", "animeSpeedAUyr", "flash speed", 200, 8000],
-  ["r", "animeRangeAU", "flash range before it burns out (AU)", 0.5, 6, 0.1],
+  ["r", "animeRangeAU", "flash range at full power (AU); softer shots go less far", 0.5, 6, 0.1],
   ["r", "animeHitstopMs", "impact frame (ms)", 0, 600, 10],
   ["r", "animeTrailS", "trail lingers (s)", 0.2, 4, 0.1],
   ["r", "animeImpactEnergy", "impact energy (x a normal shot)", 0.25, 4, 0.25],
@@ -1908,7 +1917,8 @@ const PANEL = [
   ["r", "planetBoost", "planet gravity on the ship and cue ball", 100, 30000, 100],
   ["-"],
   ["b", "introFlyover", "mission briefing flyover at the start"],
-  ["r", "introFlyS", "briefing: seconds per body", 1, 8, 0.1],
+  ["r", "introFlyS", "briefing: seconds per body", 1, 10, 0.1],
+  ["r", "introSlow", "briefing: slow-down past each body (0 = none, 1 = a stop)", 0, 1, 0.05],
   ["r", "introPitchDeg", "briefing: camera tilt (90 = top-down)", 25, 90, 1],
   ["b", "camFollow", "camera follows the ship  [C]"],
   ["r", "viewRadiusAU", "how much of the table you see", 1.5, 5, 0.1],
