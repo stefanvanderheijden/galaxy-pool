@@ -33,8 +33,8 @@
     After a shot that ball cannot be caught for captureLockoutS seconds (it has no
     catch ring until then; the ring appearing is the cue), and the ship takes half the shot's delta-v backwards, so it
     leaves the ring rather than catching its own shot.
-    Space          the cue ball key. A catchable ball in reach (inside its ring, speed
-                   matched, lockout over) is caught: onto a bare nose or into the
+    Space          the cue ball key. A ball in reach (inside its ring, lockout over,
+                   at ANY speed) is caught: onto a bare nose or into the
                    chamber. Nothing in reach: a new ball on the nose now. Catching is
                    manual by default (autoCapture on the panel brings the winch back).
                    The ball already out keeps flying and can
@@ -1166,11 +1166,10 @@ function captureBall(k) {
 // the next chambered ball loads onto a bare nose.
 function spaceKey() {
   if (acb.mode === "capturing" || score.failed || score.won) return;
+  // any speed: inside the ring and past the lockout is enough for the hand
   let best = null, bd = 1e9;
-  for (const k of balls) if (k.lock <= 0 && catchable(k)) { const d = dist(ship.x, ship.y, k.x, k.y); if (d < bd) { bd = d; best = k; } }
+  for (const k of balls) if (k.lock <= 0) { const d = dist(ship.x, ship.y, k.x, k.y); if (d < S.captureRadiusAU && d < bd) { bd = d; best = k; } }
   if (best) { captureBall(best); return; }
-  const near = balls.find(k => k.lock <= 0 && dist(ship.x, ship.y, k.x, k.y) < S.captureRadiusAU);
-  if (near && (acb.mode === "empty" || acb.mode === "lost")) { note("TOO FAST TO CATCH: match its speed (REL " + Math.hypot(ship.vx - near.vx, ship.vy - near.vy).toFixed(1) + " AU/yr)", "#e8b463"); return; }
   newBallNow();
 }
 function stepCapture(realDt) {
@@ -1570,11 +1569,11 @@ function draw(realDt) {
     const inside = d < S.captureRadiusAU, slow = rel < S.captureSpeed;
     // No ring at all until the ball is catchable: the ring appearing IS the signal.
     if (k.lock > 0) { drawBall(sx, sy, k.type, true); continue; }
-    const col = inside && slow ? "rgba(143,232,176,0.9)" : inside ? "rgba(232,180,99,0.8)" : "rgba(255,255,255,0.35)";
+    const col = inside && (slow || !S.autoCapture) ? "rgba(143,232,176,0.9)" : inside ? "rgba(232,180,99,0.8)" : "rgba(255,255,255,0.35)";
     cx.setLineDash([4, 4]); circle(sx, sy, S.captureRadiusAU * sc, null, col, 1.5); cx.setLineDash([]);
     if (inside) {
       cx.fillStyle = col; cx.font = `10px "Share Tech Mono", monospace`; cx.textAlign = "center";
-      cx.fillText(slow ? (S.autoCapture ? "MATCHED" : "SPACE TO CATCH") : "REL " + rel.toFixed(1) + " AU/yr", sx, sy - S.captureRadiusAU * sc - 6);
+      cx.fillText(!S.autoCapture ? "SPACE TO CATCH" : slow ? "MATCHED" : "REL " + rel.toFixed(1) + " AU/yr", sx, sy - S.captureRadiusAU * sc - 6);
     }
     drawBall(sx, sy, k.type, true);
   }
@@ -1893,7 +1892,7 @@ const PANEL = [
   ["-"],
   ["r", "captureRadiusAU", "catch ring size", 0.05, 0.6, 0.01],
   ["b", "autoCapture", "catch automatically when matched (off = Space catches)"],
-  ["r", "captureSpeed", "speed match needed to catch (higher = easier)", 0.5, 20, 0.25],
+  ["r", "captureSpeed", "speed match for the automatic catch (higher = easier)", 0.5, 20, 0.25],
   ["r", "captureDwellS", "seconds in the ring before catching", 0, 1.5, 0.05],
   ["r", "captureSeconds", "seconds to reel the cue ball in", 0.2, 3, 0.05],
   ["r", "respawnSeconds", "seconds until the next ball loads itself", 0, 10, 0.5],
