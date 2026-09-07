@@ -95,7 +95,7 @@
   Two honesty decisions, both sliders. The ball FLIES at flash speed but IMPACTS with a
   normal shot's energy (animeImpactEnergy x shotPower), so the world leaves at a speed
   the table is tuned for and the ball is catchable afterwards; a flash that hits
-  nothing burns out after animeRangeAU times the shot's power (so the blast sets how
+  nothing burns out after animeRangeAU (6 AU at full power) times the shot's power (so the blast sets how
   far the ball goes, as it does in a normal shot) and drops to normal shot speed. At 1600
   AU/yr a fixed substep of 1e-4 yr moves 0.16 AU, three times a world's radius, so a
   flash ball is SWEPT: segment against circle, first contact wins, and the ball is
@@ -173,6 +173,18 @@
   reason the tutorial's lines are not. Skip is any input via the new Input System's
   anyKey. The blend to the game's orthographic camera is the same trick: dolly to the
   straight-down pose, set the ortho size to focal / height, swap cameras that frame.
+
+  FAUX 3D WORLDS (fauxSpheres, on). The worlds are the Galaxy 64 planet card, ported
+  from Reference/galaxy-64/src/planetCard.ts with the lab's shading values: the flat
+  sprite is unwrapped at load into a seamless band, the band scrolls through a circular
+  mask as the world turns (its spin), and a shading pass lights it from wherever
+  Solaris is: soft terminator, limb darkening, atmosphere rim and halo in the level's
+  atmosphereColor, an ocean specular hint, and city lights on Terra's night side. The
+  star's light is lifted toward the viewer by sphereLightZ, because a table seen from
+  straight above would otherwise show every world half dark. It is a WebGL2 pass into
+  an offscreen canvas drawn onto the table in the 2D draw order; without WebGL2 the
+  flat sprites come back. Port note: Unity gets this as a quad with the same shader
+  (PlanetCardView already owns the sprite), the band baked once per world at load.
 
   THE STABILISER. A shot kicks the ship backwards (recoilFrac), which is honest and
   leaves you slowly falling out of your ring while you watch the ball. So after every
@@ -271,6 +283,8 @@ const DEFAULTS = {
   acbFeelsWorlds: true,   // the ACB flies the game layer (boosted worlds) like the ship
   planetsCollide: true,   // struck worlds knock each other
   camFollow: false,       // C toggles: whole table, or glide after the ship
+  fauxSpheres: true,      // worlds drawn as the Galaxy 64 planet card: a band turning under a shading pass
+  sphereLightZ: 0.35,     // the star's light lifted toward the viewer, so a top-down world is not half dark
   thrustAccel: 3000,      // AU/yr^2. The designer found 400 too slow at 200K; slider is log around this
   linearDamp: 0.9,        // settle per real second while off gravity. 0 = honest space
   aimEase: 24,            // how fast the nose swings to the cursor, per second
@@ -311,7 +325,7 @@ const DEFAULTS = {
   gravityHorizonYr: 0.1,  // gravity is drawn as the velocity it adds over this
   animeMode: true,        // 'Anime style pool ball trail'. See the header
   animeSpeedAUyr: 1600,   // flash speed: about 1 AU per 0.1 s real at 200K
-  animeRangeAU: 3.0,      // a miss burns out after this much flight
+  animeRangeAU: 6.0,      // a full-power miss burns out after this much flight
   animeHitstopMs: 200,    // the impact frame, real milliseconds, bodies touching
   animeTrailS: 1.5,       // the trail's linger, real seconds
   animeImpactEnergy: 1.0, // impact energy as a multiple of a normal shot at this power
@@ -695,7 +709,7 @@ function drawCard(st, a, W, H) {
   // picture
   const px = x0 + 46, py = y0 + 46, R = 30;
   cx.save(); cx.beginPath(); cx.rect(x0 + 8, y0 + 8, 76, 76); cx.clip();
-  if (st.sprite) { if (!drawSprite(st.sprite, px, py, R, st.tint ? sunTinted : null, a)) circle(px, py, R, st.o.color); }
+  if (st.sprite) { if (!(st.o.orbitR ? drawWorld(st.o, px, py, R, a) : drawSprite(st.sprite, px, py, R, st.tint ? sunTinted : null, a))) circle(px, py, R, st.o.color); }
   else { cx.save(); cx.translate(px, py); cx.rotate(-0.6); cx.beginPath(); cx.moveTo(24, 0); cx.lineTo(-13, 12); cx.lineTo(-7, 0); cx.lineTo(-13, -12); cx.closePath(); cx.fillStyle = "#4fc3f7"; cx.fill(); cx.restore(); }
   cx.restore();
   cx.globalAlpha = a;
@@ -1464,6 +1478,270 @@ function drawSprite(key, sx, sy, R, img, alpha) {
   cx.globalAlpha = 1;
   return true;
 }
+// ============================== FAUX 3D WORLDS ==================================
+// The Galaxy 64 planet card, ported (Reference/galaxy-64/src/planetCard.ts). A world is a
+// flat, camera-facing disc that reads as a rotating sphere: a horizontal band of surface,
+// seamless end to end, scrolls through a circular mask, and a shading pass lights it from
+// the star (soft terminator, limb darkening, atmosphere rim and halo, an ocean specular
+// hint, city lights on an inhabited night side). The band is not authored: it is unwrapped
+// at load from the same 576x324 sprite the flat disc uses, the baked shadow found by
+// luminance and left out, the lit half folded into a band whose right end is its left end
+// by construction, the artist's lighting flat-fielded out so the shader is the only light.
+// Rendering is a WebGL2 pass into an offscreen canvas, one draw per world per frame, then
+// drawImage onto the table, so the planets stay in the 2D canvas's own draw order. The
+// shading values are the lab's (card-lab.html), unchanged. No WebGL2: the flat sprites.
+const SPHERE = { gl: null, canvas: null, prog: null, u: {}, bands: {}, tex: {}, ok: false, tried: false };
+const SPHERE_SHADING = { wrap: 0.32, limb: 0.55, rim: 0.9, rimWidth: 0.28, spec: 0.22, ambient: 0.045 };
+const SPHERE_EXTENT = 1.12, SPHERE_HALO = 0.09;
+const BAND_W = 1024, BAND_H = 512;
+const WORLD_ATMO = { red: "#c9a84e", terra: "#7fb0e6" };   // level-01's atmosphereColor; Vera has none
+const SPHERE_VERT = `#version 300 es
+in vec2 aP; out vec2 vP; uniform float uExtent;
+void main() { vP = aP * uExtent; gl_Position = vec4(aP, 0.0, 1.0); }`;
+const SPHERE_FRAG = `#version 300 es
+precision highp float;
+in vec2 vP; out vec4 fragColor;
+uniform sampler2D uBand;
+uniform float uScroll;
+uniform vec3 uLight;
+uniform vec3 uAtmo;
+uniform float uWrap, uLimb, uRim, uRimWidth, uSpec, uAmbient, uInhabited, uHaloR, uAlpha;
+const float PI = 3.14159265;
+const float TAU = 6.28318531;
+float hash(vec2 p) { p = fract(p * vec2(443.897, 441.423)); p += dot(p, p.yx + 19.19); return fract((p.x + p.y) * p.x); }
+void main() {
+  vec2 p = vP;
+  float r2 = dot(p, p);
+  float r = sqrt(r2);
+  float aa = fwidth(r);
+  float disc = 1.0 - smoothstep(1.0 - aa, 1.0 + aa, r);
+  float z = sqrt(max(0.0, 1.0 - r2));
+  vec3 n = vec3(p, z);
+  vec3 edgeN = r > 1e-5 ? vec3(p / r, 0.0) : vec3(0.0, 0.0, 1.0);
+  // true sphere mapping; the explicit gradients hide the wrap seam from the mip selection
+  float lon = atan(p.x, z) / TAU + uScroll;
+  float lat = 0.5 - asin(clamp(p.y, -1.0, 1.0)) / PI;
+  vec2 buv = vec2(lon, lat);
+  vec3 alb = pow(textureGrad(uBand, buv, dFdx(buv), dFdy(buv)).rgb, vec3(2.2));
+  float ndl = dot(n, uLight);
+  float diff = clamp((ndl + uWrap) / (1.0 + uWrap), 0.0, 1.0);
+  diff = diff * diff * (3.0 - 2.0 * diff);
+  float limb = mix(1.0, z, uLimb);
+  vec3 col = alb * (uAmbient + diff * limb);
+  vec3 h = normalize(uLight + vec3(0.0, 0.0, 1.0));
+  float ocean = clamp((alb.b - max(alb.r, alb.g)) * 6.0, 0.0, 1.0);
+  col += uSpec * ocean * pow(max(dot(n, h), 0.0), 60.0) * diff;
+  if (uInhabited > 0.5) {
+    float lum = dot(alb, vec3(0.2126, 0.7152, 0.0722));
+    float land = step(alb.b, max(alb.r, alb.g) * 1.05) * step(lum, 0.45);
+    float night = 1.0 - smoothstep(-0.25, 0.05, ndl);
+    float spark = smoothstep(0.90, 0.97, hash(floor(vec2(fract(buv.x), buv.y) * vec2(360.0, 180.0))));
+    col += vec3(1.0, 0.72, 0.38) * spark * land * night * z * 0.55;
+  }
+  float sunSide = clamp(dot(edgeN, uLight) * 0.5 + 0.5, 0.0, 1.0);
+  sunSide = 0.3 + 0.7 * sunSide * sunSide;
+  float fres = pow(1.0 - z, 1.0 / max(uRimWidth, 0.02));
+  col += uAtmo * fres * uRim * sunSide * (uAmbient * 2.0 + diff);
+  float d = max(0.0, r - 1.0);
+  float halo = pow(max(0.0, 1.0 - d / uHaloR), 2.4) * uRim * 0.55 * sunSide;
+  vec3 rgb = mix(uAtmo, col, disc);
+  float a = (disc + halo * (1.0 - disc)) * uAlpha;
+  rgb = pow(clamp(rgb, 0.0, 1.0), vec3(1.0 / 2.2));
+  fragColor = vec4(rgb * a, a);   // premultiplied, for drawImage onto the table
+}`;
+function sphereInit() {
+  if (SPHERE.tried) return SPHERE.ok;
+  SPHERE.tried = true;
+  const c = document.createElement("canvas"); c.width = 64; c.height = 64;
+  const gl = c.getContext("webgl2", { premultipliedAlpha: true, alpha: true, antialias: false });
+  if (!gl) return false;
+  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { console.warn(gl.getShaderInfoLog(s)); return null; } return s; };
+  const vs = sh(gl.VERTEX_SHADER, SPHERE_VERT), fs = sh(gl.FRAGMENT_SHADER, SPHERE_FRAG);
+  if (!vs || !fs) return false;
+  const prog = gl.createProgram(); gl.attachShader(prog, vs); gl.attachShader(prog, fs); gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) { console.warn(gl.getProgramInfoLog(prog)); return false; }
+  gl.useProgram(prog);
+  const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+  const aP = gl.getAttribLocation(prog, "aP"); gl.enableVertexAttribArray(aP); gl.vertexAttribPointer(aP, 2, gl.FLOAT, false, 0, 0);
+  for (const n of ["uExtent", "uBand", "uScroll", "uLight", "uAtmo", "uWrap", "uLimb", "uRim", "uRimWidth", "uSpec", "uAmbient", "uInhabited", "uHaloR", "uAlpha"])
+    SPHERE.u[n] = gl.getUniformLocation(prog, n);
+  const S = SPHERE_SHADING;
+  gl.uniform1f(SPHERE.u.uExtent, SPHERE_EXTENT); gl.uniform1i(SPHERE.u.uBand, 0);
+  gl.uniform1f(SPHERE.u.uWrap, S.wrap); gl.uniform1f(SPHERE.u.uLimb, S.limb); gl.uniform1f(SPHERE.u.uRim, S.rim);
+  gl.uniform1f(SPHERE.u.uRimWidth, S.rimWidth); gl.uniform1f(SPHERE.u.uSpec, S.spec); gl.uniform1f(SPHERE.u.uAmbient, S.ambient);
+  gl.uniform1f(SPHERE.u.uHaloR, SPHERE_HALO);
+  gl.disable(gl.DEPTH_TEST); gl.disable(gl.BLEND);
+  SPHERE.gl = gl; SPHERE.canvas = c; SPHERE.prog = prog; SPHERE.ok = true;
+  return true;
+}
+function sphereBand(key) {
+  if (SPHERE.bands[key] !== undefined) return SPHERE.bands[key];
+  const im = IMG[key];
+  if (!im || !im.complete || !im.width) return null;
+  SPHERE.bands[key] = null;                        // in progress: the flat sprite meanwhile
+  setTimeout(() => {
+    const band = unwrapSprite(im);
+    const gl = SPHERE.gl, t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, band);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    const ext = gl.getExtension("EXT_texture_filter_anisotropic");
+    if (ext) gl.texParameterf(gl.TEXTURE_2D, ext.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(8, gl.getParameter(ext.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
+    SPHERE.tex[key] = t; SPHERE.bands[key] = band;
+  }, 0);
+  return null;
+}
+// Draw world b as a lit sphere of radius R px at sx, sy. Light is the unit vector from the
+// world toward the star in screen space, lifted by sphereLightZ so a top-down table is not
+// forever half dark. Falls back to the flat sprite until the band is ready.
+function drawWorld(b, sx, sy, R, alpha) {
+  if (!S.fauxSpheres || !sphereInit() || !sphereBand(b.sprite)) return drawSprite(b.sprite, sx, sy, R, null, alpha);
+  const gl = SPHERE.gl, c = SPHERE.canvas, u = SPHERE.u;
+  const size = Math.max(8, Math.min(1024, Math.ceil(2 * R * SPHERE_EXTENT) + 2));
+  if (c.width !== size) { c.width = size; c.height = size; }
+  gl.viewport(0, 0, size, size);
+  let lx = STAR.x - b.x, ly = STAR.y - b.y; const ll = Math.hypot(lx, ly) || 1; lx /= ll; ly /= ll;
+  const lz = S.sphereLightZ, ln = Math.hypot(1, lz);
+  gl.uniform3f(u.uLight, lx / ln, -ly / ln, lz / ln);   // screen y down, shader y up
+  const atmo = colRGB(WORLD_ATMO[b.sprite] || mixHex(b.color, "#ffffff", 0.45));
+  gl.uniform3f(u.uAtmo, Math.pow(atmo[0] / 255, 2.2), Math.pow(atmo[1] / 255, 2.2), Math.pow(atmo[2] / 255, 2.2));
+  gl.uniform1f(u.uScroll, (b.spin / TAU) % 1);
+  gl.uniform1f(u.uInhabited, b.sprite === "terra" ? 1 : 0);
+  gl.uniform1f(u.uAlpha, alpha == null ? 1 : alpha);
+  gl.bindTexture(gl.TEXTURE_2D, SPHERE.tex[b.sprite]);
+  gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  cx.drawImage(c, sx - size / 2, sy - size / 2, size, size);
+  return true;
+}
+function colRGB(hex) { const n = parseInt(hex.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+function mixHex(a, b, t) { const p = colRGB(a), q = colRGB(b); return "#" + [0, 1, 2].map(i => Math.round(p[i] + (q[i] - p[i]) * t).toString(16).padStart(2, "0")).join(""); }
+
+// ---- the unwrap, ported line for line from planetCard.ts ------------------------------
+const SRGB_TO_LINEAR = new Float32Array(256);
+for (let i = 0; i < 256; i++) { const c = i / 255; SRGB_TO_LINEAR[i] = c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }
+function linearToSrgb(v) { v = Math.max(0, Math.min(1, v)); return Math.round(255 * (v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055)); }
+function lumOf(d, i) { return 0.2126 * SRGB_TO_LINEAR[d[i]] + 0.7152 * SRGB_TO_LINEAR[d[i + 1]] + 0.0722 * SRGB_TO_LINEAR[d[i + 2]]; }
+function spriteData(img) {
+  const c = document.createElement("canvas"); c.width = img.naturalWidth; c.height = img.naturalHeight;
+  const g = c.getContext("2d", { willReadFrequently: true }); g.drawImage(img, 0, 0);
+  return g.getImageData(0, 0, c.width, c.height);
+}
+function findDisc(im, minAlpha) {
+  const { width: w, height: h, data } = im;
+  let x0 = w, x1 = -1, y0 = h, y1 = -1;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = (y * w + x) * 4;
+    if (data[i + 3] < minAlpha) continue;
+    if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+  }
+  if (x1 < 0) return null;
+  return { cx: (x0 + x1 + 1) / 2, cy: (y0 + y1 + 1) / 2, r: Math.max(x1 - x0 + 1, y1 - y0 + 1) / 2 };
+}
+function sampleLinear(im, x, y, out) {
+  const w = im.width, h = im.height, d = im.data;
+  const fx = Math.max(0, Math.min(w - 1.001, x)), fy = Math.max(0, Math.min(h - 1.001, y));
+  const ix = Math.floor(fx), iy = Math.floor(fy), tx = fx - ix, ty = fy - iy;
+  const i00 = (iy * w + ix) * 4, i10 = i00 + 4, i01 = i00 + w * 4, i11 = i01 + 4;
+  for (let c = 0; c < 3; c++) {
+    const a = SRGB_TO_LINEAR[d[i00 + c]] * (1 - tx) + SRGB_TO_LINEAR[d[i10 + c]] * tx;
+    const b = SRGB_TO_LINEAR[d[i01 + c]] * (1 - tx) + SRGB_TO_LINEAR[d[i11 + c]] * tx;
+    out[c] = a * (1 - ty) + b * ty;
+  }
+}
+function boxSmooth(src, radius, circular) {
+  const n = src.length, out = new Float32Array(n); radius = Math.round(radius);
+  for (let i = 0; i < n; i++) {
+    let s = 0, k = 0;
+    for (let j = -radius; j <= radius; j++) { let q = i + j; if (circular) q = ((q % n) + n) % n; else if (q < 0 || q >= n) continue; s += src[q]; k++; }
+    out[i] = s / k;
+  }
+  return out;
+}
+function unwrapSprite(img) {
+  const im = spriteData(img), disc = findDisc(im, 128);
+  const band = document.createElement("canvas"); band.width = BAND_W; band.height = BAND_H;
+  const g = band.getContext("2d");
+  if (!disc) { g.fillStyle = "#888"; g.fillRect(0, 0, BAND_W, BAND_H); return band; }
+  const { cx: dcx, cy: dcy, r: R } = disc, d = im.data, W = im.width;
+  // the baked shadow: darker than 12% of the disc's median luminance is ink, not surface
+  const lums = [];
+  for (let y = Math.floor(dcy - R); y <= Math.ceil(dcy + R); y++) for (let x = Math.floor(dcx - R); x <= Math.ceil(dcx + R); x++) {
+    if (x < 0 || y < 0 || x >= W || y >= im.height) continue;
+    if (Math.hypot(x + 0.5 - dcx, y + 0.5 - dcy) > R * 0.95) continue;
+    const i = (y * W + x) * 4; if (d[i + 3] < 200) continue;
+    lums.push(lumOf(d, i));
+  }
+  lums.sort((a, b) => a - b);
+  const median = lums.length ? lums[lums.length >> 1] : 0.2, shadowThr = 0.12 * median;
+  const fA = new Float32Array(BAND_H), fB = new Float32Array(BAND_H), valid = new Uint8Array(BAND_H);
+  const RUN = 6, INSIDE = 0.985;
+  for (let v = 0; v < BAND_H; v++) {
+    const lat = (0.5 - (v + 0.5) / BAND_H) * Math.PI;
+    const ys = Math.round(dcy - Math.sin(lat) * R * INSIDE), halfW = R * Math.cos(lat) * INSIDE;
+    const xs = Math.max(0, Math.floor(dcx - halfW)), xe = Math.min(W - 1, Math.ceil(dcx + halfW));
+    if (ys < 0 || ys >= im.height || xe - xs < RUN) continue;
+    const lit = [];
+    for (let x = xs; x <= xe; x++) { const i = (ys * W + x) * 4; lit.push(d[i + 3] >= 200 && lumOf(d, i) > shadowThr); }
+    let a = -1, b = -1;
+    for (let k = 0; k + RUN <= lit.length; k++) { let ok = true; for (let j = 0; j < RUN; j++) if (!lit[k + j]) { ok = false; break; } if (ok) { a = k; break; } }
+    for (let k = lit.length - RUN; k >= 0; k--) { let ok = true; for (let j = 0; j < RUN; j++) if (!lit[k + j]) { ok = false; break; } if (ok) { b = k + RUN - 1; break; } }
+    if (a < 0 || b <= a) continue;
+    fA[v] = (xs + a - dcx) / halfW; fB[v] = (xs + b + 1 - dcx) / halfW; valid[v] = 1;
+  }
+  let last = -1;
+  for (let v = 0; v < BAND_H; v++) {
+    if (valid[v]) { last = v; continue; }
+    let next = -1; for (let u = v + 1; u < BAND_H; u++) if (valid[u]) { next = u; break; }
+    const src = last < 0 ? next : next < 0 ? last : (v - last <= next - v ? last : next);
+    if (src < 0) { fA[v] = -1; fB[v] = 1; } else { fA[v] = fA[src]; fB[v] = fB[src]; }
+  }
+  const ERODE = 0.05;
+  for (let v = 0; v < BAND_H; v++) {
+    let a = Math.max(-0.96, fA[v] + ERODE), b = Math.min(0.96, fB[v] - ERODE);
+    if (b - a < 0.4) { const m = (a + b) / 2; a = m - 0.2; b = m + 0.2; }
+    fA[v] = a; fB[v] = b;
+  }
+  const sA = boxSmooth(fA, 10, false), sB = boxSmooth(fB, 10, false);
+  // the fold: a triangle wave over the lit extent, so column 0 and column 1 are one pixel
+  const lin = new Float32Array(BAND_W * BAND_H * 3), px = new Float32Array(3);
+  for (let v = 0; v < BAND_H; v++) {
+    const lat = (0.5 - (v + 0.5) / BAND_H) * Math.PI;
+    const ys = dcy - Math.sin(lat) * R * INSIDE - 0.5, halfW = R * Math.cos(lat) * INSIDE, a = sA[v], b = sB[v];
+    for (let u = 0; u < BAND_W; u++) {
+      const t0 = (u + 0.5) / BAND_W, t = t0 < 0.5 ? t0 * 2 : 2 - t0 * 2;
+      sampleLinear(im, dcx + halfW * (a + t * (b - a)) - 0.5, ys, px);
+      const o = (v * BAND_W + u) * 3; lin[o] = px[0]; lin[o + 1] = px[1]; lin[o + 2] = px[2];
+    }
+  }
+  // flat-field: divide out the row and column luminance trends, gain clamped to 2.5x
+  const rowMean = new Float32Array(BAND_H), colMean = new Float32Array(BAND_W); let global = 0;
+  for (let v = 0; v < BAND_H; v++) for (let u = 0; u < BAND_W; u++) {
+    const o = (v * BAND_W + u) * 3, l = 0.2126 * lin[o] + 0.7152 * lin[o + 1] + 0.0722 * lin[o + 2];
+    rowMean[v] += l; colMean[u] += l; global += l;
+  }
+  for (let v = 0; v < BAND_H; v++) rowMean[v] /= BAND_W;
+  for (let u = 0; u < BAND_W; u++) colMean[u] /= BAND_H;
+  global /= BAND_W * BAND_H;
+  const rowS = boxSmooth(rowMean, BAND_H >> 5, false), colS = boxSmooth(colMean, BAND_W >> 5, true);
+  const out = g.createImageData(BAND_W, BAND_H), od = out.data, eps = 1e-4;
+  for (let v = 0; v < BAND_H; v++) {
+    const gr = Math.max(0.5, Math.min(2.5, global / (rowS[v] + eps)));
+    for (let u = 0; u < BAND_W; u++) {
+      const gc = Math.max(0.5, Math.min(2.5, global / (colS[u] + eps))), k = gr * gc;
+      const o = (v * BAND_W + u) * 3, q = (v * BAND_W + u) * 4;
+      od[q] = linearToSrgb(lin[o] * k); od[q + 1] = linearToSrgb(lin[o + 1] * k); od[q + 2] = linearToSrgb(lin[o + 2] * k); od[q + 3] = 255;
+    }
+  }
+  g.putImageData(out, 0, 0);
+  return band;
+}
+
 const colCache = {};
 function colA(hex, a) {
   if (!colCache[hex]) { const n = parseInt(hex.slice(1), 16); colCache[hex] = [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
@@ -1551,7 +1829,7 @@ function draw(realDt) {
     if (!b.alive) continue;
     const q = worldToScreen(b.x, b.y); if (!q) continue;
     const [sx, sy] = q, R = ballR(b) * (persp ? q[2] : sc);
-    if (!drawSprite(b.sprite, sx, sy, R)) circle(sx, sy, R, b.color);
+    if (!drawWorld(b, sx, sy, R)) circle(sx, sy, R, b.color);
     if (b.struck) circle(sx, sy, R + 3, null, colA(b.color, 0.5), 1);
   }
   // the balls: every free one with its catch ring, then the one on the nose
@@ -1844,7 +2122,7 @@ cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { cam.zoom = Math.max(0.4, Math.min(6, cam.zoom * Math.exp(-e.deltaY * 0.0012))); e.preventDefault(); }, { passive: false });
 
 // ============================== TEST PANEL ======================================
-const STORE_KEY = "galaxytable.v21";   // bumped: saved settings would otherwise hide the new default
+const STORE_KEY = "galaxytable.v22";   // bumped: saved settings would otherwise hide the new default
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
   catch { return { ...DEFAULTS }; }
@@ -1867,7 +2145,7 @@ const PANEL = [
   ["-"],
   ["b", "animeMode", "Anime style pool ball trail"],
   ["l", "animeSpeedAUyr", "flash speed", 200, 8000],
-  ["r", "animeRangeAU", "flash range at full power (AU); softer shots go less far", 0.5, 6, 0.1],
+  ["r", "animeRangeAU", "flash range at full power (AU); softer shots go less far", 0.5, 12, 0.1],
   ["r", "animeHitstopMs", "impact frame (ms)", 0, 600, 10],
   ["r", "animeTrailS", "trail lingers (s)", 0.2, 4, 0.1],
   ["r", "animeImpactEnergy", "impact energy (x a normal shot)", 0.25, 4, 0.25],
@@ -1892,6 +2170,8 @@ const PANEL = [
   ["b", "planetsCollide", "struck planets can hit other planets"],
   ["b", "acbFeelsWorlds", "planets bend the cue ball's path"],
   ["-"],
+  ["b", "fauxSpheres", "planets as lit, turning spheres (Galaxy 64 card)"],
+  ["r", "sphereLightZ", "how much of a planet the star lights (0 = half)", 0, 2, 0.05],
   ["r", "ballScale", "planet size", 2, 20, 0.5],
   ["r", "minBallAU", "smallest planet size", 0.02, 0.1, 0.005],
   ["r", "acbRadiusAU", "cue ball size", 0.02, 0.1, 0.005],
