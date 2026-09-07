@@ -33,7 +33,11 @@
     After a shot that ball cannot be caught for captureLockoutS seconds (it has no
     catch ring until then; the ring appearing is the cue), and the ship takes half the shot's delta-v backwards, so it
     leaves the ring rather than catching its own shot.
-    Space          new ball on the nose now. The ball already out keeps flying and can
+    Space          the cue ball key. A catchable ball in reach (inside its ring, speed
+                   matched, lockout over) is caught: onto a bare nose or into the
+                   chamber. Nothing in reach: a new ball on the nose now. Catching is
+                   manual by default (autoCapture on the panel brings the winch back).
+                   The ball already out keeps flying and can
                    still be caught; the new one costs one of the three (panel toggle).
                    During a respawn wait it just skips the wait
     C              camera: whole table / follow the ship
@@ -143,8 +147,8 @@
   from a wide view of the whole system past every body in turn (Solaris, Red, Terra,
   Vera, Styx, Lethe, Acheron, then the ark) and settles into the top-down view the game
   is played in. The camera never stops: one spline through every body, introFlyS
-  seconds per body, easing down past each one (introSlow) while its INSPECTOR CARD
-  fades in and out: the body's picture and its properties (mass, density, diameter, travel speed, inhabited,
+  seconds per body at constant speed along the path (arc length, so no pause at a
+  turn) while each body's INSPECTOR CARD fades in and out: the body's picture and its properties (mass, density, diameter, travel speed, inhabited,
   surface temperature, from level-01.json's own numbers), and under them a MISSION
   NOTE by Robert Cupboard, the advisor, in his voice: what the body is for on this
   table and nothing about who set the table. Any key or click skips to the game.
@@ -257,7 +261,6 @@ const TAU = Math.PI * 2;
 const DEFAULTS = {
   introFlyover: true,     // the mission briefing flyover at the start of every rack
   introFlyS: 3.6,         // seconds per body: the camera never stops
-  introSlow: 0.7,         // how much it slows past a body (0 = constant speed, 1 = a stop)
   introPitchDeg: 52,      // camera pitch below horizontal during the flyover
   dragMode: false,        // false: CHARGE (hold LMB), true: DRAG (pull back). Tab swaps
   thrustAntigrav: true,   // the drive lets go of gravity while it burns (hyperwarp 2)
@@ -285,7 +288,8 @@ const DEFAULTS = {
   ballScale: 10,          // drawR multiplier, drawing AND collision. See the header
   minBallAU: 0.05,        // floor under ballScale, so Vera is not a speck
   acbRadiusAU: 0.045,
-  captureRadiusAU: 0.14,  // the ring around a free ACB the ship must be inside
+  captureRadiusAU: 0.28,  // the ring around a free ACB the ship must be inside
+  autoCapture: false,     // off: a matched ball waits for Space. On: it winches in by itself
   captureSpeed: 4.0,      // AU/yr of relative speed the ship must be under. 3 was too strict, 8 too loose
   captureDwellS: 0.25,    // real seconds inside and slow before the winch starts
   captureSeconds: 1.25,   // real seconds of eased winch back onto the nose (001)
@@ -522,7 +526,7 @@ function endIntro() {
   cv.classList.remove("briefing");
   // the handoff: the top-down camera at the fit the outro ended on
   cam.x = ORIGIN.x; cam.y = ORIGIN.y; cam.zoom = 1;
-  cam.scale = Math.min(cv.clientWidth, cv.clientHeight) / 2 / S.viewRadiusAU;
+  if (cv.clientWidth > 0) cam.scale = Math.min(cv.clientWidth, cv.clientHeight) / 2 / S.viewRadiusAU;
 }
 function skipIntro() {
   if (!intro || intro.done) return;
@@ -534,9 +538,9 @@ function introTotal() { return INTRO_TITLE_S + intro.stops.length * S.introFlyS 
 function wideRange() { return introFocal() / (Math.max(1, Math.min(cv.clientWidth, cv.clientHeight)) / 2 / S.viewRadiusAU); }
 // The camera pose at time t. One continuous path: a Catmull-Rom spline through the
 // wide opening view, every stop in order, and the top-down finish, so the camera
-// never stops and never corners. Time runs through each segment with a mild
-// ease (introSlow of the speed is eased), which is the slow-down past each body;
-// the card fades in inside 0.3 of a segment of a body and out again after it. The
+// never stops and never corners. It moves at constant speed along that path (see
+// introArc), so a turn past a body keeps its momentum; the card is up for most of
+// each pass and crossfades at the midpoint between two bodies. The
 // azimuth turns slowly the whole time, which is the pass-by. The last segment is
 // the outro: pitch to 90 degrees, azimuth to the game's own.
 function introPose(t) {
@@ -547,12 +551,16 @@ function introPose(t) {
   const pts = [{ x: ORIGIN.x, y: ORIGIN.y, lr: Math.log(wideRange() * 0.9) }];
   for (const st of stops) pts.push({ x: st.o.x, y: st.o.y, lr: Math.log(Math.max(0.3, st.R * introFocal() / st.px)) });
   pts.push({ x: ORIGIN.x, y: ORIGIN.y, lr: Math.log(wideRange()) });
-  // path parameter u: 0 at the wide view, i+1 at stop i, N+1 at the top-down finish
+  // path parameter u: 0 at the wide view, i+1 at stop i, N+1 at the top-down finish.
+  // The tour runs at CONSTANT SPEED along the path, by arc length (a zoom counts as
+  // distance too, so the opening dive onto the star takes time): an ease at each body
+  // read as a pause, and a per-segment clock made the long hops fast and the short
+  // ones slow. Momentum is kept through every turn.
   let u, title = 0, pitchNow = pitch;
   if (t < INTRO_TITLE_S) { u = 0; title = 1 - Math.max(0, (t - (INTRO_TITLE_S - 0.5)) / 0.5); }
   else if (t < total - INTRO_OUTRO_S) {
-    const w = t - INTRO_TITLE_S, i = Math.min(N - 1, Math.floor(w / per)), f = Math.min(1, w / per - i);
-    u = i + S.introSlow * easeInOutCubic(f) + (1 - S.introSlow) * f;
+    const arc = introArc(pts, N);
+    u = arcToU(arc, (t - INTRO_TITLE_S) / (N * per) * arc.total);
   } else {
     const f = easeInOutCubic(Math.min(1, (t - (total - INTRO_OUTRO_S)) / INTRO_OUTRO_S));
     u = N + f;
@@ -575,6 +583,30 @@ function introPose(t) {
   const near = Math.round(u) - 1;
   if (near >= 0 && near < N) { const d = Math.abs(u - (near + 1)); cardA = Math.max(0, Math.min(1, (0.5 - d) / 0.08)); if (cardA > 0) cardIdx = near; }
   return { x, y, range, pitch: pitchNow, az, cardIdx, cardA, title };
+}
+// The arc-length table for the tour, u in [0, N], cached per briefing (the path is
+// fixed once the sim freezes). Path metric: table distance plus 0.6 AU per e-fold of
+// range, so a pure zoom is not free.
+function introArc(pts, N) {
+  if (intro.arc) return intro.arc;
+  const cr = (a, b, c, d, k) => 0.5 * (2 * b + (-a + c) * k + (2 * a - 5 * b + 4 * c - d) * k * k + (-a + 3 * b - 3 * c + d) * k * k * k);
+  const P = j => pts[Math.max(0, Math.min(pts.length - 1, j))];
+  const at = u => { const i0 = Math.min(pts.length - 2, Math.floor(u)), k = u - i0, p0 = P(i0 - 1), p1 = P(i0), p2 = P(i0 + 1), p3 = P(i0 + 2);
+                    return [cr(p0.x, p1.x, p2.x, p3.x, k), cr(p0.y, p1.y, p2.y, p3.y, k), p1.lr + (p2.lr - p1.lr) * k]; };
+  const M = 200, us = [], ss = []; let acc = 0, prev = at(0);
+  for (let j = 0; j <= N * M; j++) {
+    const u = j / M, q = at(u);
+    acc += Math.hypot(q[0] - prev[0], q[1] - prev[1]) + 0.6 * Math.abs(q[2] - prev[2]);
+    us.push(u); ss.push(acc); prev = q;
+  }
+  return intro.arc = { us, ss, total: acc };
+}
+function arcToU(arc, sTarget) {
+  const ss = arc.ss; let lo = 0, hi = ss.length - 1;
+  if (sTarget >= arc.total) return arc.us[hi];
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (ss[m] <= sTarget) lo = m; else hi = m; }
+  const f = (sTarget - ss[lo]) / Math.max(1e-9, ss[hi] - ss[lo]);
+  return arc.us[lo] + (arc.us[hi] - arc.us[lo]) * f;
 }
 // The projection. persp is set for the frame while the briefing runs and null in play.
 let persp = null;
@@ -1109,25 +1141,37 @@ function checkCapture(realDt) {
     k.lock -= realDt;
     if (k.lock <= 0) { k.lock = 0; note("BALL CAN BE CAUGHT", "#8fe8b0"); }
   }
-  if (acb.mode === "capturing") return;
-  const bare = acb.mode === "empty" || acb.mode === "lost";
+  if (acb.mode === "capturing" || !S.autoCapture) return;
   for (const k of balls) {
     if (k.lock > 0) { k.dwell = 0; continue; }
     if (catchable(k)) k.dwell += realDt; else k.dwell = 0;
-    if (k.dwell >= S.captureDwellS) {
-      balls = balls.filter(o => o !== k);
-      if (bare) {
-        acb.mode = "capturing"; acb.type = k.type; acb.x = k.x; acb.y = k.y;
-        acb.cap = { age: 0, sx: k.x - ship.x, sy: k.y - ship.y };
-        note("ACB CAPTURED: " + BALL_TYPES[k.type].name + " on the nose", "#8fe8b0");
-      } else {
-        // the nose is full: the ball goes into the chamber
-        chamber.push(k.type); flash(k.x, k.y, 0.12, "#8fe8b0");
-        note("ACB RECOVERED: " + BALL_TYPES[k.type].name + " chambered", "#8fe8b0");
-      }
-      return;
-    }
+    if (k.dwell >= S.captureDwellS) { captureBall(k); return; }
   }
+}
+// The catch itself: onto a bare nose, or into the chamber when the nose is full.
+function captureBall(k) {
+  const bare = acb.mode === "empty" || acb.mode === "lost";
+  balls = balls.filter(o => o !== k);
+  if (bare) {
+    acb.mode = "capturing"; acb.type = k.type; acb.x = k.x; acb.y = k.y;
+    acb.cap = { age: 0, sx: k.x - ship.x, sy: k.y - ship.y };
+    note("ACB CAPTURED: " + BALL_TYPES[k.type].name + " on the nose", "#8fe8b0");
+  } else {
+    // the nose is full: the ball goes into the chamber
+    chamber.push(k.type); flash(k.x, k.y, 0.12, "#8fe8b0");
+    note("ACB RECOVERED: " + BALL_TYPES[k.type].name + " chambered", "#8fe8b0");
+  }
+}
+// Space is the cue ball key. A catchable ball in reach is caught first; otherwise
+// the next chambered ball loads onto a bare nose.
+function spaceKey() {
+  if (acb.mode === "capturing" || score.failed || score.won) return;
+  let best = null, bd = 1e9;
+  for (const k of balls) if (k.lock <= 0 && catchable(k)) { const d = dist(ship.x, ship.y, k.x, k.y); if (d < bd) { bd = d; best = k; } }
+  if (best) { captureBall(best); return; }
+  const near = balls.find(k => k.lock <= 0 && dist(ship.x, ship.y, k.x, k.y) < S.captureRadiusAU);
+  if (near && (acb.mode === "empty" || acb.mode === "lost")) { note("TOO FAST TO CATCH: match its speed (REL " + Math.hypot(ship.vx - near.vx, ship.vy - near.vy).toFixed(1) + " AU/yr)", "#e8b463"); return; }
+  newBallNow();
 }
 function stepCapture(realDt) {
   if (acb.mode !== "capturing") return;
@@ -1530,7 +1574,7 @@ function draw(realDt) {
     cx.setLineDash([4, 4]); circle(sx, sy, S.captureRadiusAU * sc, null, col, 1.5); cx.setLineDash([]);
     if (inside) {
       cx.fillStyle = col; cx.font = `10px "Share Tech Mono", monospace`; cx.textAlign = "center";
-      cx.fillText(slow ? "MATCHED" : "REL " + rel.toFixed(1) + " AU/yr", sx, sy - S.captureRadiusAU * sc - 6);
+      cx.fillText(slow ? (S.autoCapture ? "MATCHED" : "SPACE TO CATCH") : "REL " + rel.toFixed(1) + " AU/yr", sx, sy - S.captureRadiusAU * sc - 6);
     }
     drawBall(sx, sy, k.type, true);
   }
@@ -1693,7 +1737,7 @@ function drawHud(W, H) {
     ["T " + simYears.toFixed(2) + " yr" + (score.deaths ? "   SHIP LOST " + score.deaths : ""), "#9fb4cc"],
     ["MODE " + (S.dragMode ? "DRAG (pull back)" : "CHARGE (hold LMB)") + "   Tab swaps", "#8fc3e8"],
     ["ACB " + (acb.mode === "attached" ? "ON THE NOSE" : acb.mode === "capturing" ? "WINCHING IN" :
-              acb.mode === "empty" ? "OUT, go and catch it" + (chamber.length ? " (Space loads the next)" : "") :
+              acb.mode === "empty" ? "OUT, get in its ring and press Space" + (chamber.length ? " (or Space loads the next)" : "") :
               score.failed ? "NONE LEFT" : chamber.length ? "DESTROYED, next loads in " + Math.max(0, S.respawnSeconds - acb.lostT).toFixed(1) + " s" : "DESTROYED, catch one")
      + (balls.length > 1 || (balls.length === 1 && acb.mode !== "empty") ? "   " + balls.length + " BALL" + (balls.length > 1 ? "S" : "") + " OUT" : ""),
      acb.mode === "attached" ? "#e8f0fa" : acb.mode === "lost" ? "#ff5030" : "#8fe8b0"],
@@ -1703,7 +1747,7 @@ function drawHud(W, H) {
   notices.forEach((n, i) => { cx.fillStyle = colA(n.color, Math.min(1, (20 - n.t) / 4)); cx.fillText(n.text, 14, H - 20 - (notices.length - 1 - i) * 16); });
   renderChamber();
   cx.fillStyle = "rgba(120,140,170,0.6)"; cx.textAlign = "right";
-  cx.fillText("WASD fly  Shift drift  Q/E time  LMB shoot  Space new ball  Tab mode  C camera  R reset  H panel", W - 14, H - 14);
+  cx.fillText("WASD fly  Shift drift  Q/E time  LMB shoot  Space catch / new ball  Tab mode  C camera  R reset  H panel", W - 14, H - 14);
   cx.textAlign = "left";
   if (score.won) {
     cx.fillStyle = "rgba(5,7,13,0.6)"; cx.fillRect(W / 2 - 200, H / 2 - 50, 400, 90);
@@ -1771,7 +1815,7 @@ addEventListener("keydown", e => {
   if (e.code === "KeyP") paused = !paused;
   if (e.code === "KeyH") { const p = document.getElementById("panel"); p.style.display = p.style.display === "none" ? "" : "none"; }
   if (e.code === "Escape") { charging = false; charge = 0; drag = null; }
-  if (e.code === "Space") { newBallNow(); e.preventDefault(); }
+  if (e.code === "Space") { spaceKey(); e.preventDefault(); }
 });
 addEventListener("keyup", e => { if (KEYMAP[e.code]) keys[KEYMAP[e.code]] = false; });
 addEventListener("blur", () => { for (const k in keys) keys[k] = false; });
@@ -1792,7 +1836,7 @@ cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { cam.zoom = Math.max(0.4, Math.min(6, cam.zoom * Math.exp(-e.deltaY * 0.0012))); e.preventDefault(); }, { passive: false });
 
 // ============================== TEST PANEL ======================================
-const STORE_KEY = "galaxytable.v19";   // bumped: saved settings would otherwise hide the new default
+const STORE_KEY = "galaxytable.v20";   // bumped: saved settings would otherwise hide the new default
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
   catch { return { ...DEFAULTS }; }
@@ -1847,7 +1891,8 @@ const PANEL = [
   ["r", "pocketInfluenceAU", "pocket pull reach", 0.1, 1.2, 0.05],
   ["r", "pocketMass", "pocket pull strength", 0.1, 2, 0.05],
   ["-"],
-  ["r", "captureRadiusAU", "catch ring size", 0.05, 0.4, 0.01],
+  ["r", "captureRadiusAU", "catch ring size", 0.05, 0.6, 0.01],
+  ["b", "autoCapture", "catch automatically when matched (off = Space catches)"],
   ["r", "captureSpeed", "speed match needed to catch (higher = easier)", 0.5, 20, 0.25],
   ["r", "captureDwellS", "seconds in the ring before catching", 0, 1.5, 0.05],
   ["r", "captureSeconds", "seconds to reel the cue ball in", 0.2, 3, 0.05],
@@ -1865,7 +1910,6 @@ const PANEL = [
   ["-"],
   ["b", "introFlyover", "mission briefing flyover at the start"],
   ["r", "introFlyS", "briefing: seconds per body", 1, 8, 0.1],
-  ["r", "introSlow", "briefing: slow-down past each body (1 = a stop)", 0, 1, 0.05],
   ["r", "introPitchDeg", "briefing: camera tilt (90 = top-down)", 25, 90, 1],
   ["b", "camFollow", "camera follows the ship  [C]"],
   ["r", "viewRadiusAU", "how much of the table you see", 1.5, 5, 0.1],
@@ -1945,6 +1989,7 @@ window.RIG = {
   key: (k, down) => { keys[k] = down; },
   override: (why) => overrideStabiliser(why),
   newBall: () => newBallNow(),
+  space: () => spaceKey(),
   setType: (i, t) => { if (i < 0) acb.type = t; else chamber[i] = t; },
   starTo: (x, y, vx, vy, struck) => { STAR.x = x; STAR.y = y; STAR.vx = vx; STAR.vy = vy; if (struck != null) STAR.struck = struck; },
   teleportBody: (i, x, y, vx, vy, struck) => { const b = bodies[i]; b.x = x; b.y = y; b.vx = vx; b.vy = vy; if (struck != null) b.struck = struck; },
