@@ -174,11 +174,17 @@
   anyKey. The blend to the game's orthographic camera is the same trick: dolly to the
   straight-down pose, set the ortho size to focal / height, swap cameras that frame.
 
-  FAUX 3D WORLDS (fauxSpheres, on). The worlds are the Galaxy 64 planet card, ported
+  FAUX 3D WORLDS, STAR AND HOLES (fauxSpheres, on). Solaris is Galaxy 64's star card:
+  the sun sprite reduced to luminance and recoloured to the star's own red with a
+  white-hot core, pulsing (core and glow out of phase), turning once in 90 s, added to
+  the sky. The pockets are its hole card: the accretion drawing with two brightness
+  waves running round it in opposite senses, and a lensing vignette that darkens the
+  sky round the hole. The worlds are the Galaxy 64 planet card, ported
   from Reference/galaxy-64/src/planetCard.ts with the lab's shading values: the flat
   sprite is unwrapped at load into a seamless band, the band scrolls through a circular
   mask as the world turns (its spin), and a shading pass lights it from wherever
-  Solaris is: soft terminator, limb darkening, atmosphere rim and halo in the level's
+  Solaris is (the star is the light source, so a struck star drags every terminator
+  with it): soft terminator, limb darkening, atmosphere rim and halo in the level's
   atmosphereColor, an ocean specular hint, and city lights on Terra's night side. The
   star's light is lifted toward the viewer by sphereLightZ, because a table seen from
   straight above would otherwise show every world half dark. It is a WebGL2 pass into
@@ -652,6 +658,7 @@ function projPt(x, y, z) {
 function scAt(x, y) { if (!persp) return cam.scale; const p = projPt(x, y, 0); return p ? p[2] : 0; }
 function stepIntro(realDt) {
   intro.t += realDt * (intro.skipped ? 2 : 1);      // a skip plays the outro at double speed
+  for (const b of bodies) b.spin += realDt * TAU / 24;   // the sim is frozen, the worlds still turn
   if (intro.t >= introTotal()) { endIntro(); return; }
   intro.pose = introPose(intro.t);
   setPersp(intro.pose);
@@ -709,7 +716,10 @@ function drawCard(st, a, W, H) {
   // picture
   const px = x0 + 46, py = y0 + 46, R = 30;
   cx.save(); cx.beginPath(); cx.rect(x0 + 8, y0 + 8, 76, 76); cx.clip();
-  if (st.sprite) { if (!(st.o.orbitR ? drawWorld(st.o, px, py, R, a) : drawSprite(st.sprite, px, py, R, st.tint ? sunTinted : null, a))) circle(px, py, R, st.o.color); }
+  if (st.sprite) {
+    const drawn = st.o.orbitR ? drawWorld(st.o, px, py, R, a) : st.tint ? drawStarCard(px, py, R * 0.8) : st.pocket ? drawHoleCard(px, py, R) : false;
+    if (!drawn && !drawSprite(st.sprite, px, py, R, st.tint ? sunTinted : null, a)) circle(px, py, R, st.o.color);
+  }
   else { cx.save(); cx.translate(px, py); cx.rotate(-0.6); cx.beginPath(); cx.moveTo(24, 0); cx.lineTo(-13, 12); cx.lineTo(-7, 0); cx.lineTo(-13, -12); cx.closePath(); cx.fillStyle = "#4fc3f7"; cx.fill(); cx.restore(); }
   cx.restore();
   cx.globalAlpha = a;
@@ -1496,7 +1506,7 @@ const SPHERE_EXTENT = 1.12, SPHERE_HALO = 0.09;
 const BAND_W = 1024, BAND_H = 512;
 const WORLD_ATMO = { red: "#c9a84e", terra: "#7fb0e6" };   // level-01's atmosphereColor; Vera has none
 const SPHERE_VERT = `#version 300 es
-in vec2 aP; out vec2 vP; uniform float uExtent;
+layout(location = 0) in vec2 aP; out vec2 vP; uniform float uExtent;
 void main() { vP = aP * uExtent; gl_Position = vec4(aP, 0.0, 1.0); }`;
 const SPHERE_FRAG = `#version 300 es
 precision highp float;
@@ -1549,6 +1559,50 @@ void main() {
   rgb = pow(clamp(rgb, 0.0, 1.0), vec3(1.0 / 2.2));
   fragColor = vec4(rgb * a, a);   // premultiplied, for drawImage onto the table
 }`;
+// The sun sprite is yellow and the star may be any colour, so the sprite is reduced to
+// luminance and recoloured, with a white-hot core, pulsing (core and glow out of phase),
+// spinning once in 90 s. Additive, because it is the thing that emits.
+const STAR_FRAG = `#version 300 es
+precision highp float;
+in vec2 vP; out vec4 fragColor;
+uniform sampler2D uArt;
+uniform vec3 uColor;
+uniform float uSpin, uTime;
+void main() {
+  float c = cos(uSpin), s = sin(uSpin);
+  vec2 q = mat2(c, -s, s, c) * vP;
+  vec2 uv = q * 0.5 + 0.5;
+  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) discard;
+  vec4 t = texture(uArt, uv, 1.0);     // a mip level of blur: granulation, not blocks
+  vec3 lin = pow(t.rgb, vec3(2.2));
+  float lum = dot(lin, vec3(0.2126, 0.7152, 0.0722));
+  float core = smoothstep(0.75, 1.0, t.a);
+  float pulse = 1.0 + 0.05 * sin(uTime * 1.3) * core + 0.22 * sin(uTime * 0.9 + 1.0) * (1.0 - core);
+  vec3 col = uColor * lum * 1.6 + vec3(1.0, 0.92, 0.8) * pow(lum, 5.0) * 0.5;
+  float a = t.a * pulse;
+  vec3 rgb = pow(clamp(col * pulse, 0.0, 1.0), vec3(1.0 / 2.2));
+  fragColor = vec4(rgb * a, a);
+}`;
+// The accretion disc is a drawing at a fixed tilt, so it is not rotated; two brightness
+// waves run round it in opposite senses, which reads as matter in flow. The vignette
+// darkens the sky round the hole: a lensing hint, and what keeps the card readable.
+const HOLE_FRAG = `#version 300 es
+precision highp float;
+in vec2 vP; out vec4 fragColor;
+uniform sampler2D uArt;
+uniform float uTime, uAspect, uDiscR, uVignette;
+void main() {
+  vec2 uv = vec2(vP.x * 0.5 + 0.5, vP.y * 0.5 / uAspect + 0.5);
+  vec4 t = (uv.y < 0.0 || uv.y > 1.0) ? vec4(0.0) : texture(uArt, uv);
+  float ang = atan(vP.y, vP.x);
+  float flow = 0.82 + 0.14 * sin(ang * 3.0 - uTime * 0.9) + 0.12 * sin(ang * 5.0 + uTime * 0.6 + 1.7);
+  float lum = dot(t.rgb, vec3(0.2126, 0.7152, 0.0722));
+  vec3 col = t.rgb * mix(1.0, flow, smoothstep(0.02, 0.2, lum));
+  float d = length(vP) / uDiscR;
+  float vig = uVignette * (1.0 - smoothstep(1.0, 3.2, d));
+  float a = t.a + vig * (1.0 - t.a);
+  fragColor = vec4(col * t.a, a);   // premultiplied: the sprite over a darkening of the sky
+}`;
 function sphereInit() {
   if (SPHERE.tried) return SPHERE.ok;
   SPHERE.tried = true;
@@ -1557,23 +1611,103 @@ function sphereInit() {
   if (!gl) return false;
   const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
     if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { console.warn(gl.getShaderInfoLog(s)); return null; } return s; };
-  const vs = sh(gl.VERTEX_SHADER, SPHERE_VERT), fs = sh(gl.FRAGMENT_SHADER, SPHERE_FRAG);
-  if (!vs || !fs) return false;
-  const prog = gl.createProgram(); gl.attachShader(prog, vs); gl.attachShader(prog, fs); gl.linkProgram(prog);
-  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) { console.warn(gl.getProgramInfoLog(prog)); return false; }
-  gl.useProgram(prog);
+  const vs = sh(gl.VERTEX_SHADER, SPHERE_VERT);
+  if (!vs) return false;
+  const make = (fragSrc, names) => {
+    const fs = sh(gl.FRAGMENT_SHADER, fragSrc); if (!fs) return null;
+    const prog = gl.createProgram(); gl.attachShader(prog, vs); gl.attachShader(prog, fs); gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) { console.warn(gl.getProgramInfoLog(prog)); return null; }
+    const u = {}; for (const n of names) u[n] = gl.getUniformLocation(prog, n);
+    return { prog, u };
+  };
+  const world = make(SPHERE_FRAG, ["uExtent", "uBand", "uScroll", "uLight", "uAtmo", "uWrap", "uLimb", "uRim", "uRimWidth", "uSpec", "uAmbient", "uInhabited", "uHaloR", "uAlpha"]);
+  const star = make(STAR_FRAG, ["uExtent", "uArt", "uColor", "uSpin", "uTime"]);
+  const hole = make(HOLE_FRAG, ["uExtent", "uArt", "uTime", "uAspect", "uDiscR", "uVignette"]);
+  if (!world || !star || !hole) return false;
   const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
-  const aP = gl.getAttribLocation(prog, "aP"); gl.enableVertexAttribArray(aP); gl.vertexAttribPointer(aP, 2, gl.FLOAT, false, 0, 0);
-  for (const n of ["uExtent", "uBand", "uScroll", "uLight", "uAtmo", "uWrap", "uLimb", "uRim", "uRimWidth", "uSpec", "uAmbient", "uInhabited", "uHaloR", "uAlpha"])
-    SPHERE.u[n] = gl.getUniformLocation(prog, n);
+  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);   // aP is location 0 in every program
   const S = SPHERE_SHADING;
-  gl.uniform1f(SPHERE.u.uExtent, SPHERE_EXTENT); gl.uniform1i(SPHERE.u.uBand, 0);
-  gl.uniform1f(SPHERE.u.uWrap, S.wrap); gl.uniform1f(SPHERE.u.uLimb, S.limb); gl.uniform1f(SPHERE.u.uRim, S.rim);
-  gl.uniform1f(SPHERE.u.uRimWidth, S.rimWidth); gl.uniform1f(SPHERE.u.uSpec, S.spec); gl.uniform1f(SPHERE.u.uAmbient, S.ambient);
-  gl.uniform1f(SPHERE.u.uHaloR, SPHERE_HALO);
+  gl.useProgram(world.prog);
+  gl.uniform1f(world.u.uExtent, SPHERE_EXTENT); gl.uniform1i(world.u.uBand, 0);
+  gl.uniform1f(world.u.uWrap, S.wrap); gl.uniform1f(world.u.uLimb, S.limb); gl.uniform1f(world.u.uRim, S.rim);
+  gl.uniform1f(world.u.uRimWidth, S.rimWidth); gl.uniform1f(world.u.uSpec, S.spec); gl.uniform1f(world.u.uAmbient, S.ambient);
+  gl.uniform1f(world.u.uHaloR, SPHERE_HALO);
+  gl.useProgram(star.prog); gl.uniform1f(star.u.uExtent, 1); gl.uniform1i(star.u.uArt, 0);
+  gl.useProgram(hole.prog); gl.uniform1f(hole.u.uExtent, 1); gl.uniform1i(hole.u.uArt, 0);
+  // 0.55 measured against the top-down view in Galaxy 64: a dark pocket of sky, no visible edge
+  gl.uniform1f(hole.u.uVignette, 0.55);
   gl.disable(gl.DEPTH_TEST); gl.disable(gl.BLEND);
-  SPHERE.gl = gl; SPHERE.canvas = c; SPHERE.prog = prog; SPHERE.ok = true;
+  SPHERE.gl = gl; SPHERE.canvas = c; SPHERE.prog = world.prog; SPHERE.u = world.u; SPHERE.star = star; SPHERE.hole = hole; SPHERE.ok = true;
+  return true;
+}
+// The sun and black hole sprites as textures, measured as Galaxy 64 measures them: the
+// star's solid core is where alpha saturates (drawn at the star's radius, the glow outside
+// it); the hole's dark disc is the near-black run of the drawing (drawn at the pocket's).
+function artTexture(key) {
+  if (SPHERE.tex[key] !== undefined) return SPHERE.tex[key];
+  const im = IMG[key];
+  if (!im || !im.complete || !im.width) return null;
+  const gl = SPHERE.gl, t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);      // uv (0,0) is the picture's bottom left, as in three
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, im);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+  gl.generateMipmap(gl.TEXTURE_2D);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  const data = spriteData(im);
+  if (key === "sun") { const core = findDisc(data, 250); SPHERE.sunCoreR = core ? core.r : im.width * 0.285; }
+  if (key === "blackhole") { const dark = findDiscDark(data); SPHERE.holeD = dark ? dark.r * 2 : im.height * 0.34; }
+  return SPHERE.tex[key] = t;
+}
+function findDiscDark(im) {
+  const { width: w, height: h, data } = im;
+  let x0 = w, x1 = -1, y0 = h, y1 = -1;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = (y * w + x) * 4;
+    if (data[i + 3] < 128 || lumOf(data, i) > 0.02) continue;
+    if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+  }
+  if (x1 < 0) return null;
+  return { cx: (x0 + x1 + 1) / 2, cy: (y0 + y1 + 1) / 2, r: Math.max(x1 - x0 + 1, y1 - y0 + 1) / 2 };
+}
+function glCanvasSized(size) {
+  const c = SPHERE.canvas, gl = SPHERE.gl;
+  size = Math.max(8, Math.min(1024, Math.ceil(size)));
+  if (c.width !== size) { c.width = size; c.height = size; }
+  gl.viewport(0, 0, size, size);
+  gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+  return size;
+}
+// The star card: the sprite's solid core at radius R, its own glow outside, added to the sky.
+function drawStarCard(sx, sy, R) {
+  if (!S.fauxSpheres || !sphereInit() || !artTexture("sun")) return false;
+  const gl = SPHERE.gl, st = SPHERE.star, im = IMG.sun;
+  const size = glCanvasSized(2 * R * im.width / (2 * SPHERE.sunCoreR) + 2);
+  gl.useProgram(st.prog); gl.bindTexture(gl.TEXTURE_2D, SPHERE.tex.sun);
+  const c = colRGB(STAR.color), t = performance.now() / 1000;
+  gl.uniform3f(st.u.uColor, Math.pow(c[0] / 255, 2.2), Math.pow(c[1] / 255, 2.2), Math.pow(c[2] / 255, 2.2));
+  gl.uniform1f(st.u.uTime, t); gl.uniform1f(st.u.uSpin, t / 90 * TAU);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  cx.globalCompositeOperation = "lighter";
+  cx.drawImage(SPHERE.canvas, sx - size / 2, sy - size / 2, size, size);
+  cx.globalCompositeOperation = "source-over";
+  return true;
+}
+// The hole card, letterboxed in a square so the vignette has room above and below the
+// accretion disc. Scaled as the flat sprite was: the drawing's measured disc (the ring's
+// outer edge) at 1.15 R, so the pocket keeps the footprint the table was tuned with;
+// Galaxy 64 puts the dark disc at R instead, which here would cover the chamber menu.
+function drawHoleCard(sx, sy, R) {
+  if (!S.fauxSpheres || !sphereInit() || !artTexture("blackhole")) return false;
+  const gl = SPHERE.gl, ho = SPHERE.hole, im = IMG.blackhole;
+  const size = glCanvasSized(2 * 1.15 * R * im.width / (2 * SPRITES.blackhole.disc.r) + 2);
+  gl.useProgram(ho.prog); gl.bindTexture(gl.TEXTURE_2D, SPHERE.tex.blackhole);
+  gl.uniform1f(ho.u.uTime, performance.now() / 1000);
+  gl.uniform1f(ho.u.uAspect, im.height / im.width); gl.uniform1f(ho.u.uDiscR, SPHERE.holeD / im.width);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  cx.drawImage(SPHERE.canvas, sx - size / 2, sy - size / 2, size, size);
   return true;
 }
 function sphereBand(key) {
@@ -1602,9 +1736,8 @@ function sphereBand(key) {
 function drawWorld(b, sx, sy, R, alpha) {
   if (!S.fauxSpheres || !sphereInit() || !sphereBand(b.sprite)) return drawSprite(b.sprite, sx, sy, R, null, alpha);
   const gl = SPHERE.gl, c = SPHERE.canvas, u = SPHERE.u;
-  const size = Math.max(8, Math.min(1024, Math.ceil(2 * R * SPHERE_EXTENT) + 2));
-  if (c.width !== size) { c.width = size; c.height = size; }
-  gl.viewport(0, 0, size, size);
+  const size = glCanvasSized(2 * R * SPHERE_EXTENT + 2);
+  gl.useProgram(SPHERE.prog);
   let lx = STAR.x - b.x, ly = STAR.y - b.y; const ll = Math.hypot(lx, ly) || 1; lx /= ll; ly /= ll;
   const lz = S.sphereLightZ, ln = Math.hypot(1, lz);
   gl.uniform3f(u.uLight, lx / ln, -ly / ln, lz / ln);   // screen y down, shader y up
@@ -1614,7 +1747,6 @@ function drawWorld(b, sx, sy, R, alpha) {
   gl.uniform1f(u.uInhabited, b.sprite === "terra" ? 1 : 0);
   gl.uniform1f(u.uAlpha, alpha == null ? 1 : alpha);
   gl.bindTexture(gl.TEXTURE_2D, SPHERE.tex[b.sprite]);
-  gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   cx.drawImage(c, sx - size / 2, sy - size / 2, size, size);
   return true;
@@ -1795,20 +1927,24 @@ function draw(realDt) {
     drawRing(p.x, p.y, S.pocketInfluenceAU, "rgba(180,140,255,0.18)", 1, [3, 6]);
     const q = worldToScreen(p.x, p.y); if (!q) continue;
     const [sx, sy] = q, R = S.pocketRadiusAU * (persp ? q[2] : sc);
-    const g = cx.createRadialGradient(sx, sy, R * 0.6, sx, sy, R * 2.4);
-    g.addColorStop(0, "rgba(120,80,200,0.35)"); g.addColorStop(1, "rgba(120,80,200,0)");
-    circle(sx, sy, R * 2.4, g);
-    if (!drawSprite("blackhole", sx, sy, R * 1.15)) circle(sx, sy, R, "#0a0612", "#b48cff", 1.5);
+    if (!drawHoleCard(sx, sy, R)) {
+      const g = cx.createRadialGradient(sx, sy, R * 0.6, sx, sy, R * 2.4);
+      g.addColorStop(0, "rgba(120,80,200,0.35)"); g.addColorStop(1, "rgba(120,80,200,0)");
+      circle(sx, sy, R * 2.4, g);
+      if (!drawSprite("blackhole", sx, sy, R * 1.15)) circle(sx, sy, R, "#0a0612", "#b48cff", 1.5);
+    }
     cx.fillStyle = "rgba(200,180,255,0.55)"; cx.font = `10px "Share Tech Mono", monospace`; cx.textAlign = "center";
     cx.fillText(p.name.toUpperCase(), sx, sy + R + 14);
   }
   // the star
   if (STAR.alive) {
     const [sx, sy] = worldToScreen(STAR.x, STAR.y) || [-1e4, -1e4], R = starR() * scAt(STAR.x, STAR.y);
-    const g = cx.createRadialGradient(sx, sy, R * 0.8, sx, sy, R * 3);
-    g.addColorStop(0, "rgba(255,75,43,0.35)"); g.addColorStop(1, "rgba(255,75,43,0)");
-    circle(sx, sy, R * 3, g);
-    if (!drawSprite("sun", sx, sy, R, sunTinted)) circle(sx, sy, R, STAR.color);
+    if (!drawStarCard(sx, sy, R)) {
+      const g = cx.createRadialGradient(sx, sy, R * 0.8, sx, sy, R * 3);
+      g.addColorStop(0, "rgba(255,75,43,0.35)"); g.addColorStop(1, "rgba(255,75,43,0)");
+      circle(sx, sy, R * 3, g);
+      if (!drawSprite("sun", sx, sy, R, sunTinted)) circle(sx, sy, R, STAR.color);
+    }
     if (STAR.struck) { strokePts(STAR.trail, STAR.color, 0.4, 1); circle(sx, sy, R + 4, null, colA(STAR.color, 0.5), 1); }
   }
   // trails
