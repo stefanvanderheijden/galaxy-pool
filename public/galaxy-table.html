@@ -24,12 +24,13 @@
     MOUSE          aim: the nose tracks the cursor (hyperwarp 2)
     W / S          drive forward / back along the nose
     A / D          strafe left / right of the nose
-    Q / E hold     time slider, continuous 1x..5,000,000x
-    Shift hold     zero gravity drift
-    LMB            CHARGE mode: hold to charge, release to shoot along the nose
-                   DRAG mode: press and pull back, release to shoot the other way
-    Tab            swap CHARGE / DRAG
-    Esc            cancel a charge or a drag
+    Q / E hold     time slider, continuous 1x..max time speed (panel)
+    Shift hold     PAUSE TIME: the slider drops to the far left, the table is still,
+                   and you take your shot on it. Release and the clock springs back
+    LMB hold+drag  aim: press on the ball and pull back, further back is more power,
+                   release to shoot the other way. Time holds while the drag is held,
+                   Shift or not. This is the one aim mode; there is no other
+    Esc            cancel a drag
     After a shot that ball cannot be caught for captureLockoutS seconds (it has no
     catch ring until then; the ring appearing is the cue), and the ship takes half the shot's delta-v backwards, so it
     leaves the ring rather than catching its own shot.
@@ -49,6 +50,13 @@
   velocity it has, which is how you settle into a new orbit, or fall into the star. The
   settle damping (linearDamp) is the same feel dial with the same warning: it is not
   physics, it is what stops you spending the whole game cancelling your last input.
+  Zero gravity drift is gone; Shift is the pause now.
+
+  THE ENGINE AT HIGH TIME SPEED. The engine burns in sim time, so at 5M a tap of W
+  used to add 25x the velocity it adds at 200K, and the ship seemed to bolt. It was
+  not a bug, it was the clock, but it read as one. The burn is now capped to the rate
+  it has at the game speed (thrust scaled by min(1, gameSpeed / warp)): a second of
+  W at any time speed above the centre moves the ship the same as a second at 200K.
 
   TWO DEVIATIONS FROM HYPERWARP, both because this is a table and not a corridor:
     · The time slider's centre is 1,000,000x, not 100,000x. The table is 2 AU across
@@ -282,7 +290,7 @@ const SOFT2 = 1e-6;                        // Plummer softening^2, matches SimUn
 // Log-linear in two halves with the centre PINNED. See the header: 1M here, not 100K.
 // The centre is the panel's "game speed"; the fast end stays at least five times it.
 function warpMid() { return S.gameSpeedK * 1000; }
-function warpMax() { return Math.max(5e6, warpMid() * 5); }
+function warpMax() { return Math.max(warpMid() * 2, S.maxWarpM * 1e6); }
 const TAU = Math.PI * 2;
 
 // ============================== TUNABLES (test panel) ===========================
@@ -291,15 +299,17 @@ const DEFAULTS = {
   introFlyS: 4.6,         // seconds per body, whatever the hop: the camera never stops
   introSlow: 0.45,        // slow-down past a body: speed there is (1 - this) of the mean
   introPitchDeg: 52,      // camera pitch below horizontal during the flyover
-  dragMode: false,        // false: CHARGE (hold LMB), true: DRAG (pull back). Tab swaps
+  dragMode: true,         // the one aim mode: press on the ball, pull back, release
   thrustAntigrav: true,   // the drive lets go of gravity while it burns (hyperwarp 2)
   driftMode: true,        // the time slider springs home to 1M when released
   projections: true,      // the aim line and every struck world's forecast
   acbFeelsWorlds: true,   // the ACB flies the game layer (boosted worlds) like the ship
   planetsCollide: true,   // struck worlds knock each other
   camFollow: false,       // C toggles: whole table, or glide after the ship
+  systemScale: 1,         // the table's size: every authored radius times this (orbits, pockets, belt, view)
+  maxWarpM: 5,            // the time slider's right end, in millions x
   fauxSpheres: true,      // worlds drawn as the Galaxy 64 planet card: a band turning under a shading pass
-  sphereLightZ: 0.35,     // the star's light lifted toward the viewer, so a top-down world is not half dark
+  sphereLightZ: 0.25,     // the star's light lifted toward the viewer, so a top-down world is not half dark
   thrustAccel: 3000,      // AU/yr^2. The designer found 400 too slow at 200K; slider is log around this
   linearDamp: 0.9,        // settle per real second while off gravity. 0 = honest space
   aimEase: 24,            // how fast the nose swings to the cursor, per second
@@ -351,7 +361,7 @@ const DEFAULTS = {
   beltRadiusAU: 2.7,      // outside the pockets' influence (2.09 + 0.5)
   beltRestitution: 0.85,  // radial bounce
   styxEats: true,         // 'Styx sucks asteroids': Styx moves out and eats the belt
-  styxRadiusAU: 2.45,     // Styx's radius with styxEats on; its 0.5 AU reach then covers the belt
+  styxRadiusAU: 2.3,      // Styx's radius with styxEats on; its 0.5 AU reach then covers the belt
   styxEatYr: 0.15,        // sim years for a section inside the reach to be swallowed
   autoStabilise: true,    // burn back to a circular orbit after every shot
   stabiliseDoneAUyr: 0.05,// close enough: remaining velocity error that ends the burn
@@ -388,7 +398,8 @@ const POCKETS = [
 ].map(p => ({ name: p.name, a: p.a, x: STYX_R * Math.cos(p.a), y: STYX_R * Math.sin(p.a), color: "#b48cff" }));
 // Styx alone moves with the toggle; the other two stay. Called every frame and at reset.
 function layoutPockets() {
-  const r = S.styxEats ? S.styxRadiusAU : STYX_R;
+  for (const p of POCKETS) { const r = STYX_R * S.systemScale; p.x = r * Math.cos(p.a); p.y = r * Math.sin(p.a); }
+  const r = S.styxEats ? S.styxRadiusAU : STYX_R * S.systemScale;
   POCKETS[0].x = r * Math.cos(POCKETS[0].a); POCKETS[0].y = r * Math.sin(POCKETS[0].a);
 }
 
@@ -464,8 +475,16 @@ function orbitState(r, a, over) {
   return { x: STAR.x + r * Math.cos(a), y: STAR.y + r * Math.sin(a), vx: -v * Math.sin(a), vy: v * Math.cos(a) };
 }
 function derivePlanet(d) {
-  return { ...orbitState(d.r, d.a), id: d.id, name: d.name, sprite: d.sprite, mass: d.mass, drawR: d.drawR,
-           color: d.color, fragile: !!d.fragile, orbitR: d.r, struck: false, alive: true, trail: [], spin: Math.random() * TAU };
+  const r = d.r * S.systemScale;
+  return { ...orbitState(r, d.a), id: d.id, name: d.name, sprite: d.sprite, mass: d.mass, drawR: d.drawR,
+           color: d.color, fragile: !!d.fragile, orbitR: r, struck: false, alive: true, trail: [], spin: Math.random() * TAU };
+}
+// SYSTEM SIZE. One slider scales every authored radius: the orbits and the ship's ring
+// at reset, and the pockets, the belt, Styx's eating radius and the view live, all from
+// their defaults, so the table keeps its proportions and only its size changes.
+function applySystemScale() {
+  const k = S.systemScale;
+  S.beltRadiusAU = DEFAULTS.beltRadiusAU * k; S.styxRadiusAU = DEFAULTS.styxRadiusAU * k; S.viewRadiusAU = DEFAULTS.viewRadiusAU * k;
 }
 function ballR(b) { return b === STAR || b.id === "star" ? Math.max(b.drawR * S.ballScale, 0.1) : Math.max(b.drawR * S.ballScale, S.minBallAU); }
 function ballsLeft() { return (acb.mode === "attached" || acb.mode === "capturing" ? 1 : 0) + chamber.length + balls.length; }
@@ -473,9 +492,10 @@ function starR() { return ballR(STAR); }
 function contactList(list, star) { return star.alive ? list.concat([star]) : list; }
 
 function resetWorld() {
+  applySystemScale();
   bodies = PLANET_DEFS.map(derivePlanet);
   Object.assign(STAR, { x: 0, y: 0, vx: 0, vy: 0, alive: true, struck: false, trail: [], broken: false, brokenNoted: false });
-  const s = orbitState(SHIP_DEF.r, SHIP_DEF.a, SHIP_DEF.overSpeed);
+  const s = orbitState(SHIP_DEF.r * S.systemScale, SHIP_DEF.a, SHIP_DEF.overSpeed);
   ship = { ...s, nose: Math.atan2(s.vy, s.vx), trail: [] };
   // THE NOSE and THE BALLS are separate things. acb is the nose seat: attached (a ball
   // sits on it), capturing (one is winching in), empty (the ball was shot and is out
@@ -1057,7 +1077,7 @@ function simStep(h, offGravity) {
   if (beltI >= 0 || pocketAt(ship.x, ship.y, 0) || (STAR.alive && dist(ship.x, ship.y, STAR.x, STAR.y) < starR())) {
     score.deaths++; flash(ship.x, ship.y, 0.3, "#ffffff"); if (beltI >= 0) burst(ship.x, ship.y, 0.1, "#c8b090");
     note(beltI >= 0 ? "SHIP LOST: wrecked on the asteroid belt" : "SHIP LOST: RESPAWNING", "#ff5030");
-    const s = orbitState(SHIP_DEF.r, SHIP_DEF.a, SHIP_DEF.overSpeed);
+    const s = orbitState(SHIP_DEF.r * S.systemScale, SHIP_DEF.a, SHIP_DEF.overSpeed);
     Object.assign(ship, s); ship.nose = Math.atan2(s.vy, s.vx); ship.trail = [];
     if (acb.mode === "capturing") { balls.push({ type: acb.type, x: acb.x, y: acb.y, vx: 0, vy: 0, trail: [], dwell: 0, lock: 0 }); acb.mode = "empty"; acb.cap = null; }
     charging = false; charge = 0; drag = null; stab = null;
@@ -1092,11 +1112,13 @@ function thrustVector() {
   const mag = Math.hypot(fx, fy);
   return mag > 1e-9 ? [fx / mag, fy / mag] : null;
 }
+let curWarp = 0;   // this frame's time speed, for the engine cap
 function applyThrust(dtYr) {
   const f = thrustVector();
   if (!f) return;
-  ship.vx += f[0] * S.thrustAccel * dtYr;
-  ship.vy += f[1] * S.thrustAccel * dtYr;
+  const cap = curWarp > warpMid() ? warpMid() / curWarp : 1;   // see THE ENGINE AT HIGH TIME SPEED
+  ship.vx += f[0] * S.thrustAccel * dtYr * cap;
+  ship.vy += f[1] * S.thrustAccel * dtYr * cap;
 }
 const HULL_LEN = 0.06;   // AU, nose to the ACB's seat
 function noseSeat() {
@@ -1182,15 +1204,11 @@ function overrideStabiliser(why) {
 }
 // What the shot WOULD be right now, for the aim line: [dx, dy, power] or null.
 function pendingShot() {
-  if (acb.mode !== "attached") return null;
-  if (S.dragMode) {
-    if (!drag) return null;
-    const vx = drag.ax - mouse.sx, vy = drag.ay - mouse.sy;   // pull back, shoot forward
-    const len = Math.hypot(vx, vy);
-    if (len < 4) return [Math.cos(ship.nose), Math.sin(ship.nose), 0];
-    return [vx / len, vy / len, Math.min(1, len / S.dragMaxPx)];
-  }
-  return [Math.cos(ship.nose), Math.sin(ship.nose), charging ? charge : 1];
+  if (acb.mode !== "attached" || !drag) return null;
+  const vx = drag.ax - mouse.sx, vy = drag.ay - mouse.sy;   // pull back, shoot forward
+  const len = Math.hypot(vx, vy);
+  if (len < 4) return [Math.cos(ship.nose), Math.sin(ship.nose), 0];
+  return [vx / len, vy / len, Math.min(1, len / S.dragMaxPx)];
 }
 
 // ============================== THE CATCH =======================================
@@ -1467,23 +1485,27 @@ function frame(now) {
   }
   if (paused) { draw(realDt); return; }
 
+  // THE PAUSE. Shift holds time and the slider drops to the far left; a held drag holds
+  // time too. Release and the clock springs back to the game speed.
+  const timeHeld = keys.shift || !!drag;
   const SLIDE_RATE = 0.45;
-  if (keys.q) sliderT = Math.max(0, sliderT - SLIDE_RATE * realDt);
-  if (keys.e) sliderT = Math.min(1, sliderT + SLIDE_RATE * realDt);
-  if (S.driftMode && !keys.q && !keys.e) sliderT += (0.5 - sliderT) * Math.min(1, realDt * 3);
+  if (timeHeld) sliderT += (0 - sliderT) * Math.min(1, realDt * 8);
+  else {
+    if (keys.q) sliderT = Math.max(0, sliderT - SLIDE_RATE * realDt);
+    if (keys.e) sliderT = Math.min(1, sliderT + SLIDE_RATE * realDt);
+    if (S.driftMode && !keys.q && !keys.e) sliderT += (0.5 - sliderT) * Math.min(1, realDt * 3);
+  }
   sliderShown += (sliderT - sliderShown) * Math.min(1, realDt * 10);
-  const warp = warpNow();
+  const warp = timeHeld ? 0 : warpNow();
+  curWarp = warp;
 
   aimNose(realDt);
-  if (charging) charge = Math.min(1, charge + realDt / S.chargeSeconds);
 
   const thrusting = !!thrustVector();
   if (stab && thrusting) overrideStabiliser("engine");
-  if (stab && keys.shift) overrideStabiliser("zero gravity drift");
-  const offGravity = keys.shift || (thrusting && S.thrustAntigrav);
+  const offGravity = thrusting && S.thrustAntigrav;
 
-  const aiming = S.pauseWhileAiming && (charging || !!drag);   // time holds under the hand
-  const dtYr = aiming ? 0 : warp * realDt / SPY;
+  const dtYr = warp * realDt / SPY;
   const steps = dtYr > MAX_SUBSTEP_YR ? Math.min(MAX_SUBSTEPS, Math.ceil(dtYr / MAX_SUBSTEP_YR)) : 1;
   const h = dtYr / steps;
   let frozenAt = steps;
@@ -1582,7 +1604,9 @@ function drawSprite(key, sx, sy, R, img, alpha) {
 // drawImage onto the table, so the planets stay in the 2D canvas's own draw order. The
 // shading values are the lab's (card-lab.html), unchanged. No WebGL2: the flat sprites.
 const SPHERE = { gl: null, canvas: null, prog: null, u: {}, bands: {}, tex: {}, ok: false, tried: false };
-const SPHERE_SHADING = { wrap: 0.32, limb: 0.55, rim: 0.9, rimWidth: 0.28, spec: 0.22, ambient: 0.045 };
+// The lab's values, but with a HARD terminator (wrap 0.06 against the lab's 0.32) and
+// a darker night side: space has one light and no sky to fill the shadow.
+const SPHERE_SHADING = { wrap: 0.06, limb: 0.75, rim: 0.9, rimWidth: 0.28, spec: 0.22, ambient: 0.018 };
 const SPHERE_EXTENT = 1.12, SPHERE_HALO = 0.09;
 const BAND_W = 1024, BAND_H = 512;
 const WORLD_ATMO = { red: "#c9a84e", terra: "#7fb0e6" };   // level-01's atmosphereColor; Vera has none
@@ -2119,11 +2143,10 @@ function draw(realDt) {
     }
     cx.beginPath(); cx.moveTo(L, 0); cx.lineTo(-L * 0.55, L * 0.5); cx.lineTo(-L * 0.3, 0); cx.lineTo(-L * 0.55, -L * 0.5); cx.closePath();
     cx.fillStyle = "#4fc3f7"; cx.fill();
-    if (keys.shift) { cx.strokeStyle = "rgba(143,195,232,0.8)"; cx.lineWidth = 1.5; cx.beginPath(); cx.arc(0, 0, L * 1.3, 0, TAU); cx.stroke(); }
     cx.restore();
     // charge bar and the cue
     const p = pendingShot();
-    if (p && (charging || drag)) {
+    if (p && drag) {
       const [ax, ay] = worldToScreen(acb.x, acb.y);
       const len = 30 + p[2] * 90;
       cx.strokeStyle = "rgba(255,255,255,0.8)"; cx.lineWidth = 3; cx.beginPath();
@@ -2249,8 +2272,8 @@ function drawTimeBand(W, H) {
   g.addColorStop(0, "rgba(190,220,255,0.95)"); g.addColorStop(1, "rgba(120,170,255,0)");
   circle(bx, by, 16, g); circle(bx, by, 4, "#e8f0fa");
   cx.fillStyle = "rgba(160,185,215,0.8)"; cx.font = `12px "Share Tech Mono", monospace`; cx.textAlign = "center";
-  const w = warpNow();
-  cx.fillText(w < 1000 ? w.toFixed(0) + "x" : w < 1e6 ? (w / 1000).toFixed(0) + "K" : (w / 1e6).toFixed(1) + "M", W / 2, H - 64);
+  const w = warpNow(), held = keys.shift || !!drag;
+  cx.fillText(held ? "PAUSED" : w < 1000 ? w.toFixed(0) + "x" : w < 1e6 ? (w / 1000).toFixed(0) + "K" : (w / 1e6).toFixed(1) + "M", W / 2, H - 64);
   cx.textAlign = "left";
 }
 function drawHud(W, H) {
@@ -2260,20 +2283,19 @@ function drawHud(W, H) {
     ["SHOTS " + score.shots + "   FOULS " + score.fouls + "   POTTED " + score.potted + "/" + bodies.length +
      "   BALLS " + ballsLeft() + (score.starPotted ? "   SOLARIS POTTED" : ""), ballsLeft() <= 1 ? "#ff8c70" : "#cfe0ff"],
     ["T " + simYears.toFixed(2) + " yr" + (score.deaths ? "   SHIP LOST " + score.deaths : ""), "#9fb4cc"],
-    ["MODE " + (S.dragMode ? "DRAG (pull back)" : "CHARGE (hold LMB)") + "   Tab swaps", "#8fc3e8"],
     ["ACB " + (acb.mode === "attached" ? "ON THE NOSE" : acb.mode === "capturing" ? "WINCHING IN" :
               acb.mode === "empty" ? "OUT, get in its ring and press Space" + (chamber.length ? " (or Space loads the next)" : "") :
               score.failed ? "NONE LEFT" : chamber.length ? "DESTROYED, next loads in " + Math.max(0, S.respawnSeconds - acb.lostT).toFixed(1) + " s" : "DESTROYED, catch one")
      + (balls.length > 1 || (balls.length === 1 && acb.mode !== "empty") ? "   " + balls.length + " BALL" + (balls.length > 1 ? "S" : "") + " OUT" : ""),
      acb.mode === "attached" ? "#e8f0fa" : acb.mode === "lost" ? "#ff5030" : "#8fe8b0"],
     stab ? ["STABILISER burning, " + stab.err.toFixed(2) + " AU/yr to go.  WASD or Shift to override", "#e8b463"] : null,
-    S.pauseWhileAiming && (charging || drag) ? ["TIME HELD while aiming", "#8fc3e8"] : null,
+    keys.shift || drag ? ["TIME PAUSED" + (drag ? ": pull back, release to shoot" : ": hold LMB on the ball and pull back to aim"), "#8fc3e8"] : null,
   ].filter(Boolean);
   lines.forEach((l, i) => { cx.fillStyle = l[1]; cx.fillText(l[0], 14, 22 + i * 17); });
   notices.forEach((n, i) => { cx.fillStyle = colA(n.color, Math.min(1, (20 - n.t) / 4)); cx.fillText(n.text, 14, H - 20 - (notices.length - 1 - i) * 16); });
   renderChamber();
   cx.fillStyle = "rgba(120,140,170,0.6)"; cx.textAlign = "right";
-  cx.fillText("WASD fly  Shift drift  Q/E time  LMB shoot  Space catch / new ball  Tab mode  C camera  R reset  H panel", W - 14, H - 14);
+  cx.fillText("WASD fly  Shift pause  Q/E time  LMB drag to shoot  Space catch / new ball  C camera  R reset  H panel", W - 14, H - 14);
   cx.textAlign = "left";
   if (score.won) {
     cx.fillStyle = "rgba(5,7,13,0.6)"; cx.fillRect(W / 2 - 200, H / 2 - 50, 400, 90);
@@ -2335,7 +2357,6 @@ addEventListener("keydown", e => {
   if (e.target.tagName === "INPUT") return;
   if (intro) { skipIntro(); e.preventDefault(); return; }
   if (KEYMAP[e.code]) { keys[KEYMAP[e.code]] = true; e.preventDefault(); }
-  if (e.code === "Tab") { S.dragMode = !S.dragMode; charging = false; charge = 0; drag = null; saveSettings(); buildPanel(); e.preventDefault(); }
   if (e.code === "KeyC") { S.camFollow = !S.camFollow; saveSettings(); buildPanel(); }
   if (e.code === "KeyR") resetWorld();
   if (e.code === "KeyP") paused = !paused;
@@ -2349,101 +2370,36 @@ cv.addEventListener("mousemove", e => { mouse.sx = e.clientX; mouse.sy = e.clien
 cv.addEventListener("mousedown", e => {
   if (intro) { skipIntro(); return; }
   if (e.button !== 0 || acb.mode !== "attached") return;
-  if (S.dragMode) drag = { ax: e.clientX, ay: e.clientY };
-  else { charging = true; charge = 0; }
+  drag = { ax: e.clientX, ay: e.clientY };
 });
 addEventListener("mouseup", e => {
   if (e.button !== 0) return;
   const p = pendingShot();
-  if (S.dragMode && drag) { if (p && p[2] > 0.02) fireAcb(p[0], p[1], p[2]); drag = null; }
-  else if (charging) { if (p) fireAcb(p[0], p[1], Math.max(0.08, p[2])); charging = false; charge = 0; }
+  if (drag) { if (p && p[2] > 0.02) fireAcb(p[0], p[1], p[2]); drag = null; }
 });
 cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { cam.zoom = Math.max(0.4, Math.min(6, cam.zoom * Math.exp(-e.deltaY * 0.0012))); e.preventDefault(); }, { passive: false });
 
 // ============================== TEST PANEL ======================================
-const STORE_KEY = "galaxytable.v23";   // bumped: saved settings would otherwise hide the new default
+const STORE_KEY = "galaxytable.v24";   // bumped: saved settings would otherwise hide the new default
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
   catch { return { ...DEFAULTS }; }
 }
 function saveSettings() { try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); } catch {} }
 
+// THE PANEL, cut to the dials a designer reaches for. Everything else is still a
+// DEFAULTS entry and still tunable from the console (RIG.set), it is just not on screen.
 const PANEL = [
   ["h", "GALAXY TABLE SETTINGS"],
-  ["l", "gameSpeedK", "game speed (x1000 real time)", 20, 5000],   // log: room at the slow end
-  ["b", "driftMode", "clock returns to game speed when Q/E released"],
-  ["-"],
-  ["b", "dragMode", "aim by pulling back (off = hold to charge)  [Tab]"],
-  ["r", "shotPower", "shot strength", 1, 20, 0.5],
-  ["r", "chargeSeconds", "seconds to full charge", 0.3, 3, 0.1],
-  ["r", "dragMaxPx", "pull-back distance for full power (px)", 60, 500, 10],
-  ["r", "recoilFrac", "ship kickback on a shot", 0, 1, 0.05],
-  ["r", "captureLockoutS", "seconds after a shot before you can catch it", 0, 6, 0.25],
-  ["r", "inheritFrac", "how much ship speed bends the shot (0 = none, 1 = all)", 0, 1, 0.05],
-  ["b", "projections", "show where the shot will go"],
-  ["b", "pauseWhileAiming", "time holds while aiming (LMB down)"],
-  ["-"],
-  ["b", "animeMode", "Anime style pool ball trail"],
-  ["l", "animeSpeedAUyr", "flash speed", 200, 8000],
-  ["b", "flashTerminus", "flash terminus: the flash burns out by range (off = only a ball stops it)"],
-  ["r", "animeRangeAU", "flash range at full power (AU), with the terminus on", 0.5, 12, 0.1],
-  ["r", "animeHitstopMs", "impact frame (ms)", 0, 600, 10],
-  ["r", "animeTrailS", "trail lingers (s)", 0.2, 4, 0.1],
-  ["r", "animeImpactEnergy", "impact energy (x a normal shot)", 0.25, 4, 0.25],
-  ["-"],
-  ["b", "forceArrows", "show force arrows while aiming"],
-  ["b", "arrowNumbers", "show numbers on the arrows"],
-  ["r", "arrowPxPerAUyr", "arrow length per unit of speed (px)", 4, 40, 1],
-  ["r", "gravityHorizonYr", "gravity arrow looks ahead (years)", 0.02, 0.5, 0.01],
   ["b", "autoStabilise", "auto-correct the orbit after a shot"],
-  ["-"],
-  ["b", "beltOn", "asteroid belt on the rim (one-time cushions)"],
-  ["r", "beltRadiusAU", "belt radius (AU)", 2.3, 3.5, 0.05],
-  ["r", "beltRestitution", "belt bounciness", 0.2, 1, 0.05],
-  ["b", "beltKillsShip", "the belt wrecks the ship (gaps are safe)"],
-  ["b", "styxEats", "Styx sucks asteroids"],
-  ["r", "styxRadiusAU", "Styx's distance from the star when it does", 2.1, 2.8, 0.05],
-  ["r", "styxEatYr", "years for Styx to swallow a section", 0.02, 1, 0.01],
-  ["r", "stabiliseDoneAUyr", "how precise the orbit correction is (lower = tighter)", 0.01, 0.5, 0.01],
-  ["-"],
-  ["r", "acbMassRatio", "cue ball weight vs a planet (1 = same)", 0.2, 10, 0.1],
-  ["r", "restitution", "bounciness of hits (1 = full)", 0.2, 1, 0.05],
-  ["b", "planetsCollide", "struck planets can hit other planets"],
-  ["b", "acbFeelsWorlds", "planets bend the cue ball's path"],
-  ["-"],
-  ["b", "fauxSpheres", "planets as lit, turning spheres (Galaxy 64 card)"],
-  ["r", "sphereLightZ", "how much of a planet the star lights (0 = half)", 0, 2, 0.05],
   ["r", "ballScale", "planet size", 2, 20, 0.5],
-  ["r", "minBallAU", "smallest planet size", 0.02, 0.1, 0.005],
-  ["r", "acbRadiusAU", "cue ball size", 0.02, 0.1, 0.005],
-  ["r", "pocketRadiusAU", "pocket size", 0.05, 0.3, 0.01],
-  ["r", "pocketInfluenceAU", "pocket pull reach", 0.1, 1.2, 0.05],
-  ["r", "pocketMass", "pocket pull strength", 0.1, 2, 0.05],
-  ["-"],
-  ["r", "captureRadiusAU", "catch ring size", 0.05, 0.6, 0.01],
-  ["b", "autoCapture", "catch automatically when matched (off = Space catches)"],
-  ["r", "captureSpeed", "speed match for the automatic catch (higher = easier)", 0.5, 20, 0.25],
-  ["r", "captureDwellS", "seconds in the ring before catching", 0, 1.5, 0.05],
-  ["r", "captureSeconds", "seconds to reel the cue ball in", 0.2, 3, 0.05],
-  ["r", "respawnSeconds", "seconds until the next ball loads itself", 0, 10, 0.5],
-  ["-"],
-  ["r", "thermoEnergy", "thermonuclear hit (x a normal shot)", 1, 8, 0.25],
-  ["r", "gravPull", "gravitizer pull (solar masses)", 0.005, 0.2, 0.005],
-  ["r", "gravReachAU", "gravitizer reach (AU)", 0.1, 1.5, 0.05],
-  ["-"],
-  ["l", "thrustAccel", "engine power", 300, 30000],   // log: 3000 sits at the midpoint
-  ["r", "linearDamp", "how fast the ship slows when coasting (0 = never)", 0, 4, 0.05],
-  ["r", "aimEase", "how fast the nose turns to the mouse", 3, 60, 1],
-  ["b", "thrustAntigrav", "gravity switches off while the engine runs"],
-  ["r", "planetBoost", "planet gravity on the ship and cue ball", 100, 30000, 100],
-  ["-"],
-  ["b", "introFlyover", "mission briefing flyover at the start"],
+  ["r", "systemScale", "system size (distance between planets)", 1, 2.5, 0.05],
+  ["r", "gravPull", "gravitizer ball pull", 0.005, 0.2, 0.005],
+  ["l", "maxWarpM", "max time speed (millions x)", 1, 50],
+  ["b", "camFollow", "camera follows the ship  [C]"],
   ["r", "introFlyS", "briefing: seconds per body", 1, 10, 0.1],
   ["r", "introSlow", "briefing: slow-down past each body (0 = none, 1 = a stop)", 0, 1, 0.05],
-  ["r", "introPitchDeg", "briefing: camera tilt (90 = top-down)", 25, 90, 1],
-  ["b", "camFollow", "camera follows the ship  [C]"],
-  ["r", "viewRadiusAU", "how much of the table you see", 1.5, 5, 0.1],
 ];
 
 function fmtLog(v) { return v < 100 ? v.toFixed(1) : v.toFixed(0); }
@@ -2477,6 +2433,7 @@ function buildPanel() {
       } else S[k] = inp.type === "checkbox" ? inp.checked : parseFloat(inp.value);
       const v = document.getElementById("v_" + k);
       if (v) v.textContent = shown;
+      if (k === "systemScale") { resetWorld(); endIntro(); }   // the orbits are derived at reset
       saveSettings();
     });
   });
@@ -2521,7 +2478,7 @@ window.RIG = {
   override: (why) => overrideStabiliser(why),
   newBall: () => newBallNow(),
   space: () => spaceKey(),
-  charge: (v) => { charging = true; charge = v; },
+  charge: (v) => { drag = { ax: mouse.sx + Math.cos(ship.nose) * v * S.dragMaxPx, ay: mouse.sy + Math.sin(ship.nose) * v * S.dragMaxPx }; },   // a held drag of power v along the nose
   ease: (s) => easeGhost(s),
   frame: (dtMs) => { manualFrame = true; last = performance.now() - dtMs; frame(performance.now()); manualFrame = false; },
   setType: (i, t) => { if (i < 0) acb.type = t; else chamber[i] = t; },
