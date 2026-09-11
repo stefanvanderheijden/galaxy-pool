@@ -29,8 +29,9 @@
                    held all the way, and stays; Shift again (or E) and it springs back
     MOUSE          the nose follows the cursor, and the nose IS the shot: the aim line
                    is always drawn, faint, along it
-    LMB hold       LOCKS that direction; pull straight back from where you pressed for
-                   power, release to shoot. Time holds while LMB is down
+    LMB hold       the press takes the nose's direction; pull back from the press point
+                   for power and swing round it to pivot; release to shoot. Time holds
+                   while LMB is down, and a Shift pause ends when the shot goes
     Esc            cancel the aim
     After a shot that ball cannot be caught for captureLockoutS seconds (it has no
     catch ring until then; the ring appearing is the cue), and the ship takes half the shot's delta-v backwards, so it
@@ -64,7 +65,11 @@
   line solid white over a halo and loudest, struck worlds dashed in their own colour,
   the contact ring, the outcome markers (POTTED, INTO THE STAR, HITS THE SHIP), the
   grab bracket, the pull pointer with the power, the freeze vignette. The lines keep
-  this rig's length and easing, not 010's short horizon.
+  this rig's easing and run THREE years, much longer than 010's short horizon, so a
+  knocked world can be followed to its pocket (0.3 yr at the fine step, then 2.7 at a
+  step three times coarser). LMB up, the aim line is a faint thin dash; it is loud only
+  while you are pooling. The outcome labels and the aim caption are off by default
+  (panel: in-world labels); the outcome rings stay.
 
   THE ENGINE AT HIGH TIME SPEED. The engine burns in sim time, so at 5M a tap of W
   used to add 25x the velocity it adds at 200K, and the ship seemed to bolt. It was
@@ -323,6 +328,7 @@ const DEFAULTS = {
   acbFeelsWorlds: true,   // the ACB flies the game layer (boosted worlds) like the ship
   planetsCollide: true,   // struck worlds knock each other
   camFollow: false,       // C toggles: whole table, or glide after the ship
+  fateLabels: false,      // the forecast's outcome labels and the aim caption: off, it was clutter
   systemScale: 1,         // the table's size: every authored radius times this (orbits, pockets, belt, view)
   maxWarpM: 5,            // the time slider's right end, in millions x
   fauxSpheres: true,      // worlds drawn as the Galaxy 64 planet card: a band turning under a shading pass
@@ -518,8 +524,11 @@ function contactList(list, star) { return star.alive ? list.concat([star]) : lis
 
 function resetWorld() {
   applySystemScale();
-  bodies = PLANET_DEFS.map(derivePlanet);
+  // The star goes home FIRST: the worlds' orbits are derived around it, and after a rack
+  // where Solaris was struck or potted they were derived around where it had got to, so R
+  // racked the worlds out past the belt and they flew off the table.
   Object.assign(STAR, { x: 0, y: 0, vx: 0, vy: 0, alive: true, struck: false, trail: [], broken: false, brokenNoted: false });
+  bodies = PLANET_DEFS.map(derivePlanet);
   ship = { ...shipSpawn(), trail: [] };
   // THE NOSE and THE BALLS are separate things. acb is the nose seat: attached (a ball
   // sits on it), capturing (one is winching in), empty (the ball was shot and is out
@@ -1125,15 +1134,22 @@ function simStep(h, offGravity) {
   const shipPk = pocketAt(ship.x, ship.y, 0);
   if (!shipCause && shipPk) shipCause = "fell into " + shipPk.name;
   if (!shipCause && STAR.alive && dist(ship.x, ship.y, STAR.x, STAR.y) < starR() + SHIP_R) shipCause = "burned in Solaris";
-  if (!shipCause) for (const b of bodies) if (b.alive && dist(ship.x, ship.y, b.x, b.y) < ballR(b) + SHIP_R) { shipCause = "crashed into " + b.name; break; }
+  // a respawned hull has SHIP_SAFE_S of grace against worlds and balls (see below)
+  const safe = ship.safeT > 0;
+  if (!shipCause && !safe) for (const b of bodies) if (b.alive && dist(ship.x, ship.y, b.x, b.y) < ballR(b) + SHIP_R) { shipCause = "crashed into " + b.name; break; }
   for (const k of balls) {
     armCheck(k, ship.x, ship.y);
-    if (!shipCause && k.armed && dist(ship.x, ship.y, k.x, k.y) < S.acbRadiusAU + SHIP_R) shipCause = "hit by its own cue ball";
+    if (!shipCause && !safe && k.armed && dist(ship.x, ship.y, k.x, k.y) < S.acbRadiusAU + SHIP_R) shipCause = "hit by its own cue ball";
   }
   if (shipCause) {
     score.deaths++; flash(ship.x, ship.y, 0.3, "#ffffff"); burst(ship.x, ship.y, 0.12, "#ff8c70");
     note("SHIP LOST: " + shipCause, "#ff5030");
-    Object.assign(ship, shipSpawn()); ship.trail = [];
+    // THE DEATH LOOP, closed. The ball that killed you usually lies where you were, and
+    // the spawn is where you often are, so a respawn onto an armed ball died again every
+    // step until the ball drifted off. Every ball is DISARMED (it must leave the new hull
+    // before it can hit it) and the hull gets SHIP_SAFE_S of grace against worlds too.
+    Object.assign(ship, shipSpawn()); ship.trail = []; ship.safeT = SHIP_SAFE_S;
+    for (const k of balls) k.armed = false;
     if (acb.mode === "capturing") { balls.push({ type: acb.type, x: acb.x, y: acb.y, vx: 0, vy: 0, trail: [], dwell: 0, lock: 0 }); acb.mode = "empty"; acb.cap = null; }
     charging = false; charge = 0; drag = null; stab = null;
   }
@@ -1146,7 +1162,7 @@ function simStep(h, offGravity) {
 // chases the cursor except mid-drag, when it holds: a pull-back shot must not spin the
 // hull under the cue.
 function aimNose(realDt) {
-  if (drag) { ship.nose = Math.atan2(drag.dir[1], drag.dir[0]); return; }   // LMB down: the aim is locked
+  if (drag) { const p = pendingShot(); if (p) ship.nose = Math.atan2(p[1], p[0]); return; }   // LMB down: the nose is the pull's aim
   const [mwx, mwy] = screenToWorld(mouse.sx, mouse.sy);
   const adx = mwx - ship.x, ady = mwy - ship.y;
   if (adx * adx + ady * ady > 1e-12) {
@@ -1177,6 +1193,7 @@ function applyThrust(dtYr) {
 }
 const HULL_LEN = 0.06;   // AU, nose to the ACB's seat
 const SHIP_R = HULL_LEN * 0.6;   // the hull's collision radius: what a world or a cue ball has to touch
+const SHIP_SAFE_S = 1.5;          // real seconds of grace after a respawn, the hull blinking
 function noseSeat() {
   const nx = Math.cos(ship.nose), ny = Math.sin(ship.nose);
   const off = HULL_LEN + S.acbRadiusAU;
@@ -1229,6 +1246,7 @@ function fireAcb(dx, dy, power) {
   }
   balls.push(k);
   acb.mode = "empty";
+  timePaused = false;   // the shot goes, and so does a Shift pause: watch it leave
   ship.vx -= dx * dv * S.recoilFrac; ship.vy -= dy * dv * S.recoilFrac;
   score.shots++;
   flash(k.x, k.y, 0.08 + power * 0.15, "#ffffff");
@@ -1259,14 +1277,21 @@ function overrideStabiliser(why) {
   stab = null; note("STABILISER: manual override (" + why + ")", "#e8b463");
 }
 // What the shot WOULD be right now, for the aim line: [dx, dy, power] or null.
-// The shot as it stands: [dx, dy, power, held]. LMB down, the direction is the one
-// locked at the press and the power is the pull STRAIGHT BACK along it (sideways pull
-// does nothing). LMB up, it is the nose at the last power used: the always-on preview.
+// The shot as it stands: [dx, dy, power, held]. LMB down, it is the pull vector from the
+// press point: its length is the power and its angle the shot, so swinging the pointer
+// round the press point pivots the aim. A short pull has a noisy angle, so the direction
+// blends from the nose's at the press (drag.dir) to the pull's over AIM_BLEND_PX, and a
+// press never jumps the aim. LMB up, it is the nose at the last power used: the preview.
+const AIM_BLEND_PX = [8, 40];
 function pendingShot() {
   if (acb.mode !== "attached" || score.failed) return null;
   if (drag) {
-    const pull = ((drag.ax - mouse.sx) * drag.dir[0] + (drag.ay - mouse.sy) * drag.dir[1]) / S.dragMaxPx;
-    return [drag.dir[0], drag.dir[1], Math.max(0, Math.min(1, pull)), true];
+    const vx = drag.ax - mouse.sx, vy = drag.ay - mouse.sy, L = Math.hypot(vx, vy);
+    const w = Math.max(0, Math.min(1, (L - AIM_BLEND_PX[0]) / (AIM_BLEND_PX[1] - AIM_BLEND_PX[0])));
+    let dx = drag.dir[0] * (1 - w) + (L > 1e-9 ? vx / L : 0) * w, dy = drag.dir[1] * (1 - w) + (L > 1e-9 ? vy / L : 0) * w;
+    const n = Math.hypot(dx, dy);
+    if (n < 1e-9) { dx = drag.dir[0]; dy = drag.dir[1]; } else { dx /= n; dy /= n; }
+    return [dx, dy, Math.min(1, L / S.dragMaxPx), true];
   }
   return [Math.cos(ship.nose), Math.sin(ship.nose), lastPower, false];
 }
@@ -1473,10 +1498,13 @@ function buildGhost() {
     }
     k.flash = null;
   }
-  const H = 2e-4, N = 5000, AFTER_STAR = 1500;   // 0.3 yr of track after Solaris is struck
+  // THREE YEARS: 0.3 at the fine step, where the shot and its contacts are, then 2.7 at a
+  // step three times coarser, where a knocked world is only coasting to its pocket or not
+  const H0 = 2e-4, H1 = 6e-4, NEAR = 1500, N = NEAR + 4500, AFTER_STAR = 1500;   // AFTER_STAR: 0.3 yr of knock-on track after Solaris is struck
   let starStruckAt = gstar.struck ? 0 : Infinity;
   if (gstar.struck || (pending && out.hit && track.has("star"))) starStruckAt = 0;
   for (let i = 0; i < N; i++) {
+    const H = i < NEAR ? H0 : H1;
     stepWorlds(gb, H, gstar);
     const live = sim.filter(k => !k.dead);
     for (const k of live) gameGravity(k, gb, H, S.acbFeelsWorlds, gstar);
@@ -1515,7 +1543,7 @@ function buildGhost() {
       if (k.armed && dist(k.x, k.y, sx0, sy0) < S.acbRadiusAU + SHIP_R) { k.dead = true; if (k === pending) addFate("ship", sx0, sy0, null, true); }
     }
     if (!shipFate) for (const b of gb.concat([gstar])) if (b.alive && dist(b.x, b.y, sx0, sy0) < (b === gstar ? starR() : ballR(b)) + SHIP_R) { addFate("ship", sx0, sy0, b.name); break; }
-    if (i % 8 === 0) {
+    if (i < NEAR ? i % 8 === 0 : i % 3 === 0) {   // about the same spacing on both steps
       for (const k of sim) if (!k.dead) k.pts.push({ x: k.x, y: k.y });
       const cut = i > starStruckAt + AFTER_STAR;
       for (const b of gb.concat([gstar])) { const t = track.get(b.id); if (t && b.alive && !(cut && !t.direct)) t.pts.push({ x: b.x, y: b.y }); }
@@ -1533,8 +1561,8 @@ function buildGhost() {
 // only bending, 2.5/s once Solaris is struck in the forecast and the future is chaotic,
 // so what the eye sees is the shot's tendency and not every frame's throw of the dice.
 // The cue ball's own line is not eased: the hand is aiming it.
-const GHOST_N = 120;
-const FORECAST_IDLE = 0.4;   // the aim line's strength when LMB is up: always there, loud only under the hand
+const GHOST_N = 480;   // three years of a looping track needs the points
+const FORECAST_IDLE = 0.25;   // the aim line's strength when LMB is up: always there, loud only under the hand
 const ghostShown = new Map();   // id -> the eased points
 function resample(pts, n) {
   const out = [];
@@ -1610,6 +1638,7 @@ function frame(now) {
     ship.vx *= k; ship.vy *= k;
   }
 
+  if (ship.safeT > 0) ship.safeT = Math.max(0, ship.safeT - realDt);
   if (acb.mode === "attached") placeAcbOnNose();
   checkCapture(realDt);
   stepCapture(realDt);
@@ -2081,7 +2110,7 @@ function strokePtsFade(pts, color, alpha, width, dash) {
   const CH = 12, n = pts.length;
   for (let i = 0; i + 1 < n; i += CH) {
     const k = i / Math.max(1, n - 1);
-    strokePts(pts.slice(i, Math.min(n, i + CH + 1)), color, alpha * (1 - k * k), width, dash);
+    strokePts(pts.slice(i, Math.min(n, i + CH + 1)), color, alpha * (1 - 0.5 * k), width, dash);   // the far end at half: still readable
   }
 }
 function strokePts(pts, color, alpha, width, dash) {
@@ -2173,8 +2202,13 @@ function draw(realDt) {
       // times, and all of it loud drew a web across the table. The length is all still here.
       const cut = ghost.bankAt != null ? ghost.bankAt + 1 : ghost.pending.length;
       const leg = ghost.pending.slice(0, cut), rest = ghost.pending.slice(Math.max(0, cut - 1));
-      strokePts(leg, "#8fe8b0", 0.16 * m, 6); strokePts(leg, "#ffffff", 0.95 * m, 2);
-      if (rest.length > 1) strokePts(rest, "#ffffff", 0.3 * m, 1, [4, 6]);
+      if (drag) {                                   // pooling: loud
+        strokePts(leg, "#8fe8b0", 0.16, 6); strokePts(leg, "#ffffff", 0.95, 2);
+        if (rest.length > 1) strokePts(rest, "#ffffff", 0.3, 1, [4, 6]);
+      } else {                                      // just looking: a faint thin dash
+        strokePts(leg, "#ffffff", 0.28, 1, [3, 6]);
+        if (rest.length > 1) strokePts(rest, "#ffffff", 0.1, 1, [3, 6]);
+      }
     }
     if (ghost.hit) {
       const [sx, sy] = worldToScreen(ghost.hit.x, ghost.hit.y);
@@ -2250,7 +2284,7 @@ function draw(realDt) {
       cx.moveTo(-lon * L * 0.6, lat * L * 0.5); cx.lineTo(-lon * L * (1.2 + Math.random() * 0.4), lat * L * (0.9 + Math.random() * 0.3)); cx.stroke();
     }
     cx.beginPath(); cx.moveTo(L, 0); cx.lineTo(-L * 0.55, L * 0.5); cx.lineTo(-L * 0.3, 0); cx.lineTo(-L * 0.55, -L * 0.5); cx.closePath();
-    cx.fillStyle = "#4fc3f7"; cx.fill();
+    cx.fillStyle = ship.safeT > 0 && Math.floor(performance.now() / 110) % 2 ? "rgba(79,195,247,0.3)" : "#4fc3f7"; cx.fill();
     cx.restore();
     // charge bar and the cue
     const p = pendingShot();
@@ -2270,8 +2304,10 @@ function draw(realDt) {
         cx.beginPath(); cx.moveTo(qx - uy * arm, qy + ux * arm); cx.lineTo(qx, qy); cx.lineTo(qx + uy * arm, qy - ux * arm); cx.stroke();
       }
       cx.lineCap = "butt";
-      cx.fillStyle = "rgba(255,255,255,0.95)"; cx.font = `10px "Share Tech Mono", monospace`; cx.textAlign = "center";
-      cx.fillText("PULLING BACK: RELEASE TO SHOOT", sx, sy - BR - 12); cx.textAlign = "left";
+      if (S.fateLabels) {
+        cx.fillStyle = "rgba(255,255,255,0.95)"; cx.font = `10px "Share Tech Mono", monospace`; cx.textAlign = "center";
+        cx.fillText("PULLING BACK: RELEASE TO SHOOT", sx, sy - BR - 12); cx.textAlign = "left";
+      }
     }
   }
   // flashes
@@ -2306,6 +2342,7 @@ function drawFate(f, m) {
   const c = a => `rgba(${col[0]},${col[1]},${col[2]},${a})`;
   circle(sx, sy, 12, null, `rgba(5,7,13,${0.85 * m})`, 4);
   circle(sx, sy, 12, null, c(m), 2);
+  if (!S.fateLabels) return;
   const who = f.cue ? "CUE BALL" : (f.name || "").toUpperCase();
   const text = who + (f.kind === "pot" ? " POTTED" : f.kind === "star" ? " INTO THE STAR" : " HITS THE SHIP");
   cx.font = `9px "Share Tech Mono", monospace`; cx.textAlign = "center";
@@ -2408,13 +2445,24 @@ function drawHud(W, H) {
      + (balls.length > 1 || (balls.length === 1 && acb.mode !== "empty") ? "   " + balls.length + " BALL" + (balls.length > 1 ? "S" : "") + " OUT" : ""),
      acb.mode === "attached" ? "#e8f0fa" : acb.mode === "lost" ? "#ff5030" : "#8fe8b0"],
     stab ? ["STABILISER burning, " + stab.err.toFixed(2) + " AU/yr to go.  WASD or Shift to override", "#e8b463"] : null,
-    timePaused || drag ? ["TIME PAUSED" + (drag ? ": aim locked, pull straight back for power, release to shoot" : ".  Shift resumes.  Hold LMB to lock the aim"), "#8fc3e8"] : null,
+    timePaused || drag ? ["TIME PAUSED" + (drag ? ": pull back for power, swing round to pivot, release to shoot" : ".  Shift resumes.  Hold LMB to aim"), "#8fc3e8"] : null,
   ].filter(Boolean);
   lines.forEach((l, i) => { cx.fillStyle = l[1]; cx.fillText(l[0], 14, 22 + i * 17); });
   notices.forEach((n, i) => { cx.fillStyle = colA(n.color, Math.min(1, (20 - n.t) / 4)); cx.fillText(n.text, 14, H - 20 - (notices.length - 1 - i) * 16); });
   renderChamber();
-  cx.fillStyle = "rgba(120,140,170,0.6)"; cx.textAlign = "right";
-  cx.fillText("WASD fly  Shift pause on/off  Q/E time  hold LMB: lock aim, pull back, release  Space catch / new ball  C camera  R reset  H panel", W - 14, H - 14);
+  // THE CONTROLS: a list at the bottom right, on its own plate so it reads over the table
+  const CONTROLS = [["WASD", "fly"], ["MOUSE", "aim: the nose is the shot"], ["LMB hold", "pull back for power, swing to pivot"],
+                    ["LMB release", "shoot"], ["SHIFT", "pause on / off"], ["Q / E", "slower / faster time"],
+                    ["SPACE", "catch a ball / load the next"], ["C", "camera"], ["R", "rack again"], ["H", "hide the settings"]];
+  cx.font = `11px "Share Tech Mono", monospace`;
+  const lh = 15, pw = 100 + Math.max(...CONTROLS.map(c => cx.measureText(c[1]).width)) + 14, ph = CONTROLS.length * lh + 12, px0 = W - pw - 14, py0 = H - ph - 14;
+  cx.fillStyle = "rgba(8,12,22,0.85)"; cx.fillRect(px0, py0, pw, ph);
+  cx.strokeStyle = "#2a3a55"; cx.lineWidth = 1; cx.strokeRect(px0 + 0.5, py0 + 0.5, pw - 1, ph - 1);
+  CONTROLS.forEach(([k, v], i) => {
+    const y = py0 + 17 + i * lh;
+    cx.fillStyle = "#e8f0fa"; cx.fillText(k, px0 + 10, y);
+    cx.fillStyle = "#9fb4cc"; cx.fillText(v, px0 + 100, y);
+  });
   cx.textAlign = "left";
   if (score.won) {
     cx.fillStyle = "rgba(5,7,13,0.6)"; cx.fillRect(W / 2 - 200, H / 2 - 50, 400, 90);
@@ -2492,7 +2540,7 @@ cv.addEventListener("mousemove", e => { mouse.sx = e.clientX; mouse.sy = e.clien
 cv.addEventListener("mousedown", e => {
   if (intro) { skipIntro(); return; }
   if (e.button !== 0 || acb.mode !== "attached") return;
-  // LOCK the direction the nose already points along; from here the drag is power only
+  // the press takes the nose's direction; from here the pull sets power and can pivot
   drag = { ax: e.clientX, ay: e.clientY, dir: [Math.cos(ship.nose), Math.sin(ship.nose)] };
 });
 addEventListener("mouseup", e => {
@@ -2504,7 +2552,7 @@ cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { cam.zoom = Math.max(0.4, Math.min(6, cam.zoom * Math.exp(-e.deltaY * 0.0012))); e.preventDefault(); }, { passive: false });
 
 // ============================== TEST PANEL ======================================
-const STORE_KEY = "galaxytable.v25";   // bumped: saved settings would otherwise hide the new default
+const STORE_KEY = "galaxytable.v26";   // bumped: saved settings would otherwise hide the new default
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
   catch { return { ...DEFAULTS }; }
@@ -2520,6 +2568,7 @@ const PANEL = [
   ["r", "gravPull", "gravitizer ball pull", 0.005, 0.2, 0.005],
   ["l", "maxWarpM", "max time speed (millions x)", 1, 50],
   ["b", "camFollow", "camera follows the ship  [C]"],
+  ["b", "fateLabels", "in-world labels (POTTED, HITS THE SHIP, aim caption)"],
   ["r", "introFlyS", "briefing: seconds per body", 1, 10, 0.1],
   ["r", "introSlow", "briefing: slow-down past each body (0 = none, 1 = a stop)", 0, 1, 0.05],
 ];
