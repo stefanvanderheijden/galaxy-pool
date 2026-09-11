@@ -29,9 +29,13 @@
                    held all the way, and stays; Shift again (or E) and it springs back
     MOUSE          the nose follows the cursor, and the nose IS the shot: the aim line
                    is always drawn, faint, along it
-    LMB hold       the press takes the nose's direction; pull back from the press point
-                   for power and swing round it to pivot; release to shoot. Time holds
-                   while LMB is down, and a Shift pause ends when the shot goes
+    LMB hold       two aim modes, Tab swaps them. HOLD TO POWER UP (the default): power
+                   rises over chargeSeconds while the nose keeps following the cursor,
+                   release to shoot. DRAW BACK: the press takes the nose's direction,
+                   pull back from the press point for power and swing round it to
+                   pivot, release to shoot. Either way time holds while LMB is down,
+                   and a Shift pause ends when the shot goes
+    Tab            swap HOLD TO POWER UP / DRAW BACK
     RMB            TELEPORT toward the pointer, up to the width of Red's ring (1.1 AU
                    on the default table), keeping the ship's velocity; 2 s to recharge
     Esc            cancel the aim
@@ -72,8 +76,8 @@
   step three times coarser). LMB up, the aim line is a faint thin dash; it is loud only
   while you are pooling. The outcome labels and the aim caption are off by default
   (panel: in-world labels). Since trimmed further: no grab bracket, no contact ring, and
-  the only ring left on the table is the one on a pocket, where a world or the cue ball
-  goes in. The STRUCK WORLD'S line is the thick one and the cue ball's the thin one,
+  the rings left on the table are the one on a pocket, where a world or the cue ball
+  goes in, and one CONTACT RING where the cue ball first touches a planet. The STRUCK WORLD'S line is the thick one and the cue ball's the thin one,
   because the question the forecast answers is where the world goes. LMB up, the
   forecast is rebuilt every other frame: it is being looked at, not aimed.
 
@@ -327,7 +331,7 @@ const DEFAULTS = {
   introFlyS: 4.6,         // seconds per body, whatever the hop: the camera never stops
   introSlow: 0.45,        // slow-down past a body: speed there is (1 - this) of the mean
   introPitchDeg: 52,      // camera pitch below horizontal during the flyover
-  dragMode: true,         // the one aim mode: press on the ball, pull back, release
+  dragMode: false,        // false: HOLD TO POWER UP, true: DRAW BACK. Tab swaps
   thrustAntigrav: true,   // the drive lets go of gravity while it burns (hyperwarp 2)
   driftMode: true,        // the time slider springs home to 1M when released
   projections: true,      // the aim line and every struck world's forecast
@@ -1217,7 +1221,7 @@ function placeAcbOnNose() {
 // recharge. It lands honestly: on a world, a pocket, the star or the rocks, it dies.
 function teleportRange() { return 2 * PLANET_DEFS[0].r * S.systemScale; }
 function teleportTo(sx, sy) {
-  if (score.failed || drag || intro) return;
+  if (score.failed || aiming() || intro) return;
   if (teleportCd > 0) { note("TELEPORT RECHARGING: " + teleportCd.toFixed(1) + " s", "#8fc3e8"); return; }
   const [wx, wy] = screenToWorld(sx, sy);
   const dx = wx - ship.x, dy = wy - ship.y, d = Math.hypot(dx, dy);
@@ -1309,8 +1313,10 @@ function overrideStabiliser(why) {
 // blends from the nose's at the press (drag.dir) to the pull's over AIM_BLEND_PX, and a
 // press never jumps the aim. LMB up, it is the nose at the last power used: the preview.
 const AIM_BLEND_PX = [8, 40];
+function aiming() { return !!drag || charging; }   // LMB is down on a shot, in either mode
 function pendingShot() {
   if (acb.mode !== "attached" || score.failed) return null;
+  if (charging) return [Math.cos(ship.nose), Math.sin(ship.nose), charge, true];   // HOLD TO POWER UP: the nose aims
   if (drag) {
     const vx = drag.ax - mouse.sx, vy = drag.ay - mouse.sy, L = Math.hypot(vx, vy);
     const w = Math.max(0, Math.min(1, (L - AIM_BLEND_PX[0]) / (AIM_BLEND_PX[1] - AIM_BLEND_PX[0])));
@@ -1509,6 +1515,7 @@ function buildGhost() {
     }
     if (hit) {
       if (k === pending) out.hit = { x: k.x, y: k.y };
+      if (k === pending && hit.id !== "star" && !out.planetHit) out.planetHit = { x: k.x, y: k.y };
       const [ivx, ivy] = impactVelocity(k); k.vx = ivx; k.vy = ivy;
       const dx = hit.x - k.x, dy = hit.y - k.y, d = Math.hypot(dx, dy) || 1, R = S.acbRadiusAU + ballR(hit);
       k.x = hit.x - dx / d * R * 0.995; k.y = hit.y - dy / d * R * 0.995;
@@ -1546,6 +1553,7 @@ function buildGhost() {
     for (const e of events) {
       if (e.kind === "burned") { if (e.ball === pending) addFate("star", e.x, e.y, null, true); continue; }
       if (!out.hit && pending && !pending.dead && dist(e.x, e.y, pending.x, pending.y) < 0.2) out.hit = { x: e.x, y: e.y };
+      if (!out.planetHit && pending && e.ball === pending && e.b && e.b.id !== "star") out.planetHit = { x: pending.x, y: pending.y };
       // struck by the cue ball: a direct line. Struck by another body (a world the moving
       // star ploughed into): secondary, drawn thinner and shorter, because a strike on
       // Solaris sends the whole rack chaotic and a year of that is noise, not a forecast
@@ -1631,7 +1639,7 @@ function frame(now) {
 
   // THE PAUSE. Shift TOGGLES it and the slider drops to the far left, as if Q were held
   // all the way; a held aim holds time too. Off again, the clock springs back.
-  const timeHeld = timePaused || !!drag;
+  const timeHeld = timePaused || aiming();
   freezeShown += ((timeHeld ? 1 : 0) - freezeShown) * Math.min(1, realDt * 8);
   const SLIDE_RATE = 0.45;
   if (timeHeld) sliderT += (0 - sliderT) * Math.min(1, realDt * 8);
@@ -1645,6 +1653,7 @@ function frame(now) {
   curWarp = warp;
 
   aimNose(realDt);
+  if (charging) charge = Math.min(1, charge + realDt / S.chargeSeconds);   // real seconds: time is held
 
   const thrusting = !!thrustVector();
   if (stab && thrusting) overrideStabiliser("engine");
@@ -1679,7 +1688,7 @@ function frame(now) {
   // LMB up, the forecast is rebuilt every other frame (it is being looked at, not aimed,
   // and the build is the frame's biggest cost); under the hand, every frame
   ghostTick ^= 1;
-  if (S.projections) { if (drag || !ghost || ghostTick) buildGhost(); easeGhost(realDt); } else ghost = null;
+  if (S.projections) { if (aiming() || !ghost || ghostTick) buildGhost(); easeGhost(realDt); } else ghost = null;
 
   const tx = S.camFollow ? ship.x : ORIGIN.x, ty = S.camFollow ? ship.y : ORIGIN.y;
   cam.x += (tx - cam.x) * Math.min(1, realDt * 4);
@@ -2222,7 +2231,7 @@ function draw(realDt) {
   // lengths are this rig's own (a year, eased), not 010's short horizon. LMB up, the whole
   // forecast is drawn at FORECAST_IDLE of its strength: always there, loud under the hand.
   if (ghost) {
-    const m = drag ? 1 : FORECAST_IDLE;
+    const m = aiming() ? 1 : FORECAST_IDLE;
     for (const w of ghost.worlds) if (!w.direct) strokePtsFade(w.shown || w.pts, w.color, 0.28 * m, 1, [3, 7]);
     for (const pts of ghost.balls) strokePts(pts, "#ffffff", 0.22 * m, 1, [2, 7]);
     for (const w of ghost.worlds) if (w.direct) strokePtsFade(w.shown || w.pts, w.color, 0.85 * m, 3, [9, 5]);   // the struck world: the thick line
@@ -2232,13 +2241,18 @@ function draw(realDt) {
       // times, and all of it loud drew a web across the table. The length is all still here.
       const cut = ghost.bankAt != null ? ghost.bankAt + 1 : ghost.pending.length;
       const leg = ghost.pending.slice(0, cut), rest = ghost.pending.slice(Math.max(0, cut - 1));
-      if (drag) {                                   // pooling: loud
+      if (aiming()) {                               // pooling: loud
         strokePts(leg, "#ffffff", 0.9, 1.2);        // the cue ball: the thin line
         if (rest.length > 1) strokePts(rest, "#ffffff", 0.3, 1, [4, 6]);
       } else {                                      // just looking: a faint thin dash
         strokePts(leg, "#ffffff", 0.45, 1, [3, 6]);
         if (rest.length > 1) strokePts(rest, "#ffffff", 0.18, 1, [3, 6]);
       }
+    }
+    // THE CONTACT RING: where the cue ball first touches a planet, and nowhere else
+    if (ghost.planetHit) {
+      const q = worldToScreen(ghost.planetHit.x, ghost.planetHit.y);
+      if (q) { circle(q[0], q[1], 9, null, `rgba(255,255,255,${0.95 * m})`, 2); circle(q[0], q[1], 2.5, `rgba(255,255,255,${0.95 * m})`); }
     }
     for (const f of ghost.fates) drawFate(f, m);
     if (ghost.terminus) {
@@ -2318,7 +2332,7 @@ function draw(realDt) {
     }
     // charge bar and the cue
     const p = pendingShot();
-    if (p && drag) {
+    if (p && aiming()) {
       const [ax, ay] = worldToScreen(acb.x, acb.y);
       const len = 30 + p[2] * 90;
       cx.strokeStyle = "rgba(255,255,255,0.8)"; cx.lineWidth = 3; cx.beginPath();
@@ -2453,7 +2467,7 @@ function drawTimeBand(W, H) {
   g.addColorStop(0, "rgba(190,220,255,0.95)"); g.addColorStop(1, "rgba(120,170,255,0)");
   circle(bx, by, 16, g); circle(bx, by, 4, "#e8f0fa");
   cx.fillStyle = "rgba(160,185,215,0.8)"; cx.font = `12px "Share Tech Mono", monospace`; cx.textAlign = "center";
-  const w = warpNow(), held = timePaused || !!drag;
+  const w = warpNow(), held = timePaused || aiming();
   cx.fillText(held ? "PAUSED" : w < 1000 ? w.toFixed(0) + "x" : w < 1e6 ? (w / 1000).toFixed(0) + "K" : (w / 1e6).toFixed(1) + "M", W / 2, H - 64);
   cx.textAlign = "left";
 }
@@ -2470,13 +2484,14 @@ function drawHud(W, H) {
      + (balls.length > 1 || (balls.length === 1 && acb.mode !== "empty") ? "   " + balls.length + " BALL" + (balls.length > 1 ? "S" : "") + " OUT" : ""),
      acb.mode === "attached" ? "#e8f0fa" : acb.mode === "lost" ? "#ff5030" : "#8fe8b0"],
     stab ? ["STABILISER burning, " + stab.err.toFixed(2) + " AU/yr to go.  WASD or Shift to override", "#e8b463"] : null,
-    timePaused || drag ? ["TIME PAUSED" + (drag ? ": pull back for power, swing round to pivot, release to shoot" : ".  Shift resumes.  Hold LMB to aim"), "#8fc3e8"] : null,
+    ["AIM " + (S.dragMode ? "DRAW BACK" : "HOLD TO POWER UP") + "   Tab swaps", "#8fc3e8"],
+    timePaused || aiming() ? ["TIME PAUSED" + (drag ? ": pull back for power, swing round to pivot, release to shoot" : charging ? ": powering up, the nose aims, release to shoot" : ".  Shift resumes.  Hold LMB to aim"), "#8fc3e8"] : null,
   ].filter(Boolean);
   lines.forEach((l, i) => { cx.fillStyle = l[1]; cx.fillText(l[0], 14, 22 + i * 17); });
   notices.forEach((n, i) => { cx.fillStyle = colA(n.color, Math.min(1, (20 - n.t) / 4)); cx.fillText(n.text, 14, H - 20 - (notices.length - 1 - i) * 16); });
   renderChamber();
   // THE CONTROLS: a list at the bottom right, on its own plate so it reads over the table
-  const CONTROLS = [["WASD", "fly"], ["MOUSE", "aim: the nose is the shot"], ["LMB hold", "pull back for power, swing to pivot"],
+  const CONTROLS = [["WASD", "fly"], ["MOUSE", "aim: the nose is the shot"], ["LMB hold", S.dragMode ? "pull back for power, swing to pivot" : "power up, the nose aims"], ["TAB", S.dragMode ? "swap to hold to power up" : "swap to draw back"],
                     ["LMB release", "shoot"], ["RMB", "teleport, short range, 2 s recharge"], ["SHIFT", "pause on / off"], ["Q / E", "slower / faster time"],
                     ["SPACE", "catch a ball / load the next"], ["C", "camera"], ["R", "rack again"], ["H", "hide the settings"]];
   cx.font = `11px "Share Tech Mono", monospace`;
@@ -2553,6 +2568,10 @@ addEventListener("keydown", e => {
   if ((e.code === "ShiftLeft" || e.code === "ShiftRight") && !e.repeat) { timePaused = !timePaused; note(timePaused ? "TIME PAUSED" : "TIME RESUMED", "#8fc3e8"); }
   if (e.code === "KeyE" && timePaused) { timePaused = false; note("TIME RESUMED", "#8fc3e8"); }
   if (e.code === "KeyC") { S.camFollow = !S.camFollow; saveSettings(); buildPanel(); }
+  if (e.code === "Tab") {
+    S.dragMode = !S.dragMode; charging = false; charge = 0; drag = null; saveSettings();
+    note("AIM: " + (S.dragMode ? "DRAW BACK" : "HOLD TO POWER UP"), "#8fc3e8"); e.preventDefault();
+  }
   if (e.code === "KeyR") resetWorld();
   if (e.code === "KeyP") paused = !paused;
   if (e.code === "KeyH") { const p = document.getElementById("panel"); p.style.display = p.style.display === "none" ? "" : "none"; }
@@ -2566,19 +2585,21 @@ cv.addEventListener("mousedown", e => {
   if (intro) { skipIntro(); return; }
   if (e.button === 2) { teleportTo(e.clientX, e.clientY); return; }
   if (e.button !== 0 || acb.mode !== "attached") return;
-  // the press takes the nose's direction; from here the pull sets power and can pivot
+  if (!S.dragMode) { charging = true; charge = 0; return; }   // HOLD TO POWER UP
+  // DRAW BACK: the press takes the nose's direction; from here the pull sets power and can pivot
   drag = { ax: e.clientX, ay: e.clientY, dir: [Math.cos(ship.nose), Math.sin(ship.nose)] };
 });
 addEventListener("mouseup", e => {
   if (e.button !== 0) return;
   const p = pendingShot();
   if (drag) { if (p && p[2] > 0.02) { lastPower = p[2]; fireAcb(p[0], p[1], p[2]); } drag = null; }
+  else if (charging) { const pw = Math.max(0.08, charge); if (p) { lastPower = pw; fireAcb(p[0], p[1], pw); } charging = false; charge = 0; }
 });
 cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { cam.zoom = Math.max(0.4, Math.min(6, cam.zoom * Math.exp(-e.deltaY * 0.0012))); e.preventDefault(); }, { passive: false });
 
 // ============================== TEST PANEL ======================================
-const STORE_KEY = "galaxytable.v27";   // bumped: saved settings would otherwise hide the new default
+const STORE_KEY = "galaxytable.v28";   // bumped: saved settings would otherwise hide the new default
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
   catch { return { ...DEFAULTS }; }
