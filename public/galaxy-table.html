@@ -25,12 +25,13 @@
     W / S          drive forward / back along the nose
     A / D          strafe left / right of the nose
     Q / E hold     time slider, continuous 1x..max time speed (panel)
-    Shift hold     PAUSE TIME: the slider drops to the far left, the table is still,
-                   and you take your shot on it. Release and the clock springs back
-    LMB hold+drag  aim: press on the ball and pull back, further back is more power,
-                   release to shoot the other way. Time holds while the drag is held,
-                   Shift or not. This is the one aim mode; there is no other
-    Esc            cancel a drag
+    Shift          PAUSE TIME, a toggle: the slider goes to the far left as if Q were
+                   held all the way, and stays; Shift again (or E) and it springs back
+    MOUSE          the nose follows the cursor, and the nose IS the shot: the aim line
+                   is always drawn, faint, along it
+    LMB hold       LOCKS that direction; pull straight back from where you pressed for
+                   power, release to shoot. Time holds while LMB is down
+    Esc            cancel the aim
     After a shot that ball cannot be caught for captureLockoutS seconds (it has no
     catch ring until then; the ring appearing is the cue), and the ship takes half the shot's delta-v backwards, so it
     leaves the ring rather than catching its own shot.
@@ -50,7 +51,20 @@
   velocity it has, which is how you settle into a new orbit, or fall into the star. The
   settle damping (linearDamp) is the same feel dial with the same warning: it is not
   physics, it is what stops you spending the whole game cancelling your last input.
-  Zero gravity drift is gone; Shift is the pause now.
+  ZEROGRAV FREEFLIGHT is always engaged, and the log says so at the start: the ship feels
+  no gravity at all, the star's, the worlds', the pockets' or a gravitizer's. It sits
+  where you leave it, WASD moves it, the settle brings it to rest. So a shot takes
+  nothing from the ship's speed (the ball leaves at the cue's velocity alone, which is
+  why the force arrows went: there was nothing left for them to explain), the stabiliser
+  has no orbit to correct and is off, and the rack coming round is a hazard: THE SHIP
+  DIES on a world, on its own cue ball (once the ball has left the nose), on the star, in
+  a pocket and on the belt. It spawns at rest between Terra's and Vera's rings.
+
+  THE AIM GRAPHICS are Geometry Pool's (the gallery's 010, built by the team): the cue
+  line solid white over a halo and loudest, struck worlds dashed in their own colour,
+  the contact ring, the outcome markers (POTTED, INTO THE STAR, HITS THE SHIP), the
+  grab bracket, the pull pointer with the power, the freeze vignette. The lines keep
+  this rig's length and easing, not 010's short horizon.
 
   THE ENGINE AT HIGH TIME SPEED. The engine burns in sim time, so at 5M a tap of W
   used to add 25x the velocity it adds at 200K, and the ship seemed to bolt. It was
@@ -82,7 +96,7 @@
   the ship and the ACB inside their influence radius. A world only feels them once
   struck, so the rack stays an authored set of rings until a shot breaks it.
 
-  THE FORCE ARROWS. While you hold a shot the cue ball grows a free-body diagram: the
+  THE FORCE ARROWS, REMOVED: zerograv freeflight took the ship's speed out of the shot. While you hold a shot the cue ball grows a free-body diagram: the
   ship's velocity it will keep (blue, inheritFrac of it), the resultant launch velocity (green, ship
   plus cue blast), and the gravity pull at the seat (orange) shown as the velocity it
   would add over the next 0.1 year, with the body that dominates it named. The cue
@@ -150,7 +164,8 @@
   the clock on the cushions: use them before Styx has been round. Off, Styx sits with
   the other two pockets and the belt lasts the rack.
 
-  SOLARIS IS POOLABLE. The star is a body like the worlds: a cue ball that reaches it
+  SOLARIS IS POOLABLE, BUT ONLY WITH THE NIGHT BALL: every other cue ball burns in it.
+  The star is a body like the worlds: a Night ball that reaches it
   strikes it (equal-mass exchange at acbMassRatio, like any world, so a square hit on
   the 0.45-solar star moves it at cue speed: it is the heaviest ball on the table only
   in the sense that it drags everything else with it). A struck star feels the pockets
@@ -229,6 +244,8 @@
                    thermoEnergy times a normal shot: the ball for a heavy world. A
                    FRAGILE world (Terra, Vera: rock and ice) breaks instead of moving,
                    which is a foul; Red's thick envelope takes it.
+    Night          black. The only cue ball Solaris does not burn: it strikes the
+                   star like a world, so it is the one that can pool it.
     Gravitizer     dark purple. Once shot it pulls at everything inside gravReachAU,
                    worlds, balls and the ship, as a softened point mass of gravPull
                    solar masses; a world it reaches is unmoored. Drawn with subtle
@@ -323,7 +340,7 @@ const DEFAULTS = {
   // velocity, and at 3.5 AU/yr on the ring that is half the cue blast: the shot goes
   // where the orbit says, not where you aim. So the ball keeps only this fraction of
   // the ship's velocity when it leaves. 1 is real physics.
-  inheritFrac: 0.25,
+  inheritFrac: 0,   
   acbMassRatio: 1.0,      // m_acb / m_world in the collision. 1 = real pool
   restitution: 1.0,       // 1 = elastic
   ballScale: 10,          // drawR multiplier, drawing AND collision. See the header
@@ -344,7 +361,7 @@ const DEFAULTS = {
   thermoEnergy: 3,        // thermonuclear impact energy, x a normal shot
   gravPull: 0.03,         // gravitizer mass, solar masses
   gravReachAU: 0.6,       // gravitizer reach
-  forceArrows: true,      // the free-body diagram on the cue ball while aiming
+  forceArrows: false,      // the free-body diagram on the cue ball while aiming
   arrowNumbers: false,    // label the arrows with values, not just their source
   arrowPxPerAUyr: 12,     // one pixel scale for every arrow, so they compare
   gravityHorizonYr: 0.1,  // gravity is drawn as the velocity it adds over this
@@ -363,7 +380,7 @@ const DEFAULTS = {
   styxEats: true,         // 'Styx sucks asteroids': Styx moves out and eats the belt
   styxRadiusAU: 2.3,      // Styx's radius with styxEats on; its 0.5 AU reach then covers the belt
   styxEatYr: 0.15,        // sim years for a section inside the reach to be swallowed
-  autoStabilise: true,    // burn back to a circular orbit after every shot
+  autoStabilise: false,    // burn back to a circular orbit after every shot
   stabiliseDoneAUyr: 0.05,// close enough: remaining velocity error that ends the burn
 };
 let S = loadSettings();
@@ -385,9 +402,17 @@ const BALL_TYPES = {
   standard: { name: "Standard",      short: "STD",   color: "#ffffff", hi: "#ffffff", lo: "#8a97a8" },
   thermo:   { name: "Thermonuclear", short: "THERMO", color: "#ffd23a", hi: "#fff2a0", lo: "#a8781a" },
   grav:     { name: "Gravitizer",    short: "GRAV",  color: "#5a2a8a", hi: "#b48cff", lo: "#2a1040" },
+  night:    { name: "Night",         short: "NIGHT", color: "#15151f", hi: "#6a6a90", lo: "#000000" },
 };
-const TYPE_ORDER = ["standard", "thermo", "grav"];
+const TYPE_ORDER = ["standard", "thermo", "grav", "night"];
 const SHIP_DEF = { r: 1.45, a: 3.927, overSpeed: 1.005 };
+// Zerograv freeflight: the ship spawns AT REST, and between Terra's ring (0.92) and Vera's
+// (1.45) rather than on Vera's, where a parked ship would be run down within the rack.
+const SHIP_SPAWN_R = 1.19;
+function shipSpawn() {
+  const r = SHIP_SPAWN_R * S.systemScale, a = SHIP_DEF.a;
+  return { x: ORIGIN.x + r * Math.cos(a), y: ORIGIN.y + r * Math.sin(a), vx: 0, vy: 0, nose: a + Math.PI };
+}
 // Three pockets at Styx's radius, Styx first, the others 120 degrees round. Underworld
 // rivers, because a pocket is where a world goes and does not come back from.
 const STYX_A = Math.atan2(1.18, 1.72), STYX_R = Math.hypot(1.72, 1.18);
@@ -495,8 +520,7 @@ function resetWorld() {
   applySystemScale();
   bodies = PLANET_DEFS.map(derivePlanet);
   Object.assign(STAR, { x: 0, y: 0, vx: 0, vy: 0, alive: true, struck: false, trail: [], broken: false, brokenNoted: false });
-  const s = orbitState(SHIP_DEF.r * S.systemScale, SHIP_DEF.a, SHIP_DEF.overSpeed);
-  ship = { ...s, nose: Math.atan2(s.vy, s.vx), trail: [] };
+  ship = { ...shipSpawn(), trail: [] };
   // THE NOSE and THE BALLS are separate things. acb is the nose seat: attached (a ball
   // sits on it), capturing (one is winching in), empty (the ball was shot and is out
   // there), lost (a ball was destroyed and a new one is on its way). balls is every
@@ -513,8 +537,10 @@ function resetWorld() {
   simYears = 0;
   sliderT = 0.5; sliderShown = 0.5;   // open at the centre: 1M, the table's pace
   charging = false; charge = 0; drag = null; stab = null; hitstop = null;
-  fx.trails = []; fx.shards = []; fx.shocks = []; fx.flashA = 0; fx.shake = 0;
+  fx.trails = []; fx.shards = []; fx.shocks = []; fx.flashA = 0; fx.shake = 0; flashes = [];
   ghost = null;
+  timePaused = false;
+  note("zerograv freeflight: ENGAGED", "#8fc3e8");
   if (S.introFlyover) startIntro(); else endIntro();
 }
 
@@ -526,7 +552,7 @@ function resetWorld() {
 // register: short, practical, "captain", and never a word about who set the table.
 const BRIEF = {
   star:    { cls: "M-type main sequence", diameterKm: 625328, tempC: 3126.9, inhabited: false,
-             note: "Red dwarf, captain. Cold system: every world out here is frozen. It is the heaviest ball on the table and it moves if you hit it, so keep the cue off it unless you mean it." },
+             note: "Red dwarf, captain. Cold system: every world out here is frozen. It burns any cue ball you put into it, except the Night ball, and the Night ball will move it. Keep the cue off it unless you mean it." },
   smell:   { cls: "Terrestrial, veiled", diameterKm: 14661, tempC: -9.2, inhabited: false,
              note: "The heavy one. Sulphur haze over a thick envelope, and it takes a thermonuclear without cracking. It will not go far on a soft shot, so lean in." },
   hearing: { cls: "Terrestrial", diameterKm: 10472, tempC: -155.2, inhabited: true,
@@ -540,7 +566,7 @@ const BRIEF = {
   Acheron: { cls: "Singularity", diameterKm: 30, tempC: -270, inhabited: false,
              note: "Pocket three. Nothing passes inside its reach on its own, so anything that goes in, you put there." },
   ship:    { cls: "The ark", diameterKm: null, tempC: null, inhabited: true,
-             note: "That is us. One cue ball on the nose, two in the chamber. Shoot, then go and fetch it. Speed up time when the table is slow, slow it down when it matters. Good hunting, captain." },
+             note: "That is us, flying free of gravity, so mind the worlds coming round: they do not steer. One cue ball on the nose, two in the chamber. Shoot, then go and fetch it. Good hunting, captain." },
 };
 const MSUN_KG = 1.989e30, MEARTH_KG = 5.972e24, KMS_PER_AUYR = 4.7404;
 function densityGcc(massMsun, diameterKm) {
@@ -734,7 +760,7 @@ function drawCard(st, a, W, H) {
     ["mass", st.mass == null ? "classified" : st.mass >= 100 ? st.mass.toFixed(0) + " " + st.unit : st.mass.toFixed(2) + " " + st.unit],
     ["density", st.ship ? "classified" : st.pocket ? "off the scale" : densityGcc(st.mass * (st.unit.startsWith("Earth") ? MEARTH_KG / MSUN_KG : 1), B.diameterKm).toFixed(1) + " g/cm3"],
     ["diameter", B.diameterKm == null ? "0.4 AU, hull" : B.diameterKm.toLocaleString("en-US") + " km"],
-    ["travel speed", st.speed ? (st.speed * KMS_PER_AUYR).toFixed(1) + " km/s  (" + st.speed.toFixed(2) + " AU/yr)" : st.pocket ? "fixed" : "at rest, the centre"],
+    ["travel speed", st.speed ? (st.speed * KMS_PER_AUYR).toFixed(1) + " km/s  (" + st.speed.toFixed(2) + " AU/yr)" : st.pocket ? "fixed" : st.ship ? "at rest, zerograv freeflight" : "at rest, the centre"],
     ["inhabited", B.inhabited ? "YES" : "no"],
     ["surface temp", B.tempC == null ? "21 C, cabin" : B.tempC.toFixed(0) + " C"],
   ];
@@ -775,6 +801,7 @@ function drawCard(st, a, W, H) {
 let sliderT = 0.5, sliderShown = 0.5;       // 0..1 position, and its eased display twin
 let paused = false;
 let charging = false, charge = 0;
+let timePaused = false, lastPower = 0.5, freezeShown = 0;   // Shift's toggle, the aim line's idle power, the vignette
 let drag = null;                            // {ax, ay} screen anchor while a DRAG shot is held
 let stab = null;                            // { err } while the post-shot stabiliser burns
 let hitstop = null;                         // { t, ball, planet } during an impact frame
@@ -867,6 +894,11 @@ function resolveContacts(list, freeBalls, events) {
   const rA = S.acbRadiusAU;
   for (const ball of freeBalls) for (const b of list) {
     if (!b.alive || ball.dead) continue;
+    if (b.id === "star" && ball.type !== "night") {
+      // Solaris burns every cue ball but the Night ball, which is the one that can pool it
+      if (dist(ball.x, ball.y, b.x, b.y) < rA + ballR(b)) { ball.dead = true; ball.burned = true; events.push({ kind: "burned", ball, b, x: ball.x, y: ball.y }); }
+      continue;
+    }
     // a thermonuclear hits with thermoEnergy times the energy: scale its speed going in
     const boost = ball.type === "thermo" ? Math.sqrt(S.thermoEnergy) : 1;
     ball.vx *= boost; ball.vy *= boost;
@@ -897,8 +929,9 @@ function sweepBall(k, list, others, h) {
   if (L < 1e-12) return null;
   let best = null, bestT = 1;
   const targets = list.filter(b => b.alive).concat(others.filter(o => o !== k && !o.dead && !o.flash).map(o => ({ ball: o, x: o.x, y: o.y })));
+  if (sweepShip && k.armed) targets.push({ shipHit: true, x: sweepShip.x, y: sweepShip.y });   // your own ship, once the ball has left it
   for (const b of targets) {
-    const R = S.acbRadiusAU + (b.ball ? S.acbRadiusAU : ballR(b));
+    const R = S.acbRadiusAU + (b.ball ? S.acbRadiusAU : b.shipHit ? SHIP_R : ballR(b));
     const fx0 = k.x - b.x, fy0 = k.y - b.y;
     const A = dx * dx + dy * dy, B = 2 * (fx0 * dx + fy0 * dy), C = fx0 * fx0 + fy0 * fy0 - R * R;
     if (C <= 0) { best = b; bestT = 0; break; }          // already inside: contact now
@@ -931,7 +964,11 @@ function sweepBall(k, list, others, h) {
   if (k.flash) k.flash.remain -= flight;
   return best;
 }
-let sweepTime = 0, sweepSections = null;   // the belt the sweep sees: the sim's, or the forecast's copy
+let sweepTime = 0, sweepSections = null, sweepShip = null;   // the belt the sweep sees, and the ship it can hit
+// A cue ball can hit the ship only once it has LEFT it: it is born on the seat.
+function armCheck(k, sx, sy) {
+  if (!k.armed && dist(k.x, k.y, sx, sy) > S.acbRadiusAU + SHIP_R + 0.03) k.armed = true;
+}
 // A flash ball reaches the cushion: the flash ends there, the normal energy bounces.
 // A flash ball reaches the cushion: it REBOUNDS AT FLASH SPEED, radial velocity mirrored,
 // range kept, so the flash carries on off the belt and a bounce-off trick shot is a shot.
@@ -992,6 +1029,7 @@ function gravitizeAll(freeBalls, list, others, shipObj, h) {
 function pocketAt(x, y, r) { for (const p of POCKETS) if (dist(x, y, p.x, p.y) < S.pocketRadiusAU + r) return p; return null; }
 
 function simStep(h, offGravity) {
+  let shipCause = null;   // why the ship dies this step, if it does
   stepWorlds(bodies, h);
   if (!offGravity) gameGravity(ship, bodies, h, true);
   for (const k of balls) if (!k.flash) gameGravity(k, bodies, h, S.acbFeelsWorlds);   // a flash outruns gravity
@@ -1001,17 +1039,24 @@ function simStep(h, offGravity) {
   ship.x += ship.vx * h; ship.y += ship.vy * h;
   for (const k of balls) {
     if (!k.flash) { k.x += k.vx * h; k.y += k.vy * h; continue; }
-    sweepTime = simYears; sweepSections = belt;
+    sweepTime = simYears; sweepSections = belt; sweepShip = ship;
     let hit = null, hLeft = h, bounces = 0;
     while (hLeft > 0 && bounces < 8) {
       hit = sweepBall(k, contactList(bodies, STAR), balls, hLeft);
       k.flash.pts.push({ x: k.x, y: k.y, age: 0 });
+      armCheck(k, ship.x, ship.y);
       if (!(hit && hit.belt)) break;
       flashBounce(k, hit, belt, true); beltBreak(hit.i, k.x, k.y);
       fx.shake = Math.max(fx.shake, 0.5); note("FLASH REBOUND off the belt", "#c8b090");
       hLeft *= 1 - k.sweepT; bounces++; hit = null;
     }
     if (hit && hit.ball) { flashHitsBall(k, hit.ball); continue; }
+    if (hit && hit.shipHit) { fx.trails.push(k.flash.pts); burnOut(k); shipCause = "hit by its own cue ball"; continue; }
+    if (hit && hit.id === "star" && k.type !== "night") {
+      fx.trails.push(k.flash.pts); k.flash = null; k.dead = true; k.burned = true;
+      burst(k.x, k.y, 0.15, "#ff8a3c"); flash(k.x, k.y, 0.2, "#ff5030");
+      continue;
+    }
     if (hit) { beginImpactFrame(k, hit); return true; }   // the frame freezes here
     if (k.flash.remain <= 0) { fx.trails.push(k.flash.pts); burnOut(k); note("FLASH BURNED OUT: ball at normal speed", "#e8b463"); }
     else if (offTable(k)) { fx.trails.push(k.flash.pts); burnOut(k); note("FLASH LEFT THE TABLE: ball at normal speed", "#e8b463"); }
@@ -1025,6 +1070,7 @@ function simStep(h, offGravity) {
   for (const e of events) {
     if (e.kind === "struck") { flash(e.x, e.y, 0.15, e.b.color); note("STRUCK: " + e.b.name, e.b.color); }
     if (e.kind === "balls") { flash(e.x, e.y, 0.08, "#ffffff"); note("CUE BALLS COLLIDE", "#e8f0fa"); }
+    if (e.kind === "burned") { burst(e.x, e.y, 0.15, "#ff8a3c"); flash(e.x, e.y, 0.2, "#ff5030"); continue; }
     if (e.ball && e.ball.type === "thermo") thermoGoesOff(e.ball, e.b);
   }
 
@@ -1057,7 +1103,7 @@ function simStep(h, offGravity) {
   if (S.beltOn && S.styxEats) styxEatsBelt(h);
   const gone = [];
   for (const k of balls) {
-    if (k.dead) { gone.push({ k, why: "THERMONUCLEAR SPENT" }); continue; }
+    if (k.dead) { gone.push({ k, why: k.burned ? "ACB BURNED in Solaris" : "THERMONUCLEAR SPENT" }); continue; }
     const p = pocketAt(k.x, k.y, 0);
     if (p) {
       k.dead = true;
@@ -1071,14 +1117,23 @@ function simStep(h, offGravity) {
     // a bare nose loads the next chambered ball after a moment; a ball already on it stays
     if (acb.mode === "empty" && !score.failed) { acb.mode = "lost"; acb.lostT = 0; }
   }
-  // the belt wrecks the ship: an intact section is rock, and the hull is not a ball
+  // THE SHIP DIES of rock, a pocket, the star, a world, or its own cue ball. It is a hull,
+  // not a ball: nothing bounces off it, and zerograv freeflight means it sits where you
+  // leave it, so the rack coming round is a hazard.
   const beltI = S.beltKillsShip ? beltInside(ship.x, ship.y, HULL_LEN * 0.5, belt, simYears) : -1;
-  if (beltI >= 0) { belt[beltI] = 0; beltBreak(beltI, ship.x, ship.y); }
-  if (beltI >= 0 || pocketAt(ship.x, ship.y, 0) || (STAR.alive && dist(ship.x, ship.y, STAR.x, STAR.y) < starR())) {
-    score.deaths++; flash(ship.x, ship.y, 0.3, "#ffffff"); if (beltI >= 0) burst(ship.x, ship.y, 0.1, "#c8b090");
-    note(beltI >= 0 ? "SHIP LOST: wrecked on the asteroid belt" : "SHIP LOST: RESPAWNING", "#ff5030");
-    const s = orbitState(SHIP_DEF.r * S.systemScale, SHIP_DEF.a, SHIP_DEF.overSpeed);
-    Object.assign(ship, s); ship.nose = Math.atan2(s.vy, s.vx); ship.trail = [];
+  if (beltI >= 0) { belt[beltI] = 0; beltBreak(beltI, ship.x, ship.y); shipCause = shipCause || "wrecked on the asteroid belt"; }
+  const shipPk = pocketAt(ship.x, ship.y, 0);
+  if (!shipCause && shipPk) shipCause = "fell into " + shipPk.name;
+  if (!shipCause && STAR.alive && dist(ship.x, ship.y, STAR.x, STAR.y) < starR() + SHIP_R) shipCause = "burned in Solaris";
+  if (!shipCause) for (const b of bodies) if (b.alive && dist(ship.x, ship.y, b.x, b.y) < ballR(b) + SHIP_R) { shipCause = "crashed into " + b.name; break; }
+  for (const k of balls) {
+    armCheck(k, ship.x, ship.y);
+    if (!shipCause && k.armed && dist(ship.x, ship.y, k.x, k.y) < S.acbRadiusAU + SHIP_R) shipCause = "hit by its own cue ball";
+  }
+  if (shipCause) {
+    score.deaths++; flash(ship.x, ship.y, 0.3, "#ffffff"); burst(ship.x, ship.y, 0.12, "#ff8c70");
+    note("SHIP LOST: " + shipCause, "#ff5030");
+    Object.assign(ship, shipSpawn()); ship.trail = [];
     if (acb.mode === "capturing") { balls.push({ type: acb.type, x: acb.x, y: acb.y, vx: 0, vy: 0, trail: [], dwell: 0, lock: 0 }); acb.mode = "empty"; acb.cap = null; }
     charging = false; charge = 0; drag = null; stab = null;
   }
@@ -1091,7 +1146,7 @@ function simStep(h, offGravity) {
 // chases the cursor except mid-drag, when it holds: a pull-back shot must not spin the
 // hull under the cue.
 function aimNose(realDt) {
-  if (drag) return;
+  if (drag) { ship.nose = Math.atan2(drag.dir[1], drag.dir[0]); return; }   // LMB down: the aim is locked
   const [mwx, mwy] = screenToWorld(mouse.sx, mouse.sy);
   const adx = mwx - ship.x, ady = mwy - ship.y;
   if (adx * adx + ady * ady > 1e-12) {
@@ -1121,6 +1176,7 @@ function applyThrust(dtYr) {
   ship.vy += f[1] * S.thrustAccel * dtYr * cap;
 }
 const HULL_LEN = 0.06;   // AU, nose to the ACB's seat
+const SHIP_R = HULL_LEN * 0.6;   // the hull's collision radius: what a world or a cue ball has to touch
 function noseSeat() {
   const nx = Math.cos(ship.nose), ny = Math.sin(ship.nose);
   const off = HULL_LEN + S.acbRadiusAU;
@@ -1156,16 +1212,16 @@ function flashHitsBall(k, o) {
   fx.trails.push(k.flash.pts); k.flash = null;
   if (k.type === "thermo") thermoGoesOff(k, { name: "a cue ball" });
 }
-// Both modes end here: a direction and a 0..1 power. The ACB leaves the seat with the
-// ship's velocity plus the shot, and the ship takes recoilFrac of it backwards.
+// A direction and a 0..1 power. The ACB leaves the seat at the cue's velocity ALONE:
+// zerograv freeflight, the ship's own speed is no factor. The ship takes recoilFrac back.
 function fireAcb(dx, dy, power) {
   if (acb.mode !== "attached" || score.failed) return;
   const dv = power * S.shotPower;
   placeAcbOnNose();
-  const k = { type: acb.type, x: acb.x, y: acb.y, vx: ship.vx * S.inheritFrac + dx * dv, vy: ship.vy * S.inheritFrac + dy * dv, trail: [], dwell: 0, lock: S.captureLockoutS };
+  const k = { type: acb.type, x: acb.x, y: acb.y, vx: dx * dv, vy: dy * dv, trail: [], dwell: 0, lock: S.captureLockoutS };
   if (S.animeMode) {
     // the flash: same direction, flash speed, and the normal shot's energy remembered for the impact
-    k.vx = ship.vx * S.inheritFrac + dx * S.animeSpeedAUyr; k.vy = ship.vy * S.inheritFrac + dy * S.animeSpeedAUyr;
+    k.vx = dx * S.animeSpeedAUyr; k.vy = dy * S.animeSpeedAUyr;
     // the blast sets the range: a full-power flash crosses animeRangeAU, a soft one less
     k.flash = { remain: flashRange(power), normalDv: dv, pts: [{ x: k.x, y: k.y, age: 0 }] };
     burst(k.x, k.y, 0.12 + power * 0.1, "#dfffe8"); flash(k.x, k.y, 0.2 + power * 0.2, "#8fe8b0");
@@ -1203,12 +1259,16 @@ function overrideStabiliser(why) {
   stab = null; note("STABILISER: manual override (" + why + ")", "#e8b463");
 }
 // What the shot WOULD be right now, for the aim line: [dx, dy, power] or null.
+// The shot as it stands: [dx, dy, power, held]. LMB down, the direction is the one
+// locked at the press and the power is the pull STRAIGHT BACK along it (sideways pull
+// does nothing). LMB up, it is the nose at the last power used: the always-on preview.
 function pendingShot() {
-  if (acb.mode !== "attached" || !drag) return null;
-  const vx = drag.ax - mouse.sx, vy = drag.ay - mouse.sy;   // pull back, shoot forward
-  const len = Math.hypot(vx, vy);
-  if (len < 4) return [Math.cos(ship.nose), Math.sin(ship.nose), 0];
-  return [vx / len, vy / len, Math.min(1, len / S.dragMaxPx)];
+  if (acb.mode !== "attached" || score.failed) return null;
+  if (drag) {
+    const pull = ((drag.ax - mouse.sx) * drag.dir[0] + (drag.ay - mouse.sy) * drag.dir[1]) / S.dragMaxPx;
+    return [drag.dir[0], drag.dir[1], Math.max(0, Math.min(1, pull)), true];
+  }
+  return [Math.cos(ship.nose), Math.sin(ship.nose), lastPower, false];
 }
 
 // ============================== THE CATCH =======================================
@@ -1339,32 +1399,50 @@ function buildGhost() {
   if (p) {
     const [x, y] = noseSeat();
     const dv = p[2] * S.shotPower, sp = S.animeMode ? S.animeSpeedAUyr : dv;
-    pending = { type: acb.type, x, y, vx: ship.vx * S.inheritFrac + p[0] * sp, vy: ship.vy * S.inheritFrac + p[1] * sp, pts: [{ x, y }], dead: false,
+    pending = { type: acb.type, x, y, vx: p[0] * sp, vy: p[1] * sp, armed: false, pts: [{ x, y }], dead: false,
                 flash: S.animeMode ? { remain: flashRange(p[2]), normalDv: dv, pts: [] } : null };
     sim.push(pending);
   }
-  for (const k of balls) sim.push({ type: k.type, x: k.x, y: k.y, vx: k.vx, vy: k.vy, pts: [{ x: k.x, y: k.y }], dead: false,
+  for (const k of balls) sim.push({ type: k.type, x: k.x, y: k.y, vx: k.vx, vy: k.vy, armed: !!k.armed, pts: [{ x: k.x, y: k.y }], dead: false,
                                     flash: k.flash ? { remain: k.flash.remain, normalDv: k.flash.normalDv, pts: [] } : null });
   if (!sim.length) { ghost = null; return; }
   const gb = bodies.map(b => ({ ...b, trail: null }));
   const gstar = { ...STAR, trail: null };
   const gbelt = belt.slice();                       // the forecast spends its own copy
   let gt = simYears;
-  const out = { pending: null, hit: null, terminus: null, balls: [], worlds: [] };
+  const out = { pending: null, hit: null, terminus: null, fates: [], balls: [], worlds: [] };
+  // WHAT BECOMES OF IT (Geometry Pool's outcome markers): where the shot's own ball and
+  // the worlds it moves end up, and anything that runs into the parked ship
+  const sx0 = ship.x, sy0 = ship.y;
+  let shipFate = false;
+  const addFate = (kind, x, y, name, cue) => {
+    if (kind === "ship") { if (shipFate) return; shipFate = true; }
+    out.fates.push({ kind, x, y, name, cue: !!cue });
+  };
   const track = new Map();
   for (const b of gb.concat([gstar])) if (b.struck && b.alive) track.set(b.id, { color: b.color, pts: [{ x: b.x, y: b.y }] });
   // A flash flies straight and first, swept exactly as the sim sweeps it, against the
   // worlds where they stand now: at 1600 AU/yr they do not move during it.
   for (const k of sim) {
     if (!k.flash) continue;
-    sweepTime = gt; sweepSections = gbelt;
+    sweepTime = gt; sweepSections = gbelt; sweepShip = ship;
     let hit = null, bounces = 0;
     while (k.flash.remain > 1e-6 && bounces < 8 && !offTable(k)) {
       // straight flight only as far as the off-table circle, so an endless flash ends where the sim's does
       hit = sweepBall(k, contactList(gb, gstar), sim, Math.min(k.flash.remain, exitDistance(k) + 1e-3) / Math.hypot(k.vx, k.vy));
       k.pts.push({ x: k.x, y: k.y });
+      armCheck(k, sx0, sy0);
       if (!(hit && hit.belt)) { if (!hit && !offTable(k) && k.flash.remain > 1e-6) continue; break; }
+      if (k === pending && out.bankAt == null) out.bankAt = k.pts.length - 1;   // the first cushion: the shot's first leg ends here
       flashBounce(k, hit, gbelt, true); bounces++; hit = null;   // the rebound, on the forecast's own belt
+    }
+    if (hit && hit.shipHit) {
+      if (k === pending) addFate("ship", k.x, k.y, null, true);
+      burnOut(k); k.dead = true; continue;
+    }
+    if (hit && hit.id === "star" && k.type !== "night") {
+      if (k === pending) addFate("star", k.x, k.y, null, true);
+      k.flash = null; k.dead = true; continue;
     }
     if (hit && hit.ball) {
       // ball on ball, as flashHitsBall does it: impact energy, placed touching, equal-mass exchange
@@ -1412,6 +1490,7 @@ function buildGhost() {
     const events = [];
     resolveContacts(contactList(gb, gstar), live, events);
     for (const e of events) {
+      if (e.kind === "burned") { if (e.ball === pending) addFate("star", e.x, e.y, null, true); continue; }
       if (!out.hit && pending && !pending.dead && dist(e.x, e.y, pending.x, pending.y) < 0.2) out.hit = { x: e.x, y: e.y };
       // struck by the cue ball: a direct line. Struck by another body (a world the moving
       // star ploughed into): secondary, drawn thinner and shorter, because a strike on
@@ -1422,10 +1501,20 @@ function buildGhost() {
     }
     for (const b of gb) {
       if (!b.alive) continue;
-      if (pocketAt(b.x, b.y, 0) || (gstar.alive && dist(b.x, b.y, gstar.x, gstar.y) < starR() + ballR(b) * 0.5)) b.alive = false;
+      const pk = pocketAt(b.x, b.y, 0);
+      if (pk) { b.alive = false; if (track.has(b.id)) addFate("pot", b.x, b.y, b.name); }
+      else if (gstar.alive && dist(b.x, b.y, gstar.x, gstar.y) < starR() + ballR(b) * 0.5) { b.alive = false; if (track.has(b.id)) addFate("star", b.x, b.y, b.name); }
     }
-    if (gstar.alive && pocketAt(gstar.x, gstar.y, 0)) gstar.alive = false;
-    for (const k of live) if (pocketAt(k.x, k.y, 0)) k.dead = true;
+    if (gstar.alive && pocketAt(gstar.x, gstar.y, 0)) { gstar.alive = false; addFate("pot", gstar.x, gstar.y, "Solaris"); }
+    for (const k of live) if (pocketAt(k.x, k.y, 0)) { k.dead = true; if (k === pending) addFate("pot", k.x, k.y, null, true); }
+    // THE SHIP IN THE FORECAST sits where it is (zerograv), so a world coming round on its
+    // ring, or your own ball off a cushion, is marked on it
+    for (const k of live) {
+      if (k.dead) continue;
+      armCheck(k, sx0, sy0);
+      if (k.armed && dist(k.x, k.y, sx0, sy0) < S.acbRadiusAU + SHIP_R) { k.dead = true; if (k === pending) addFate("ship", sx0, sy0, null, true); }
+    }
+    if (!shipFate) for (const b of gb.concat([gstar])) if (b.alive && dist(b.x, b.y, sx0, sy0) < (b === gstar ? starR() : ballR(b)) + SHIP_R) { addFate("ship", sx0, sy0, b.name); break; }
     if (i % 8 === 0) {
       for (const k of sim) if (!k.dead) k.pts.push({ x: k.x, y: k.y });
       const cut = i > starStruckAt + AFTER_STAR;
@@ -1445,6 +1534,7 @@ function buildGhost() {
 // so what the eye sees is the shot's tendency and not every frame's throw of the dice.
 // The cue ball's own line is not eased: the hand is aiming it.
 const GHOST_N = 120;
+const FORECAST_IDLE = 0.4;   // the aim line's strength when LMB is up: always there, loud only under the hand
 const ghostShown = new Map();   // id -> the eased points
 function resample(pts, n) {
   const out = [];
@@ -1485,9 +1575,10 @@ function frame(now) {
   }
   if (paused) { draw(realDt); return; }
 
-  // THE PAUSE. Shift holds time and the slider drops to the far left; a held drag holds
-  // time too. Release and the clock springs back to the game speed.
-  const timeHeld = keys.shift || !!drag;
+  // THE PAUSE. Shift TOGGLES it and the slider drops to the far left, as if Q were held
+  // all the way; a held aim holds time too. Off again, the clock springs back.
+  const timeHeld = timePaused || !!drag;
+  freezeShown += ((timeHeld ? 1 : 0) - freezeShown) * Math.min(1, realDt * 8);
   const SLIDE_RATE = 0.45;
   if (timeHeld) sliderT += (0 - sliderT) * Math.min(1, realDt * 8);
   else {
@@ -1503,7 +1594,7 @@ function frame(now) {
 
   const thrusting = !!thrustVector();
   if (stab && thrusting) overrideStabiliser("engine");
-  const offGravity = thrusting && S.thrustAntigrav;
+  const offGravity = true;   // ZEROGRAV FREEFLIGHT, always engaged: the ship feels no gravity
 
   const dtYr = warp * realDt / SPY;
   const steps = dtYr > MAX_SUBSTEP_YR ? Math.min(MAX_SUBSTEPS, Math.ceil(dtYr / MAX_SUBSTEP_YR)) : 1;
@@ -2067,13 +2158,29 @@ function draw(realDt) {
   for (const b of bodies) if (b.alive && b.struck) strokePts(b.trail, b.color, 0.4, 1);
   for (const k of balls) if (k.flash) drawBurningTrail(k.flash.pts);
   for (const tr of fx.trails) drawBurningTrail(tr);
-  // the forecast
+  // THE AIM LINE in Geometry Pool's hierarchy, drawn back to front: THE CUE BALL IS SOLID
+  // WHITE AND LOUDEST, EVERYTHING ELSE IS A DASHED CONSEQUENCE IN ITS OWN COLOUR. The
+  // lengths are this rig's own (a year, eased), not 010's short horizon. LMB up, the whole
+  // forecast is drawn at FORECAST_IDLE of its strength: always there, loud under the hand.
   if (ghost) {
-    // a struck world's forecast is thick and solid-ish in its colour; the cue ball's stays a thin white dash
-    for (const w of ghost.worlds) strokePtsFade(w.shown || w.pts, w.color, w.direct ? 0.75 : 0.45, w.direct ? 2.2 : 1.2, [10, 5]);
-    for (const pts of ghost.balls) strokePts(pts, "#ffffff", 0.3, 1, [3, 5]);
-    if (ghost.pending) strokePts(ghost.pending, "#ffffff", 0.45, 1, [3, 5]);
-    if (ghost.hit) { const [sx, sy] = worldToScreen(ghost.hit.x, ghost.hit.y); circle(sx, sy, 6, null, "rgba(255,255,255,0.7)", 1); }
+    const m = drag ? 1 : FORECAST_IDLE;
+    for (const w of ghost.worlds) if (!w.direct) strokePtsFade(w.shown || w.pts, w.color, 0.28 * m, 1, [3, 7]);
+    for (const pts of ghost.balls) strokePts(pts, "#ffffff", 0.22 * m, 1, [2, 7]);
+    for (const w of ghost.worlds) if (w.direct) strokePtsFade(w.shown || w.pts, w.color, 0.7 * m, 1.6, [6, 5]);
+    if (ghost.pending) {
+      // The first leg is the shot and is loud. Every leg after a cushion is a consequence,
+      // drawn at the consequence weight: a flash with nothing to find banks up to eight
+      // times, and all of it loud drew a web across the table. The length is all still here.
+      const cut = ghost.bankAt != null ? ghost.bankAt + 1 : ghost.pending.length;
+      const leg = ghost.pending.slice(0, cut), rest = ghost.pending.slice(Math.max(0, cut - 1));
+      strokePts(leg, "#8fe8b0", 0.16 * m, 6); strokePts(leg, "#ffffff", 0.95 * m, 2);
+      if (rest.length > 1) strokePts(rest, "#ffffff", 0.3 * m, 1, [4, 6]);
+    }
+    if (ghost.hit) {
+      const [sx, sy] = worldToScreen(ghost.hit.x, ghost.hit.y);
+      circle(sx, sy, 9, null, `rgba(255,255,255,${0.95 * m})`, 2); circle(sx, sy, 2.5, `rgba(255,255,255,${0.95 * m})`);
+    }
+    for (const f of ghost.fates) drawFate(f, f.kind === "ship" ? Math.max(m, 0.85) : m);
     if (ghost.terminus) {
       // a short tick across the aim line where the flash ends and coasting starts
       const q = worldToScreen(ghost.terminus.x, ghost.terminus.y);
@@ -2112,6 +2219,7 @@ function draw(realDt) {
     const b = cx.createRadialGradient(x - R * 0.35, y - R * 0.35, R * 0.1, x, y, R);
     b.addColorStop(0, T.hi); b.addColorStop(0.55, T.color); b.addColorStop(1, T.lo);
     circle(x, y, R, b);
+    if (type === "night") circle(x, y, R + 0.5, null, "rgba(170,175,230,0.6)", 1);   // a black ball needs an edge on black
   };
   for (const k of balls) {
     const [sx, sy] = worldToScreen(k.x, k.y);
@@ -2154,7 +2262,16 @@ function draw(realDt) {
       cx.lineTo(ax - p[0] * (S.acbRadiusAU * sc + 8 + len), ay - p[1] * (S.acbRadiusAU * sc + 8 + len)); cx.stroke();
       cx.fillStyle = "rgba(20,30,50,0.8)"; cx.fillRect(sx - 30, sy + 22, 60, 6);
       cx.fillStyle = "#e8f0fa"; cx.fillRect(sx - 30, sy + 22, 60 * p[2], 6);
-      if (S.forceArrows) drawForceArrows(p);
+      // Geometry Pool's grab bracket: four corners closed on the hull while the cue is drawn
+      const BR = 20, arm = 9;
+      cx.strokeStyle = "rgba(255,255,255,0.95)"; cx.lineWidth = 2; cx.lineCap = "round";
+      for (let i = 0; i < 4; i++) {
+        const a = i * Math.PI / 2 + Math.PI / 4, ux = Math.cos(a), uy = Math.sin(a), qx = sx + ux * BR, qy = sy + uy * BR;
+        cx.beginPath(); cx.moveTo(qx - uy * arm, qy + ux * arm); cx.lineTo(qx, qy); cx.lineTo(qx + uy * arm, qy - ux * arm); cx.stroke();
+      }
+      cx.lineCap = "butt";
+      cx.fillStyle = "rgba(255,255,255,0.95)"; cx.font = `10px "Share Tech Mono", monospace`; cx.textAlign = "center";
+      cx.fillText("PULLING BACK: RELEASE TO SHOOT", sx, sy - BR - 12); cx.textAlign = "left";
     }
   }
   // flashes
@@ -2170,8 +2287,49 @@ function draw(realDt) {
   drawImpactFx();
   if (fx.flashA > 0.01) { cx.fillStyle = `rgba(235,245,255,${Math.min(1, fx.flashA)})`; cx.fillRect(0, 0, W, H); }
   if (intro) { drawBriefing(W, H); return; }
+  // THE FREEZE made visible (Geometry Pool's): a cool vignette comes in as the clock stops
+  if (freezeShown > 0.01) {
+    const g = cx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.32, W / 2, H / 2, Math.max(W, H) * 0.72);
+    g.addColorStop(0, "rgba(90,150,220,0)"); g.addColorStop(1, `rgba(70,130,210,${0.30 * freezeShown})`);
+    cx.fillStyle = g; cx.fillRect(0, 0, W, H);
+  }
   drawTimeBand(W, H);
   drawHud(W, H);
+  drawPointer();
+}
+// WHAT BECOMES OF IT: Geometry Pool's outcome markers. A ring where a body's future ends,
+// and a label on its own dark plate, because it usually lands on something bright.
+function drawFate(f, m) {
+  const q = worldToScreen(f.x, f.y); if (!q) return;
+  const [sx, sy] = q;
+  const col = f.kind === "pot" ? [198, 168, 255] : f.kind === "star" ? [255, 168, 110] : [255, 90, 74];
+  const c = a => `rgba(${col[0]},${col[1]},${col[2]},${a})`;
+  circle(sx, sy, 12, null, `rgba(5,7,13,${0.85 * m})`, 4);
+  circle(sx, sy, 12, null, c(m), 2);
+  const who = f.cue ? "CUE BALL" : (f.name || "").toUpperCase();
+  const text = who + (f.kind === "pot" ? " POTTED" : f.kind === "star" ? " INTO THE STAR" : " HITS THE SHIP");
+  cx.font = `9px "Share Tech Mono", monospace`; cx.textAlign = "center";
+  const w = cx.measureText(text).width, ty = sy - 22;
+  cx.fillStyle = `rgba(5,7,13,${0.88 * m})`; cx.fillRect(sx - w / 2 - 5, ty - 9, w + 10, 13);
+  cx.strokeStyle = c(m); cx.lineWidth = 1; cx.strokeRect(sx - w / 2 - 5, ty - 9, w + 10, 13);
+  cx.fillStyle = c(m); cx.fillText(text, sx, ty + 1);
+  cx.textAlign = "left";
+}
+// THE PULL POINTER (Geometry Pool's): while the cue is drawn the system cursor is hidden
+// and an arrowhead at the pointer faces the way the ball will go, with the power under it.
+function drawPointer() {
+  const want = drag ? "none" : "crosshair";
+  if (cv.style.cursor !== want) cv.style.cursor = want;
+  if (!drag) return;
+  const p = pendingShot(); if (!p) return;
+  const sx = mouse.sx, sy = mouse.sy;
+  cx.save(); cx.translate(sx, sy); cx.rotate(Math.atan2(p[1], p[0]));
+  cx.fillStyle = "rgba(255,255,255,0.95)";
+  cx.beginPath(); cx.moveTo(11, 0); cx.lineTo(-5, 7); cx.lineTo(-1, 0); cx.lineTo(-5, -7); cx.closePath(); cx.fill();
+  cx.restore();
+  circle(sx, sy, 15, null, "rgba(255,255,255,0.5)", 1);
+  cx.fillStyle = "rgba(255,255,255,0.9)"; cx.font = `10px "Share Tech Mono", monospace`; cx.textAlign = "center";
+  cx.fillText((p[2] * 100).toFixed(0) + "%", sx, sy + 27); cx.textAlign = "left";
 }
 // The meteor: three passes over the same polyline, fringe, core, hot line. Width and
 // alpha come from each point's age, so the head is fat and bright and the tail is a
@@ -2219,45 +2377,6 @@ function drawImpactFx() {
   }
 }
 
-function arrow(x0, y0, x1, y1, color, width, dash) {
-  const dx = x1 - x0, dy = y1 - y0, L = Math.hypot(dx, dy);
-  if (L < 2) return;
-  cx.strokeStyle = color; cx.fillStyle = color; cx.lineWidth = width; cx.setLineDash(dash || []);
-  cx.beginPath(); cx.moveTo(x0, y0); cx.lineTo(x1, y1); cx.stroke(); cx.setLineDash([]);
-  const ux = dx / L, uy = dy / L, h = Math.min(9, L * 0.5);
-  cx.beginPath(); cx.moveTo(x1, y1); cx.lineTo(x1 - ux * h - uy * h * 0.5, y1 - uy * h + ux * h * 0.5);
-  cx.lineTo(x1 - ux * h + uy * h * 0.5, y1 - uy * h - ux * h * 0.5); cx.closePath(); cx.fill();
-}
-function arrowLabel(x, y, text, color) {
-  cx.font = `10px "Share Tech Mono", monospace`; cx.textAlign = "left";
-  const w = cx.measureText(text).width;
-  cx.fillStyle = "rgba(5,7,13,0.75)"; cx.fillRect(x + 4, y - 9, w + 6, 13);
-  cx.fillStyle = color; cx.fillText(text, x + 7, y + 1);
-}
-// The free-body diagram on the cue ball. See the header: one pixel scale for all of it.
-function drawForceArrows(p) {
-  const [ax0, ay0] = worldToScreen(acb.x, acb.y);
-  const k = S.arrowPxPerAUyr;
-  const shipV = [ship.vx * S.inheritFrac, ship.vy * S.inheritFrac];   // what the ball keeps
-  const cueV = [p[0] * p[2] * S.shotPower, p[1] * p[2] * S.shotPower];
-  const g = gravityAt(acb.x, acb.y, S.acbFeelsWorlds);
-  const gravV = [g.ax * S.gravityHorizonYr, g.ay * S.gravityHorizonYr];
-  // the ship's tip, then the cue added to it: the resultant runs from the ball to t2
-  const t1 = [ax0 + shipV[0] * k, ay0 + shipV[1] * k];
-  const t2 = [t1[0] + cueV[0] * k, t1[1] + cueV[1] * k];
-  const tg = [ax0 + gravV[0] * k, ay0 + gravV[1] * k];
-  arrow(ax0, ay0, t1[0], t1[1], "#4fc3f7", 2);
-  arrow(ax0, ay0, t2[0], t2[1], "#8fe8b0", 2, [5, 4]);
-  arrow(ax0, ay0, tg[0], tg[1], "#ffa040", 2);
-  // Labels sit at midpoints, pushed to opposite sides of the line, because the ship and
-  // cue arrows are often near-collinear and tip labels would stack on each other.
-  const side = (a, b, sgn) => { const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1;
-    return [(a[0] + b[0]) / 2 - dy / L * 14 * sgn, (a[1] + b[1]) / 2 + dx / L * 14 * sgn]; };
-  const sm = side([ax0, ay0], t1, 1), n = S.arrowNumbers;
-  arrowLabel(sm[0], sm[1], "ship" + (n ? " " + Math.hypot(...shipV).toFixed(1) + " AU/yr" : ""), "#4fc3f7");
-  if (n) arrowLabel(t2[0], t2[1], Math.hypot(shipV[0] + cueV[0], shipV[1] + cueV[1]).toFixed(1) + " AU/yr", "#8fe8b0");
-  arrowLabel(tg[0], tg[1] + 14, "gravity: " + g.top + (n ? " +" + Math.hypot(...gravV).toFixed(2) + " AU/yr in " + S.gravityHorizonYr + " yr" : ""), "#ffa040");
-}
 function drawTimeBand(W, H) {
   const R = W * 1.1, cxp = W / 2, cyp = H - R - 90;
   const span = 0.38;
@@ -2272,7 +2391,7 @@ function drawTimeBand(W, H) {
   g.addColorStop(0, "rgba(190,220,255,0.95)"); g.addColorStop(1, "rgba(120,170,255,0)");
   circle(bx, by, 16, g); circle(bx, by, 4, "#e8f0fa");
   cx.fillStyle = "rgba(160,185,215,0.8)"; cx.font = `12px "Share Tech Mono", monospace`; cx.textAlign = "center";
-  const w = warpNow(), held = keys.shift || !!drag;
+  const w = warpNow(), held = timePaused || !!drag;
   cx.fillText(held ? "PAUSED" : w < 1000 ? w.toFixed(0) + "x" : w < 1e6 ? (w / 1000).toFixed(0) + "K" : (w / 1e6).toFixed(1) + "M", W / 2, H - 64);
   cx.textAlign = "left";
 }
@@ -2289,13 +2408,13 @@ function drawHud(W, H) {
      + (balls.length > 1 || (balls.length === 1 && acb.mode !== "empty") ? "   " + balls.length + " BALL" + (balls.length > 1 ? "S" : "") + " OUT" : ""),
      acb.mode === "attached" ? "#e8f0fa" : acb.mode === "lost" ? "#ff5030" : "#8fe8b0"],
     stab ? ["STABILISER burning, " + stab.err.toFixed(2) + " AU/yr to go.  WASD or Shift to override", "#e8b463"] : null,
-    keys.shift || drag ? ["TIME PAUSED" + (drag ? ": pull back, release to shoot" : ": hold LMB on the ball and pull back to aim"), "#8fc3e8"] : null,
+    timePaused || drag ? ["TIME PAUSED" + (drag ? ": aim locked, pull straight back for power, release to shoot" : ".  Shift resumes.  Hold LMB to lock the aim"), "#8fc3e8"] : null,
   ].filter(Boolean);
   lines.forEach((l, i) => { cx.fillStyle = l[1]; cx.fillText(l[0], 14, 22 + i * 17); });
   notices.forEach((n, i) => { cx.fillStyle = colA(n.color, Math.min(1, (20 - n.t) / 4)); cx.fillText(n.text, 14, H - 20 - (notices.length - 1 - i) * 16); });
   renderChamber();
   cx.fillStyle = "rgba(120,140,170,0.6)"; cx.textAlign = "right";
-  cx.fillText("WASD fly  Shift pause  Q/E time  LMB drag to shoot  Space catch / new ball  C camera  R reset  H panel", W - 14, H - 14);
+  cx.fillText("WASD fly  Shift pause on/off  Q/E time  hold LMB: lock aim, pull back, release  Space catch / new ball  C camera  R reset  H panel", W - 14, H - 14);
   cx.textAlign = "left";
   if (score.won) {
     cx.fillStyle = "rgba(5,7,13,0.6)"; cx.fillRect(W / 2 - 200, H / 2 - 50, 400, 90);
@@ -2352,11 +2471,14 @@ function cycleSlot(sl) {
 }
 
 // ============================== INPUT ===========================================
-const KEYMAP = { KeyW: "w", KeyA: "a", KeyS: "s", KeyD: "d", KeyQ: "q", KeyE: "e", ShiftLeft: "shift", ShiftRight: "shift" };
+const KEYMAP = { KeyW: "w", KeyA: "a", KeyS: "s", KeyD: "d", KeyQ: "q", KeyE: "e" };
 addEventListener("keydown", e => {
   if (e.target.tagName === "INPUT") return;
   if (intro) { skipIntro(); e.preventDefault(); return; }
   if (KEYMAP[e.code]) { keys[KEYMAP[e.code]] = true; e.preventDefault(); }
+  // Shift toggles the pause; E, the other way along the slider, also ends it
+  if ((e.code === "ShiftLeft" || e.code === "ShiftRight") && !e.repeat) { timePaused = !timePaused; note(timePaused ? "TIME PAUSED" : "TIME RESUMED", "#8fc3e8"); }
+  if (e.code === "KeyE" && timePaused) { timePaused = false; note("TIME RESUMED", "#8fc3e8"); }
   if (e.code === "KeyC") { S.camFollow = !S.camFollow; saveSettings(); buildPanel(); }
   if (e.code === "KeyR") resetWorld();
   if (e.code === "KeyP") paused = !paused;
@@ -2370,18 +2492,19 @@ cv.addEventListener("mousemove", e => { mouse.sx = e.clientX; mouse.sy = e.clien
 cv.addEventListener("mousedown", e => {
   if (intro) { skipIntro(); return; }
   if (e.button !== 0 || acb.mode !== "attached") return;
-  drag = { ax: e.clientX, ay: e.clientY };
+  // LOCK the direction the nose already points along; from here the drag is power only
+  drag = { ax: e.clientX, ay: e.clientY, dir: [Math.cos(ship.nose), Math.sin(ship.nose)] };
 });
 addEventListener("mouseup", e => {
   if (e.button !== 0) return;
   const p = pendingShot();
-  if (drag) { if (p && p[2] > 0.02) fireAcb(p[0], p[1], p[2]); drag = null; }
+  if (drag) { if (p && p[2] > 0.02) { lastPower = p[2]; fireAcb(p[0], p[1], p[2]); } drag = null; }
 });
 cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { cam.zoom = Math.max(0.4, Math.min(6, cam.zoom * Math.exp(-e.deltaY * 0.0012))); e.preventDefault(); }, { passive: false });
 
 // ============================== TEST PANEL ======================================
-const STORE_KEY = "galaxytable.v24";   // bumped: saved settings would otherwise hide the new default
+const STORE_KEY = "galaxytable.v25";   // bumped: saved settings would otherwise hide the new default
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
   catch { return { ...DEFAULTS }; }
@@ -2392,7 +2515,6 @@ function saveSettings() { try { localStorage.setItem(STORE_KEY, JSON.stringify(S
 // DEFAULTS entry and still tunable from the console (RIG.set), it is just not on screen.
 const PANEL = [
   ["h", "GALAXY TABLE SETTINGS"],
-  ["b", "autoStabilise", "auto-correct the orbit after a shot"],
   ["r", "ballScale", "planet size", 2, 20, 0.5],
   ["r", "systemScale", "system size (distance between planets)", 1, 2.5, 0.05],
   ["r", "gravPull", "gravitizer ball pull", 0.005, 0.2, 0.005],
@@ -2478,7 +2600,9 @@ window.RIG = {
   override: (why) => overrideStabiliser(why),
   newBall: () => newBallNow(),
   space: () => spaceKey(),
-  charge: (v) => { drag = { ax: mouse.sx + Math.cos(ship.nose) * v * S.dragMaxPx, ay: mouse.sy + Math.sin(ship.nose) * v * S.dragMaxPx }; },   // a held drag of power v along the nose
+  charge: (v) => { const d = [Math.cos(ship.nose), Math.sin(ship.nose)]; drag = { dir: d, ax: mouse.sx + d[0] * v * S.dragMaxPx, ay: mouse.sy + d[1] * v * S.dragMaxPx }; },   // a held, locked aim of power v
+  ghost: () => ghost,
+  paused: () => timePaused,
   ease: (s) => easeGhost(s),
   frame: (dtMs) => { manualFrame = true; last = performance.now() - dtMs; frame(performance.now()); manualFrame = false; },
   setType: (i, t) => { if (i < 0) acb.type = t; else chamber[i] = t; },
