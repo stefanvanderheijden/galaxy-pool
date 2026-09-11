@@ -38,7 +38,9 @@
                    takes the nose's direction, pull back from the press point for power
                    and swing round it to pivot. Release shoots in all three; time holds
                    while LMB is down, and a Shift pause ends when the shot goes
-    Tab            next aim mode: POWER LINE, HOLD TO POWER UP, DRAW BACK
+    Tab            next aim mode: POWER LINE, HOLD TO POWER UP, DRAW BACK. The mode you
+                   are on is the chip at the bottom centre, above the time slider: its
+                   name in green, a dot for each of the three, the border flashing on Tab
     RMB            TELEPORT toward the pointer, up to the width of Red's ring (1.1 AU
                    on the default table), keeping the ship's velocity; 2 s to recharge
     Esc            cancel the aim
@@ -2400,8 +2402,34 @@ function draw(realDt) {
     cx.fillStyle = g; cx.fillRect(0, 0, W, H);
   }
   drawTimeBand(W, H);
+  drawAimMode(W, H);
   drawHud(W, H);
   drawPointer();
+}
+// THE AIM MODE CHIP, bottom centre, just above the time slider. It is the only place the
+// mode is shown, so it gets its own plate and the table's one green: the name large, a
+// dot for each of the three modes with this one filled, and the Tab key that moves it on.
+// Narrow on purpose: a strip of all three names ran into the controls list at 1024 px.
+let aimSwitchAt = -1e9;   // when Tab last changed the mode: the border flashes for 0.8 s
+function drawAimMode(W, H) {
+  const name = AIM_NAMES[S.aimMode], order = ["reach", "charge", "draw"], idx = order.indexOf(S.aimMode);
+  const k = Math.max(0, 1 - (performance.now() - aimSwitchAt) / 800);
+  cx.font = `13px "Share Tech Mono", monospace`;
+  const w = cx.measureText(name).width + 120, h = 36, x0 = Math.round(W / 2 - w / 2), y0 = H - 112 - h;
+  cx.fillStyle = `rgba(8,12,22,${0.9 + 0.08 * k})`; cx.fillRect(x0, y0, w, h);
+  cx.strokeStyle = colA("#8fe8b0", 0.35 + 0.65 * k); cx.lineWidth = 1 + 1.5 * k;
+  cx.strokeRect(x0 + 0.5, y0 + 0.5, w - 1, h - 1);
+  cx.textAlign = "center"; cx.fillStyle = "#8fe8b0";
+  cx.fillText(name, W / 2, y0 + 17);
+  for (let i = 0; i < 3; i++) {
+    const dx = W / 2 + (i - 1) * 12, dy = y0 + 27;
+    if (i === idx) circle(dx, dy, 3, "#8fe8b0"); else circle(dx, dy, 2.5, null, "rgba(143,232,176,0.4)", 1);
+  }
+  cx.font = `9px "Share Tech Mono", monospace`; cx.fillStyle = "rgba(159,180,204,0.7)";
+  cx.textAlign = "left"; cx.fillText("AIM", x0 + 10, y0 + 22);
+  cx.strokeStyle = "rgba(159,180,204,0.5)"; cx.lineWidth = 1; cx.strokeRect(x0 + w - 40.5, y0 + 11.5, 30, 14);
+  cx.textAlign = "center"; cx.fillText("TAB", x0 + w - 25, y0 + 22);
+  cx.textAlign = "left";
 }
 // WHAT BECOMES OF IT: Geometry Pool's outcome markers. A ring where a body's future ends,
 // and a label on its own dark plate, because it usually lands on something bright.
@@ -2523,7 +2551,6 @@ function drawHud(W, H) {
      + (balls.length > 1 || (balls.length === 1 && acb.mode !== "empty") ? "   " + balls.length + " BALL" + (balls.length > 1 ? "S" : "") + " OUT" : ""),
      acb.mode === "attached" ? "#e8f0fa" : acb.mode === "lost" ? "#ff5030" : "#8fe8b0"],
     stab ? ["STABILISER burning, " + stab.err.toFixed(2) + " AU/yr to go.  WASD or Shift to override", "#e8b463"] : null,
-    ["AIM " + AIM_NAMES[S.aimMode] + "   Tab for " + AIM_NAMES[AIM_NEXT[S.aimMode]], "#8fc3e8"],
     timePaused || aiming() ? ["TIME PAUSED" + (drag ? ": pull back for power, swing round to pivot, release to shoot" : charging ? ": powering up, the nose aims, release to shoot" : reaching ? ": further from the ship is harder, release to shoot" : ".  Shift resumes.  Hold LMB to aim"), "#8fc3e8"] : null,
   ].filter(Boolean);
   lines.forEach((l, i) => { cx.fillStyle = l[1]; cx.fillText(l[0], 14, 22 + i * 17); });
@@ -2609,7 +2636,7 @@ addEventListener("keydown", e => {
   if (e.code === "KeyC") { S.camFollow = !S.camFollow; saveSettings(); buildPanel(); }
   if (e.code === "Tab") {
     S.aimMode = AIM_NEXT[S.aimMode] || "reach"; charging = false; charge = 0; drag = null; reaching = false; saveSettings();
-    note("AIM: " + AIM_NAMES[S.aimMode], "#8fc3e8"); e.preventDefault();
+    note("AIM: " + AIM_NAMES[S.aimMode], "#8fc3e8"); aimSwitchAt = performance.now(); e.preventDefault();
   }
   if (e.code === "KeyR") resetWorld();
   if (e.code === "KeyP") paused = !paused;
