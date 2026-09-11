@@ -26,7 +26,9 @@
     A / D          strafe left / right of the nose
     Q / E hold     time slider, continuous 1x..max time speed (panel)
     Shift          PAUSE TIME, a toggle: the slider goes to the far left as if Q were
-                   held all the way, and stays; Shift again (or E) and it springs back
+                   held all the way, and stays; Shift again (or E) and it springs back.
+                   Holding Q until the slider reaches the far left engages the same
+                   pause; Q has to be pressed again to re-engage it after a resume
     MOUSE          the nose follows the cursor, and the nose IS the shot: the aim line
                    is always drawn, faint, along it
     LMB hold       three aim modes, Tab cycles them. POWER LINE (the default): the shot
@@ -831,6 +833,7 @@ function drawCard(st, a, W, H) {
 let sliderT = 0.5, sliderShown = 0.5;       // 0..1 position, and its eased display twin
 let paused = false;
 let charging = false, charge = 0, reaching = false;   // reaching: LMB down in POWER LINE
+let qArmed = false;   // a fresh Q press may engage the pause at the slider's end, once
 let timePaused = false, lastPower = 0.5, freezeShown = 0, teleportCd = 0, ghostTick = 0;   // Shift's toggle, the aim line's idle power, the vignette
 let drag = null;                            // {ax, ay} screen anchor while a DRAG shot is held
 let stab = null;                            // { err } while the post-shot stabiliser burns
@@ -1620,8 +1623,8 @@ function buildGhost() {
 }
 
 // The world forecasts EASE toward each new build rather than snapping: resampled to a
-// fixed count and blended point by point on the real clock, 10/s when the rack is
-// only bending, 2.5/s once Solaris is struck in the forecast and the future is chaotic,
+// fixed count and eased point by point on the real clock (THE EASE, below), quicker
+// while the rack is only bending, slower once Solaris is struck and the future is chaotic,
 // so what the eye sees is the shot's tendency and not every frame's throw of the dice.
 // The cue ball's own line is not eased: the hand is aiming it.
 const GHOST_N = 480;   // three years of a looping track needs the points
@@ -1636,16 +1639,31 @@ function resample(pts, n) {
   }
   return out;
 }
+// THE EASE, per point: a critically damped spring toward the new build. It starts from
+// rest, so a swing of the line EASES IN rather than jumping; and it never approaches
+// slower than EASE_FLOOR, so the tail ARRIVES instead of crawling the last pixels as the
+// exponential blend it replaced did. The chaotic case (Solaris struck in the forecast)
+// gets the slower spring and floor, so what is seen there is the tendency.
+const EASE_SPRING = { calm: 16, chaos: 6 }, EASE_FLOOR = { calm: 1.5, chaos: 0.6 };   // 1/s; AU per real second
 function easeGhost(realDt) {
   if (!ghost) { ghostShown.clear(); return; }
-  const rate = ghost.starStruck ? 2.5 : 10, k = Math.min(1, realDt * rate), seen = new Set();
+  const mode = ghost.starStruck ? "chaos" : "calm", w0 = EASE_SPRING[mode], vmin = EASE_FLOOR[mode], dt = realDt, seen = new Set();
   for (const w of ghost.worlds) {
     seen.add(w.id);
     const target = resample(w.pts, GHOST_N);
     let sh = ghostShown.get(w.id);
-    if (!sh) { sh = target; ghostShown.set(w.id, sh); }
-    else for (let i = 0; i < GHOST_N; i++) { sh[i].x += (target[i].x - sh[i].x) * k; sh[i].y += (target[i].y - sh[i].y) * k; }
-    w.shown = sh;
+    if (!sh) { sh = { pts: target, v: new Float64Array(GHOST_N * 2) }; ghostShown.set(w.id, sh); }
+    else for (let i = 0; i < GHOST_N; i++) {
+      const p = sh.pts[i], t = target[i], dx = t.x - p.x, dy = t.y - p.y, d = Math.hypot(dx, dy);
+      if (d <= vmin * dt) { p.x = t.x; p.y = t.y; sh.v[2 * i] = 0; sh.v[2 * i + 1] = 0; continue; }   // arrived
+      let vx = sh.v[2 * i], vy = sh.v[2 * i + 1];
+      vx += (w0 * w0 * dx - 2 * w0 * vx) * dt; vy += (w0 * w0 * dy - 2 * w0 * vy) * dt;
+      let sx = vx * dt, sy = vy * dt;
+      const along = (sx * dx + sy * dy) / d, floor = vmin * dt;
+      if (along < floor) { sx += (floor - along) * dx / d; sy += (floor - along) * dy / d; }   // the tail's floor
+      p.x += sx; p.y += sy; sh.v[2 * i] = vx; sh.v[2 * i + 1] = vy;
+    }
+    w.shown = sh.pts;
   }
   for (const id of [...ghostShown.keys()]) if (!seen.has(id)) ghostShown.delete(id);
 }
@@ -1668,6 +1686,8 @@ function frame(now) {
 
   // THE PAUSE. Shift TOGGLES it and the slider drops to the far left, as if Q were held
   // all the way; a held aim holds time too. Off again, the clock springs back.
+  // Q held all the way to the left engages the pause, as Shift does; one engage per press
+  if (keys.q && qArmed && !timePaused && sliderT <= 0) { timePaused = true; qArmed = false; note("TIME PAUSED", "#8fc3e8"); }
   const timeHeld = timePaused || aiming();
   freezeShown += ((timeHeld ? 1 : 0) - freezeShown) * Math.min(1, realDt * 8);
   const SLIDE_RATE = 0.45;
@@ -2554,14 +2574,14 @@ function drawHud(W, H) {
      + (balls.length > 1 || (balls.length === 1 && acb.mode !== "empty") ? "   " + balls.length + " BALL" + (balls.length > 1 ? "S" : "") + " OUT" : ""),
      acb.mode === "attached" ? "#e8f0fa" : acb.mode === "lost" ? "#ff5030" : "#8fe8b0"],
     stab ? ["STABILISER burning, " + stab.err.toFixed(2) + " AU/yr to go.  WASD or Shift to override", "#e8b463"] : null,
-    timePaused || aiming() ? ["TIME PAUSED" + (drag ? ": pull back for power, swing round to pivot, release to shoot" : charging ? ": powering up, the nose aims, release to shoot" : reaching ? ": further from the ship is harder, release to shoot" : ".  Shift resumes.  Hold LMB to aim"), "#8fc3e8"] : null,
+    timePaused || aiming() ? ["TIME PAUSED" + (drag ? ": pull back for power, swing round to pivot, release to shoot" : charging ? ": powering up, the nose aims, release to shoot" : reaching ? ": further from the ship is harder, release to shoot" : ".  Shift or E resumes.  Hold LMB to aim"), "#8fc3e8"] : null,
   ].filter(Boolean);
   lines.forEach((l, i) => { cx.fillStyle = l[1]; cx.fillText(l[0], 14, 22 + i * 17); });
   notices.forEach((n, i) => { cx.fillStyle = colA(n.color, Math.min(1, (20 - n.t) / 4)); cx.fillText(n.text, 14, H - 20 - (notices.length - 1 - i) * 16); });
   renderChamber();
   // THE CONTROLS: a list at the bottom right, on its own plate so it reads over the table
   const CONTROLS = [["WASD", "fly"], ["MOUSE", "aim: the nose is the shot"], ["LMB hold", AIM_HELP[S.aimMode]], ["TAB", "next aim mode: " + AIM_NAMES[AIM_NEXT[S.aimMode]].toLowerCase()],
-                    ["LMB release", "shoot"], ["RMB", "teleport, short range, 2 s recharge"], ["SHIFT", "pause on / off"], ["Q / E", "slower / faster time"],
+                    ["LMB release", "shoot"], ["RMB", "teleport, short range, 2 s recharge"], ["SHIFT", "pause on / off"], ["Q / E", "slower / faster time (Q to the end pauses)"],
                     ["SPACE", "catch a ball / load the next"], ["C", "camera"], ["R", "rack again"], ["H", "hide the settings"]];
   cx.font = `11px "Share Tech Mono", monospace`;
   const lh = 15, pw = 100 + Math.max(...CONTROLS.map(c => cx.measureText(c[1]).width)) + 14, ph = CONTROLS.length * lh + 12, px0 = W - pw - 14, py0 = H - ph - 14;
@@ -2636,6 +2656,7 @@ addEventListener("keydown", e => {
   // Shift toggles the pause; E, the other way along the slider, also ends it
   if ((e.code === "ShiftLeft" || e.code === "ShiftRight") && !e.repeat) { timePaused = !timePaused; note(timePaused ? "TIME PAUSED" : "TIME RESUMED", "#8fc3e8"); }
   if (e.code === "KeyE" && timePaused) { timePaused = false; note("TIME RESUMED", "#8fc3e8"); }
+  if (e.code === "KeyQ" && !e.repeat) qArmed = true;
   if (e.code === "KeyC") { S.camFollow = !S.camFollow; saveSettings(); buildPanel(); }
   if (e.code === "Tab") {
     S.aimMode = AIM_NEXT[S.aimMode] || "reach"; charging = false; charge = 0; drag = null; reaching = false; saveSettings();
