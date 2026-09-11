@@ -77,7 +77,8 @@
   while you are pooling. The outcome labels and the aim caption are off by default
   (panel: in-world labels). Since trimmed further: no grab bracket, no contact ring, and
   the rings left on the table are the one on a pocket, where a world or the cue ball
-  goes in, and one CONTACT RING where the cue ball first touches a planet. The STRUCK WORLD'S line is the thick one and the cue ball's the thin one,
+  goes in, and a CONTACT RING where the cue ball first touches a planet and another
+  where it first touches the sun (the burn, or a Night ball's strike). The STRUCK WORLD'S line is the thick one and the cue ball's the thin one,
   because the question the forecast answers is where the world goes. LMB up, the
   forecast is rebuilt every other frame: it is being looked at, not aimed.
 
@@ -1498,7 +1499,7 @@ function buildGhost() {
       burnOut(k); k.dead = true; continue;
     }
     if (hit && hit.id === "star" && k.type !== "night") {
-      if (k === pending) addFate("star", k.x, k.y, null, true);
+      if (k === pending) { addFate("star", k.x, k.y, null, true); if (!out.sunHit) out.sunHit = { x: k.x, y: k.y }; }
       k.flash = null; k.dead = true; continue;
     }
     if (hit && hit.ball) {
@@ -1516,6 +1517,7 @@ function buildGhost() {
     if (hit) {
       if (k === pending) out.hit = { x: k.x, y: k.y };
       if (k === pending && hit.id !== "star" && !out.planetHit) out.planetHit = { x: k.x, y: k.y };
+      if (k === pending && hit.id === "star" && !out.sunHit) out.sunHit = { x: k.x, y: k.y };   // a Night ball strikes it
       const [ivx, ivy] = impactVelocity(k); k.vx = ivx; k.vy = ivy;
       const dx = hit.x - k.x, dy = hit.y - k.y, d = Math.hypot(dx, dy) || 1, R = S.acbRadiusAU + ballR(hit);
       k.x = hit.x - dx / d * R * 0.995; k.y = hit.y - dy / d * R * 0.995;
@@ -1551,9 +1553,10 @@ function buildGhost() {
     const events = [];
     resolveContacts(contactList(gb, gstar), live, events);
     for (const e of events) {
-      if (e.kind === "burned") { if (e.ball === pending) addFate("star", e.x, e.y, null, true); continue; }
+      if (e.kind === "burned") { if (e.ball === pending) { addFate("star", e.x, e.y, null, true); if (!out.sunHit) out.sunHit = { x: e.x, y: e.y }; } continue; }
       if (!out.hit && pending && !pending.dead && dist(e.x, e.y, pending.x, pending.y) < 0.2) out.hit = { x: e.x, y: e.y };
       if (!out.planetHit && pending && e.ball === pending && e.b && e.b.id !== "star") out.planetHit = { x: pending.x, y: pending.y };
+      if (!out.sunHit && pending && e.ball === pending && e.b && e.b.id === "star") out.sunHit = { x: pending.x, y: pending.y };
       // struck by the cue ball: a direct line. Struck by another body (a world the moving
       // star ploughed into): secondary, drawn thinner and shorter, because a strike on
       // Solaris sends the whole rack chaotic and a year of that is noise, not a forecast
@@ -2249,9 +2252,11 @@ function draw(realDt) {
         if (rest.length > 1) strokePts(rest, "#ffffff", 0.18, 1, [3, 6]);
       }
     }
-    // THE CONTACT RING: where the cue ball first touches a planet, and nowhere else
-    if (ghost.planetHit) {
-      const q = worldToScreen(ghost.planetHit.x, ghost.planetHit.y);
+    // THE CONTACT RINGS: where the cue ball first touches a planet, and where it first
+    // touches the sun, and nowhere else
+    for (const c of [ghost.planetHit, ghost.sunHit]) {
+      if (!c) continue;
+      const q = worldToScreen(c.x, c.y);
       if (q) { circle(q[0], q[1], 9, null, `rgba(255,255,255,${0.95 * m})`, 2); circle(q[0], q[1], 2.5, `rgba(255,255,255,${0.95 * m})`); }
     }
     for (const f of ghost.fates) drawFate(f, m);
