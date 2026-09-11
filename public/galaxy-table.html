@@ -38,6 +38,9 @@
                    takes the nose's direction, pull back from the press point for power
                    and swing round it to pivot. Release shoots in all three; time holds
                    while LMB is down, and a Shift pause ends when the shot goes
+    LMB on a bare nose, with a ball in the chamber: loads it at once and says so in the
+                   log. That press only loads, so a click cannot load and fire at once;
+                   the next press aims
     Tab            next aim mode: POWER LINE, HOLD TO POWER UP, DRAW BACK. The mode you
                    are on is the chip at the bottom centre, above the time slider: its
                    name in green, a dot for each of the three, the border flashing on Tab
@@ -1408,12 +1411,12 @@ function stepCapture(realDt) {
 }
 // Space: load the next chambered ball onto a bare nose. Nothing is spent: a ball out
 // there keeps flying and can still be caught back into the chamber.
-function newBallNow() {
+function newBallNow(auto) {   // auto: loaded by LMB on a bare nose
   if (score.failed || score.won || acb.mode === "attached" || acb.mode === "capturing") return;
   if (!chamber.length) { note("CHAMBER EMPTY: catch a ball", "#e8b463"); return; }
   acb.type = chamber.shift();
   acb.mode = "attached"; acb.cap = null; placeAcbOnNose();
-  note(BALL_TYPES[acb.type].name.toUpperCase() + " LOADED" + (balls.length ? " (" + balls.length + " out)" : ""), "#e8f0fa");
+  note((auto ? "NOSE WAS EMPTY, " : "") + BALL_TYPES[acb.type].name.toUpperCase() + " LOADED" + (auto ? " from the chamber on LMB" : "") + (balls.length ? " (" + balls.length + " out)" : ""), "#e8f0fa");
 }
 function stepLost(realDt) {
   if (acb.mode !== "lost" || score.failed) return;
@@ -2546,7 +2549,7 @@ function drawHud(W, H) {
      "   BALLS " + ballsLeft() + (score.starPotted ? "   SOLARIS POTTED" : ""), ballsLeft() <= 1 ? "#ff8c70" : "#cfe0ff"],
     ["T " + simYears.toFixed(2) + " yr" + (score.deaths ? "   SHIP LOST " + score.deaths : ""), "#9fb4cc"],
     ["ACB " + (acb.mode === "attached" ? "ON THE NOSE" : acb.mode === "capturing" ? "WINCHING IN" :
-              acb.mode === "empty" ? "OUT, get in its ring and press Space" + (chamber.length ? " (or Space loads the next)" : "") :
+              acb.mode === "empty" ? "OUT, get in its ring and press Space" + (chamber.length ? " (or Space or LMB loads the next)" : "") :
               score.failed ? "NONE LEFT" : chamber.length ? "DESTROYED, next loads in " + Math.max(0, S.respawnSeconds - acb.lostT).toFixed(1) + " s" : "DESTROYED, catch one")
      + (balls.length > 1 || (balls.length === 1 && acb.mode !== "empty") ? "   " + balls.length + " BALL" + (balls.length > 1 ? "S" : "") + " OUT" : ""),
      acb.mode === "attached" ? "#e8f0fa" : acb.mode === "lost" ? "#ff5030" : "#8fe8b0"],
@@ -2650,6 +2653,9 @@ cv.addEventListener("mousemove", e => { mouse.sx = e.clientX; mouse.sy = e.clien
 cv.addEventListener("mousedown", e => {
   if (intro) { skipIntro(); return; }
   if (e.button === 2) { teleportTo(e.clientX, e.clientY); return; }
+  // A BARE NOSE (the ball is out, or was destroyed and the next is on its way) with a ball
+  // in the chamber: LMB loads it now. This press only loads; the next one aims.
+  if (e.button === 0 && (acb.mode === "empty" || acb.mode === "lost") && chamber.length && !score.failed && !score.won) { newBallNow(true); return; }
   if (e.button !== 0 || acb.mode !== "attached") return;
   if (S.aimMode === "reach") { reaching = true; return; }             // POWER LINE
   if (S.aimMode === "charge") { charging = true; charge = 0; return; }  // HOLD TO POWER UP
