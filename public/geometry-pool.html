@@ -28,11 +28,22 @@
   CONTROLS, MOUSE AND KEYBOARD
     MOUSE MOVE     the ship flies to the cursor, and the clock winds up with the
                    distance: far cursor, fast time, the rack whirling past you.
-    LMB on the ship, drag, release
-                   the aim. Pressing on the ship FREEZES TIME over freezeInS; drag away
-                   from it to pull the cue back (direction is opposite the drag, power is
-                   how far); release to shoot. Time comes back over thawOutS, which is
-                   slower than the freeze on purpose: you watch the flash leave.
+    LMB on the ship, move, release
+                   the aim, and pressing on the ship FREEZES TIME over freezeInS. THREE
+                   SHOOTING STYLES, Tab cycles them, ported from 009 Galaxy Table:
+                     POWER LINE (the default)  the shot goes TOWARD the pointer and the
+                       pointer's distance from the ship is the power, full at dragMaxPx.
+                       You keep pointing at the body you want, exactly as you do when
+                       flying, instead of pulling away from it.
+                     HOLD TO POWER UP  the power builds over chargeSeconds while you
+                       hold, and the shot goes toward the pointer wherever it is.
+                     DRAW BACK  this rig's original: pull away from the ship and the
+                       shot goes the other way, power is how far you pulled.
+                   Release to shoot in all three. Time comes back over thawOutS, which is
+                   slower than the freeze on purpose: you watch the flash leave. The mode
+                   is the chip above the time slider; the PAD's right stick is its own
+                   aim (its angle is the shot, its throw the power) in every mode.
+    Tab            next shooting style: POWER LINE, HOLD TO POWER UP, DRAW BACK
     Esc / RMB      cancel the aim, no shot, time returns
     Space          catch a ball in reach, or load the next one onto a bare nose
     Q / E hold     time slider, continuous. Drift returns it to game speed.
@@ -239,7 +250,7 @@ function warpMax() { return Math.max(5e6, warpMid() * 5); }
 // loadSettings() runs it is still in its temporal dead zone: reading it throws, the
 // try/catch in loadSettings swallows the throw, and every rack silently opens on the
 // DEFAULTS however the panel was left. Saved settings there are written and never read.
-const STORE_KEY = "geometrypool.v1";
+const STORE_KEY = "geometrypool.v2";   // bumped: the shooting styles added defaults
 const DEFAULTS = {
   // ---- the flying. THE SHIP IS SLOW AND THE CLOCK IS THE THROTTLE: see the header ----
   shipSpeedAUyr: 3.0,     // the ship's honest speed. Under Vera's 3.5 so it is the slowest thing here
@@ -258,7 +269,9 @@ const DEFAULTS = {
   thawOutS: 0.42,         // real seconds for it to come back. Slower on purpose
   grabRadiusPx: 70,       // how near the ship LMB counts as grabbing it
   grabAnywhere: false,    // on, LMB anywhere aims: no need to find the hull
-  dragMaxPx: 220,         // pixels of pull for a full-power shot
+  dragMaxPx: 220,         // pixels of pull (or of reach) for a full-power shot
+  aimMode: "reach",       // "reach" POWER LINE, "charge" HOLD TO POWER UP, "draw" DRAW BACK. Tab cycles
+  chargeSeconds: 1.2,     // HOLD TO POWER UP: real seconds from nothing to full power
   shotPower: 8.0,         // AU/yr of delta-v at full pull
   recoilFrac: 0,          // ship kickback. 0: the ship is not on a rail, nothing to correct
   inheritFrac: 0,         // how much ship velocity the ball keeps. 0: the shot is the aim
@@ -894,23 +907,40 @@ function cancelAim(why) {
 }
 function releaseAim() {
   if (!aim) return;
-  const { dir, power } = aim;
+  const { dir, power, src } = aim;
+  // a tap in HOLD TO POWER UP has had no time to build: give it a floor rather than a dud
+  const pw = S.aimMode === "charge" && src === "mouse" ? Math.max(0.08, power) : power;
   aim = null; pointerToShip();
-  if (power > 0.02) fireAcb(dir[0], dir[1], power);
-  else note("NO SHOT: nothing pulled back", "#8fc3e8");
+  if (pw > 0.02) fireAcb(dir[0], dir[1], pw);
+  else note("NO SHOT: " + (S.aimMode === "reach" ? "the pointer never left the ship" : "nothing pulled back"), "#8fc3e8");
 }
-// The mouse rewrites the aim every frame from the pull vector: the shot is opposite the
-// drag, measured from the SHIP rather than from where the click landed, so a click a few
-// pixels off the hull does not tilt the whole shot.
+// THE THREE SHOOTING STYLES, on the mouse. All of them measure from the SHIP rather than
+// from where the click landed, so a click a few pixels off the hull does not tilt the
+// whole shot. POWER LINE and DRAW BACK read the same vector and differ only in its sign:
+// one shoots where you point, the other away from it. HOLD TO POWER UP takes its power
+// from the clock instead, and keeps pointing where the pointer is.
+const AIM_NAMES = { reach: "POWER LINE", charge: "HOLD TO POWER UP", draw: "DRAW BACK" };
+const AIM_NEXT = { reach: "charge", charge: "draw", draw: "reach" };
+const AIM_HELP = { reach: "press the ship, then move out: distance is power",
+                   charge: "press the ship and hold: power builds over time",
+                   draw: "press the ship and pull back: the shot goes the other way" };
+const AIM_GRAB = { reach: "MOVE OUT TO AIM", charge: "HOLD TO POWER UP", draw: "PULL BACK TO AIM" };
+const AIM_DEAD_PX = 6;
 function updateMouseAim(realDt) {
   if (!aim || aim.src !== "mouse") return;
   aim.held += realDt;
   const q = shipScreen();
-  const vx = q[0] - mouse.sx, vy = q[1] - mouse.sy;
+  const vx = q[0] - mouse.sx, vy = q[1] - mouse.sy;     // ship minus pointer
   const len = Math.hypot(vx, vy);
-  if (len < 4) { aim.power = 0; return; }
-  aim.dir = [vx / len, vy / len];
-  aim.power = Math.min(1, len / S.dragMaxPx);
+  if (S.aimMode === "charge") {                          // HOLD TO POWER UP: the clock is the power
+    if (len > AIM_DEAD_PX) aim.dir = [-vx / len, -vy / len];
+    aim.power = Math.min(1, aim.held / Math.max(0.05, S.chargeSeconds));
+    return;
+  }
+  if (len < AIM_DEAD_PX) { aim.power = 0; return; }
+  const sign = S.aimMode === "reach" ? -1 : 1;           // POWER LINE shoots where you point
+  aim.dir = [sign * vx / len, sign * vy / len];
+  aim.power = Math.min(1, (len - AIM_DEAD_PX) / Math.max(1, S.dragMaxPx));
 }
 // What the shot WOULD be right now, for the forecast.
 function pendingShot() {
@@ -2019,7 +2049,7 @@ function draw(realDt) {
       }
       cx.lineCap = "butt";
       cx.fillStyle = col; cx.font = `10px "Share Tech Mono", monospace`; cx.textAlign = "center";
-      cx.fillText(aim ? "PULLING BACK — RELEASE TO SHOOT" : ready ? "PULL BACK TO AIM" : "NO CUE BALL ON THE NOSE", sx, sy - R - 12);
+      cx.fillText(aim ? "RELEASE TO SHOOT" : ready ? AIM_GRAB[S.aimMode] : "NO CUE BALL ON THE NOSE", sx, sy - R - 12);
       cx.textAlign = "left";
     }
     cx.save(); cx.translate(sx, sy); cx.rotate(ship.nose);
@@ -2067,8 +2097,34 @@ function draw(realDt) {
     cx.fillStyle = g; cx.fillRect(0, 0, W, H);
   }
   drawTimeBand(W, H);
+  drawAimMode(W, H);
   drawHud(W, H);
   drawPointer();
+}
+// THE SHOOTING STYLE, on a chip just above the time slider: the only place the mode is
+// named, so it gets its own plate and this rig's green. The name, a dot for each of the
+// three styles with this one filled, and the Tab key that moves it on; the border flashes
+// for 0.8 s after a swap. Ported from 009 with the rig's own colours.
+let aimSwitchAt = -1e9;
+function drawAimMode(W, H) {
+  const name = AIM_NAMES[S.aimMode], order = ["reach", "charge", "draw"], idx = order.indexOf(S.aimMode);
+  const k = Math.max(0, 1 - (performance.now() - aimSwitchAt) / 800);
+  cx.font = `13px "Share Tech Mono", monospace`;
+  const w = cx.measureText(name).width + 120, h = 36, x0 = Math.round(W / 2 - w / 2), y0 = H - 112 - h;
+  cx.fillStyle = `rgba(8,12,22,${0.9 + 0.08 * k})`; cx.fillRect(x0, y0, w, h);
+  cx.strokeStyle = colA("#8fe8b0", 0.35 + 0.65 * k); cx.lineWidth = 1 + 1.5 * k;
+  cx.strokeRect(x0 + 0.5, y0 + 0.5, w - 1, h - 1);
+  cx.textAlign = "center"; cx.fillStyle = "#8fe8b0";
+  cx.fillText(name, W / 2, y0 + 17);
+  for (let i = 0; i < 3; i++) {
+    const dx = W / 2 + (i - 1) * 12, dy = y0 + 27;
+    if (i === idx) circle(dx, dy, 3, "#8fe8b0"); else circle(dx, dy, 2.5, null, "rgba(143,232,176,0.4)", 1);
+  }
+  cx.font = `9px "Share Tech Mono", monospace`; cx.fillStyle = "rgba(159,180,204,0.7)";
+  cx.textAlign = "left"; cx.fillText("AIM", x0 + 10, y0 + 22);
+  cx.strokeStyle = "rgba(159,180,204,0.5)"; cx.lineWidth = 1; cx.strokeRect(x0 + w - 40.5, y0 + 11.5, 30, 14);
+  cx.textAlign = "center"; cx.fillText("TAB", x0 + w - 25, y0 + 22);
+  cx.textAlign = "left";
 }
 // THE POINTER. Drawn, not the OS's, in the four states the header names. Last in the
 // frame so nothing can cover it, and skipped entirely when the pad is flying, because
@@ -2230,7 +2286,7 @@ function drawHud(W, H) {
      (Math.hypot(ship.vx, ship.vy) * yrPerRealS()).toFixed(2) + " AU/s)" +
      "   SLOWEST WORLD " + slowestWorldAUyr().toFixed(1) + " AU/yr", "#9fb4cc"],
     travelBoost > 1.05 ? ["TRAVELLING: time x" + travelBoost.toFixed(0) + " — the rack is running while you fly", "#8fe8b0"] : null,
-    [pad.active ? "PAD: left stick flies, right stick aims and RELEASING IT SHOOTS" : "MOUSE: the ship flies to the cursor, drag off the hull to aim", "#8fc3e8"],
+    [pad.active ? "PAD: left stick flies, right stick aims and RELEASING IT SHOOTS" : AIM_NAMES[S.aimMode] + ": " + AIM_HELP[S.aimMode], "#8fc3e8"],
     ["CUE BALL " + (acb.mode === "attached" ? "ON THE NOSE" : acb.mode === "capturing" ? "WINCHING IN" :
               acb.mode === "empty" ? "OUT, fly into its ring" + (chamber.length ? " (or Space loads the next)" : "") :
               score.failed ? "NONE LEFT" : chamber.length ? "DESTROYED, next loads in " + Math.max(0, S.respawnSeconds - acb.lostT).toFixed(1) + " s" : "DESTROYED, catch one")
@@ -2246,7 +2302,7 @@ function drawHud(W, H) {
   renderChamber();
   cx.fillStyle = "rgba(120,140,170,0.6)"; cx.textAlign = "right";
   cx.fillText(pad.active ? "L stick fly  R stick aim (release = shoot)  RT fire  A catch  B cancel  LB/RB time  START pause  BACK reset"
-                         : "move to fly  drag the ship to aim  Space catch  Q/E time  C camera  R reset  P pause  H panel", W - 14, H - 14);
+                         : "move to fly  press the ship to aim  Tab style  Space catch  Q/E time  C camera  R reset  P pause  H panel", W - 14, H - 14);
   cx.textAlign = "left";
   const banner = (title, sub, col) => {
     cx.fillStyle = "rgba(5,7,13,0.6)"; cx.fillRect(W / 2 - 200, H / 2 - 50, 400, 90);
@@ -2299,6 +2355,10 @@ addEventListener("keydown", e => {
   if (e.target.tagName === "INPUT") return;
   if (KEYMAP[e.code]) { keys[KEYMAP[e.code]] = true; e.preventDefault(); }
   if (e.code === "KeyC") { S.camFollow = !S.camFollow; saveSettings(); buildPanel(); }
+  if (e.code === "Tab") {
+    S.aimMode = AIM_NEXT[S.aimMode] || "reach"; cancelAim("mode"); saveSettings();
+    note("AIM: " + AIM_NAMES[S.aimMode], "#8fc3e8"); aimSwitchAt = performance.now(); e.preventDefault();
+  }
   if (e.code === "KeyR") resetWorld();
   if (e.code === "KeyP") paused = !paused;
   if (e.code === "KeyH") { const p = document.getElementById("panel"); p.style.display = p.style.display === "none" ? "" : "none"; }
@@ -2341,7 +2401,7 @@ cv.addEventListener("mousedown", e => {
   if (e.button === 2) { cancelAim("right click"); return; }
   if (e.button !== 0) return;
   if (S.grabAnywhere || overShip(mouse.sx, mouse.sy)) startAim("mouse");
-  else note("AIM: press ON THE SHIP and pull back (grabAnywhere on the panel lifts this)", "#e8b463");
+  else note("AIM: " + AIM_HELP[S.aimMode] + " (grabAnywhere on the panel lifts this)", "#e8b463");
 });
 addEventListener("mouseup", e => { if (e.button === 0 && aim && aim.src === "mouse") releaseAim(); });
 cv.addEventListener("contextmenu", e => e.preventDefault());
@@ -2374,7 +2434,8 @@ const PANEL = [
   ["r", "thawOutS", "seconds for time to come back after the shot", 0.05, 2, 0.02],
   ["r", "grabRadiusPx", "how near the ship a click counts as grabbing it (px)", 20, 200, 5],
   ["b", "grabAnywhere", "aim from anywhere, not just on the ship"],
-  ["r", "dragMaxPx", "pull-back distance for full power (px)", 60, 500, 10],
+  ["r", "dragMaxPx", "distance for full power: pulled back, or reached out (px)", 60, 500, 10],
+  ["r", "chargeSeconds", "HOLD TO POWER UP: seconds to full power", 0.3, 3, 0.1],
   ["r", "shotPower", "shot strength", 1, 20, 0.5],
   ["r", "recoilFrac", "ship kickback on a shot", 0, 1, 0.05],
   ["r", "inheritFrac", "how much ship speed bends the shot (0 = none)", 0, 1, 0.05],
