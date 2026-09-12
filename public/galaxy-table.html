@@ -19,8 +19,10 @@
     3. The ACB hits a world; the world is knocked off its rail and feels the pockets.
     4. Fly to the ACB and catch it: inside the ring, slow enough, it winches back on.
     5. Repeat until the rack is clear, AND SOLARIS WITH IT: the table is not cleared
-       until the star is in a pocket too, and only the Night ball can move it (every
-       other cue ball burns there), so a rack needs one chambered.
+       until the star is in a pocket too. Only two cue balls can move it: the NIGHT
+       ball, which strikes it and comes back out, and the THERMONUCLEAR, which strikes
+       it hardest and is spent doing it. Every other ball burns there, so a rack needs
+       one of the two chambered.
 
   CONTROLS
     MOUSE          aim: the nose tracks the cursor (hyperwarp 2)
@@ -192,7 +194,7 @@
   the clock on the cushions: use them before Styx has been round. Off, Styx sits with
   the other two pockets and the belt lasts the rack.
 
-  SOLARIS IS POOLABLE, BUT ONLY WITH THE NIGHT BALL: every other cue ball burns in it,
+  SOLARIS IS POOLABLE, WITH THE NIGHT BALL OR A THERMONUCLEAR: every other ball burns in it,
   AND POTTING IT IS PART OF CLEARING THE TABLE. Three worlds down is not a win while the
   star is still up; the log says so when the last world goes.
   The star is a body like the worlds: a Night ball that reaches it
@@ -273,9 +275,11 @@
     Thermonuclear  yellow. Goes off on impact, so it is spent, and hits with
                    thermoEnergy times a normal shot: the ball for a heavy world. A
                    FRAGILE world (Terra, Vera: rock and ice) breaks instead of moving,
-                   which is a foul; Red's thick envelope takes it.
-    Night          black. The only cue ball Solaris does not burn: it strikes the
-                   star like a world, so it is the one that can pool it.
+                   which is a foul; Red's thick envelope takes it. It also STRIKES
+                   SOLARIS rather than burning in it, going off there as it does on a
+                   world: the hardest hit the star can be given, for the price of the ball.
+    Night          black. The only cue ball that comes back OUT of Solaris: it strikes
+                   the star like a world and can be caught again afterwards.
     Gravitizer     dark purple. Once shot it pulls at everything inside gravReachAU,
                    worlds, balls and the ship, as a softened point mass of gravPull
                    solar masses; a world it reaches is unmoored. Drawn with subtle
@@ -438,6 +442,10 @@ const BALL_TYPES = {
   night:    { name: "Night",         short: "NIGHT", color: "#15151f", hi: "#6a6a90", lo: "#000000" },
 };
 const TYPE_ORDER = ["standard", "thermo", "grav", "night"];
+// WHO CAN HIT SOLARIS. Every other cue ball burns in it. The Night ball strikes it and
+// comes back out; the thermonuclear strikes it too and is spent there, going off as it
+// does on any world, which makes it the hardest hit the star can be given.
+function strikesStar(type) { return type === "night" || type === "thermo"; }
 const SHIP_DEF = { r: 1.45, a: 3.927, overSpeed: 1.005 };
 // Zerograv freeflight: the ship spawns AT REST, and between Terra's ring (0.92) and Vera's
 // (1.45) rather than on Vera's, where a parked ship would be run down within the rack.
@@ -588,7 +596,7 @@ function resetWorld() {
 // register: short, practical, "captain", and never a word about who set the table.
 const BRIEF = {
   star:    { cls: "M-type main sequence", diameterKm: 625328, tempC: 3126.9, inhabited: false,
-             note: "Red dwarf, captain. Cold system: every world out here is frozen. It burns any cue ball you put into it, except the Night ball, and the Night ball will move it. You will need to: the table is not clear until Solaris is in a pocket, so chamber a Night ball and leave the star for last." },
+             note: "Red dwarf, captain. Cold system: every world out here is frozen. It burns any cue ball you put into it but two: the Night ball, which strikes it and comes back, and a thermonuclear, which strikes it hardest and is spent there. You will need one: the table is not clear until Solaris is in a pocket, so chamber one of them and leave the star for last." },
   smell:   { cls: "Terrestrial, veiled", diameterKm: 14661, tempC: -9.2, inhabited: false,
              note: "The heavy one. Sulphur haze over a thick envelope, and it takes a thermonuclear without cracking. It will not go far on a soft shot, so lean in." },
   hearing: { cls: "Terrestrial", diameterKm: 10472, tempC: -155.2, inhabited: true,
@@ -931,7 +939,7 @@ function resolveContacts(list, freeBalls, events) {
   const rA = S.acbRadiusAU;
   for (const ball of freeBalls) for (const b of list) {
     if (!b.alive || ball.dead) continue;
-    if (b.id === "star" && ball.type !== "night") {
+    if (b.id === "star" && !strikesStar(ball.type)) {
       // Solaris burns every cue ball but the Night ball, which is the one that can pool it
       if (dist(ball.x, ball.y, b.x, b.y) < rA + ballR(b)) { ball.dead = true; ball.burned = true; events.push({ kind: "burned", ball, b, x: ball.x, y: ball.y }); }
       continue;
@@ -1089,7 +1097,7 @@ function simStep(h, offGravity) {
     }
     if (hit && hit.ball) { flashHitsBall(k, hit.ball); continue; }
     if (hit && hit.shipHit) { fx.trails.push(k.flash.pts); burnOut(k); shipCause = "hit by its own cue ball"; continue; }
-    if (hit && hit.id === "star" && k.type !== "night") {
+    if (hit && hit.id === "star" && !strikesStar(k.type)) {
       fx.trails.push(k.flash.pts); k.flash = null; k.dead = true; k.burned = true;
       burst(k.x, k.y, 0.15, "#ff8a3c"); flash(k.x, k.y, 0.2, "#ff5030");
       continue;
@@ -1538,7 +1546,7 @@ function buildGhost() {
       if (k === pending) addFate("ship", k.x, k.y, null, true);
       burnOut(k); k.dead = true; continue;
     }
-    if (hit && hit.id === "star" && k.type !== "night") {
+    if (hit && hit.id === "star" && !strikesStar(k.type)) {
       if (k === pending) { addFate("star", k.x, k.y, null, true); if (!out.sunHit) out.sunHit = { x: k.x, y: k.y }; }
       k.flash = null; k.dead = true; continue;
     }
@@ -1557,7 +1565,7 @@ function buildGhost() {
     if (hit) {
       if (k === pending) out.hit = { x: k.x, y: k.y };
       if (k === pending && hit.id !== "star" && !out.planetHit) out.planetHit = { x: k.x, y: k.y };
-      if (k === pending && hit.id === "star" && !out.sunHit) out.sunHit = { x: k.x, y: k.y };   // a Night ball strikes it
+      if (k === pending && hit.id === "star" && !out.sunHit) out.sunHit = { x: k.x, y: k.y };   // a Night ball or a thermonuclear strikes it
       const [ivx, ivy] = impactVelocity(k); k.vx = ivx; k.vy = ivy;
       const dx = hit.x - k.x, dy = hit.y - k.y, d = Math.hypot(dx, dy) || 1, R = S.acbRadiusAU + ballR(hit);
       k.x = hit.x - dx / d * R * 0.995; k.y = hit.y - dy / d * R * 0.995;
