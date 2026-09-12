@@ -18,7 +18,9 @@
     2. Aim and shoot the ACB (two aim modes, Tab swaps them in play).
     3. The ACB hits a world; the world is knocked off its rail and feels the pockets.
     4. Fly to the ACB and catch it: inside the ring, slow enough, it winches back on.
-    5. Repeat until the rack is clear.
+    5. Repeat until the rack is clear, AND SOLARIS WITH IT: the table is not cleared
+       until the star is in a pocket too, and only the Night ball can move it (every
+       other cue ball burns there), so a rack needs one chambered.
 
   CONTROLS
     MOUSE          aim: the nose tracks the cursor (hyperwarp 2)
@@ -190,7 +192,9 @@
   the clock on the cushions: use them before Styx has been round. Off, Styx sits with
   the other two pockets and the belt lasts the rack.
 
-  SOLARIS IS POOLABLE, BUT ONLY WITH THE NIGHT BALL: every other cue ball burns in it.
+  SOLARIS IS POOLABLE, BUT ONLY WITH THE NIGHT BALL: every other cue ball burns in it,
+  AND POTTING IT IS PART OF CLEARING THE TABLE. Three worlds down is not a win while the
+  star is still up; the log says so when the last world goes.
   The star is a body like the worlds: a Night ball that reaches it
   strikes it (equal-mass exchange at acbMassRatio, like any world, so a square hit on
   the 0.45-solar star moves it at cue speed: it is the heaviest ball on the table only
@@ -565,7 +569,7 @@ function resetWorld() {
   beltEat = new Array(BELT_N).fill(0);       // 0..1 per section, how far Styx has pulled it in
   layoutPockets();
   placeAcbOnNose();
-  score = { shots: 0, fouls: 0, potted: 0, burned: 0, deaths: 0, lost: 0, won: false, wonAt: 0, failed: false, starPotted: false };
+  score = { shots: 0, fouls: 0, potted: 0, burned: 0, deaths: 0, lost: 0, won: false, wonAt: 0, failed: false, starPotted: false, worldsCleared: false };
   simYears = 0;
   sliderT = 0.5; sliderShown = 0.5;   // open at the centre: 1M, the table's pace
   charging = false; charge = 0; drag = null; reaching = false; stab = null; hitstop = null;
@@ -584,7 +588,7 @@ function resetWorld() {
 // register: short, practical, "captain", and never a word about who set the table.
 const BRIEF = {
   star:    { cls: "M-type main sequence", diameterKm: 625328, tempC: 3126.9, inhabited: false,
-             note: "Red dwarf, captain. Cold system: every world out here is frozen. It burns any cue ball you put into it, except the Night ball, and the Night ball will move it. Keep the cue off it unless you mean it." },
+             note: "Red dwarf, captain. Cold system: every world out here is frozen. It burns any cue ball you put into it, except the Night ball, and the Night ball will move it. You will need to: the table is not clear until Solaris is in a pocket, so chamber a Night ball and leave the star for last." },
   smell:   { cls: "Terrestrial, veiled", diameterKm: 14661, tempC: -9.2, inhabited: false,
              note: "The heavy one. Sulphur haze over a thick envelope, and it takes a thermonuclear without cracking. It will not go far on a soft shot, so lean in." },
   hearing: { cls: "Terrestrial", diameterKm: 10472, tempC: -155.2, inhabited: true,
@@ -1177,7 +1181,14 @@ function simStep(h, offGravity) {
     if (acb.mode === "capturing") { balls.push({ type: acb.type, x: acb.x, y: acb.y, vx: 0, vy: 0, trail: [], dwell: 0, lock: 0 }); acb.mode = "empty"; acb.cap = null; }
     charging = false; charge = 0; drag = null; reaching = false; stab = null;
   }
-  if (!score.won && bodies.every(b => !b.alive)) { score.won = true; score.wonAt = simYears; note("TABLE CLEARED", "#ffe08a"); }
+  // THE TABLE IS CLEAR WHEN THE WORLDS ARE GONE AND SOLARIS IS IN A POCKET. The star is
+  // the last ball on the table, and only the Night ball can move it.
+  const worldsGone = bodies.every(b => !b.alive);
+  if (worldsGone && !score.worldsCleared) {
+    score.worldsCleared = true;
+    if (!score.starPotted) note("WORLDS CLEARED: Solaris is still up, and it is the last ball", "#ffe08a");
+  }
+  if (!score.won && worldsGone && score.starPotted) { score.won = true; score.wonAt = simYears; note("TABLE CLEARED", "#ffe08a"); }
   return false;
 }
 
@@ -2566,7 +2577,7 @@ function drawHud(W, H) {
   const alive = bodies.filter(b => b.alive).length;
   const lines = [
     ["SHOTS " + score.shots + "   FOULS " + score.fouls + "   POTTED " + score.potted + "/" + bodies.length +
-     "   BALLS " + ballsLeft() + (score.starPotted ? "   SOLARIS POTTED" : ""), ballsLeft() <= 1 ? "#ff8c70" : "#cfe0ff"],
+     "   BALLS " + ballsLeft() + "   SOLARIS " + (score.starPotted ? "POTTED" : "STILL UP"), ballsLeft() <= 1 ? "#ff8c70" : "#cfe0ff"],
     ["T " + simYears.toFixed(2) + " yr" + (score.deaths ? "   SHIP LOST " + score.deaths : ""), "#9fb4cc"],
     ["ACB " + (acb.mode === "attached" ? "ON THE NOSE" : acb.mode === "capturing" ? "WINCHING IN" :
               acb.mode === "empty" ? "OUT, get in its ring and press Space" + (chamber.length ? " (or Space or LMB loads the next)" : "") :
