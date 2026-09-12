@@ -194,7 +194,8 @@
   the clock on the cushions: use them before Styx has been round. Off, Styx sits with
   the other two pockets and the belt lasts the rack.
 
-  SOLARIS IS POOLABLE, WITH THE NIGHT BALL OR A THERMONUCLEAR: every other ball burns in it,
+  SOLARIS IS POOLABLE, WITH THE NIGHT BALL OR A THERMONUCLEAR (and a gravitizer moves it
+  from a distance, without touching): every other ball burns in it,
   AND POTTING IT IS PART OF CLEARING THE TABLE. Three worlds down is not a win while the
   star is still up; the log says so when the last world goes.
   The star is a body like the worlds: a Night ball that reaches it
@@ -283,7 +284,11 @@
     Gravitizer     dark purple. Once shot it pulls at everything inside gravReachAU,
                    worlds, balls and the ship, as a softened point mass of gravPull
                    solar masses; a world it reaches is unmoored. Drawn with subtle
-                   inward-pulsing purple rings, the pull made visible. The
+                   inward-pulsing purple rings, the pull made visible. IT PULLS SOLARIS
+                   TOO, and the star it reaches is unmoored like any world, so it is the
+                   third way to move the star and the only one that never touches it: a
+                   gravitizer that does touch it burns like any other ball. Strength and
+                   reach are both sliders. The
   ship into either respawns on its opening orbit. No timer, no energy, no fog, no scan,
   no rogue, no gas cloud, no Robert: a feel rig for one question, whether shooting and
   chasing a cue ball is better than shooting with the ship.
@@ -596,7 +601,7 @@ function resetWorld() {
 // register: short, practical, "captain", and never a word about who set the table.
 const BRIEF = {
   star:    { cls: "M-type main sequence", diameterKm: 625328, tempC: 3126.9, inhabited: false,
-             note: "Red dwarf, captain. Cold system: every world out here is frozen. It burns any cue ball you put into it but two: the Night ball, which strikes it and comes back, and a thermonuclear, which strikes it hardest and is spent there. You will need one: the table is not clear until Solaris is in a pocket, so chamber one of them and leave the star for last." },
+             note: "Red dwarf, captain. Cold system: every world out here is frozen. It burns any cue ball you put into it but two: the Night ball, which strikes it and comes back, and a thermonuclear, which strikes it hardest and is spent there. A gravitizer will drag it about from a distance, so long as you keep the ball off it. You will need one: the table is not clear until Solaris is in a pocket, so chamber one of them and leave the star for last." },
   smell:   { cls: "Terrestrial, veiled", diameterKm: 14661, tempC: -9.2, inhabited: false,
              note: "The heavy one. Sulphur haze over a thick envelope, and it takes a thermonuclear without cracking. It will not go far on a soft shot, so lean in." },
   hearing: { cls: "Terrestrial", diameterKm: 10472, tempC: -155.2, inhabited: true,
@@ -1063,6 +1068,10 @@ function gravitize(k, o, h) {
   pull(k.x, k.y, G * S.gravPull, o, h);
   return true;
 }
+// A gravitizer pulls the worlds, the other balls, the ship and SOLARIS: anything it
+// reaches is unmoored, the star included, so a gravitizer can walk the star toward a
+// pocket without ever touching it. Touching is still fatal to it: it is not one of the
+// two that survive the star, so a pull that ends in contact ends the ball.
 function gravitizeAll(freeBalls, list, others, shipObj, h) {
   for (const k of freeBalls) {
     if (k.type !== "grav" || k.flash || k.dead) continue;
@@ -1078,7 +1087,7 @@ function simStep(h, offGravity) {
   stepWorlds(bodies, h);
   if (!offGravity) gameGravity(ship, bodies, h, true);
   for (const k of balls) if (!k.flash) gameGravity(k, bodies, h, S.acbFeelsWorlds);   // a flash outruns gravity
-  gravitizeAll(balls, bodies, balls, offGravity ? null : ship, h);
+  gravitizeAll(balls, contactList(bodies, STAR), balls, offGravity ? null : ship, h);   // the star is pulled too
   for (const b of bodies) if (b.alive) { b.x += b.vx * h; b.y += b.vy * h; b.spin += h * 40; }
   if (STAR.alive && STAR.struck) { STAR.x += STAR.vx * h; STAR.y += STAR.vy * h; }
   ship.x += ship.vx * h; ship.y += ship.vy * h;
@@ -1591,7 +1600,7 @@ function buildGhost() {
     stepWorlds(gb, H, gstar);
     const live = sim.filter(k => !k.dead);
     for (const k of live) gameGravity(k, gb, H, S.acbFeelsWorlds, gstar);
-    gravitizeAll(live, gb, live, null, H);
+    gravitizeAll(live, contactList(gb, gstar), live, null, H);   // the star is pulled too
     for (const b of gb) if (b.alive) { b.x += b.vx * H; b.y += b.vy * H; }
     if (gstar.alive && gstar.struck) { gstar.x += gstar.vx * H; gstar.y += gstar.vy * H; }
     for (const k of live) { k.x += k.vx * H; k.y += k.vy * H; }
@@ -2726,7 +2735,8 @@ const PANEL = [
   ["h", "GALAXY TABLE SETTINGS"],
   ["r", "ballScale", "planet size", 2, 20, 0.5],
   ["r", "systemScale", "system size (distance between planets)", 1, 2.5, 0.05],
-  ["r", "gravPull", "gravitizer ball pull", 0.005, 0.2, 0.005],
+  ["r", "gravPull", "gravitizer pull strength", 0.005, 0.2, 0.005],
+  ["r", "gravReachAU", "gravitizer pull reach (AU)", 0.1, 2, 0.05],
   ["l", "maxWarpM", "max time speed (millions x)", 1, 50],
   ["b", "camFollow", "camera follows the ship  [C]"],
   ["b", "fateLabels", "in-world labels (POTTED, HITS THE SHIP, aim caption)"],
