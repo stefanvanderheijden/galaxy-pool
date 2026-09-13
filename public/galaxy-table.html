@@ -883,7 +883,7 @@ let qArmed = false;   // a fresh Q press may engage the pause at the slider's en
 let timePaused = false, lastPower = 0.5, freezeShown = 0, teleportCd = 0, ghostTick = 0;   // Shift's toggle, the aim line's idle power, the vignette
 let drag = null;                            // {ax, ay} screen anchor while a DRAG shot is held
 let stab = null;                            // { err } while the post-shot stabiliser burns
-let hitstop = null;                         // { t, ball, planet } during an impact frame
+let hitstop = null;                         // { t, ball, planet } during an impact frame; other: the cue ball, when it is one
 const fx = { trails: [], shards: [], shocks: [], flashA: 0, shake: 0, shakeX: 0, shakeY: 0 };
 let flashes = [];
 let notices = [];
@@ -1133,7 +1133,7 @@ function simStep(h, offGravity) {
       fx.shake = Math.max(fx.shake, 0.5); note("FLASH REBOUND off the belt", "#c8b090");
       hLeft *= 1 - k.sweepT; bounces++; hit = null;
     }
-    if (hit && hit.ball) { flashHitsBall(k, hit.ball); continue; }
+    if (hit && hit.ball) { flashHitsBall(k, hit.ball); return true; }   // the frame freezes here too
     if (hit && hit.shipHit) { fx.trails.push(k.flash.pts); burnOut(k); shipCause = "hit by its own cue ball"; continue; }
     if (hit && hit.id === "star" && !strikesStar(k.type)) {
       fx.trails.push(k.flash.pts); k.flash = null; k.dead = true; k.burned = true;
@@ -1334,18 +1334,24 @@ function thermoGoesOff(ball, b) {
   fx.flashA = Math.max(fx.flashA, 0.6); fx.shake = Math.max(fx.shake, 0.7);
   note("THERMONUCLEAR DETONATED on " + b.name, "#ffd23a");
 }
-// A flash ball reaches another cue ball: no impact frame, the normal energy transfers.
+// A flash ball reaches another cue ball: the same impact frame as a world gets (the
+// freeze, the cone, the bloom), placed touching now; the normal energy transfers when the
+// frame ends, in endBallImpact.
 function flashHitsBall(k, o) {
-  const [ivx, ivy] = impactVelocity(k); k.vx = ivx; k.vy = ivy;
   const dx = o.x - k.x, dy = o.y - k.y, d = Math.hypot(dx, dy) || 1, R = 2 * S.acbRadiusAU;
   k.x = o.x - dx / d * R * 0.995; k.y = o.y - dy / d * R * 0.995;
-  // the same cone, bloom and shockwave as a flash into a world (no hitstop: the frame
-  // freeze needs a world to hand the energy to at its end)
+  const [ivx, ivy] = impactVelocity(k);
   const dir = Math.atan2(ivy, ivx), lines = [];
   for (let i = 0; i < 18; i++) lines.push({ ang: dir + (Math.random() - 0.5) * 1.2, len: 0.12 + Math.random() * 0.4, w: 0.6 + Math.random() * 1.6 });
   fx.shards.push({ x: k.x, y: k.y, t: 0, lines });
+  fx.flashA = Math.max(fx.flashA, 0.9); fx.shake = Math.max(fx.shake, 0.5); rumble(0.5, 120);
+  hitstop = { t: S.animeHitstopMs / 1000, ball: k, other: o, planet: { name: "a cue ball" } };
+  note("IMPACT: a cue ball", "#e8f0fa");
+}
+function endBallImpact(k, o) {
+  const [ivx, ivy] = impactVelocity(k); k.vx = ivx; k.vy = ivy;
   fx.shocks.push({ x: k.x, y: k.y, t: 0 });
-  fx.flashA = Math.max(fx.flashA, 0.6); fx.shake = Math.max(fx.shake, 0.6); rumble(0.5, 120);
+  fx.shake = Math.max(fx.shake, 0.6);
   collide(k, 1, S.acbRadiusAU, o, 1, S.acbRadiusAU);
   flash(k.x, k.y, 0.1, "#ffffff"); note("CUE BALLS COLLIDE", "#e8f0fa");
   fx.trails.push(k.flash.pts); k.flash = null;
@@ -1526,7 +1532,8 @@ function beginImpactFrame(k, b) {
 }
 // The frame ends: the energy transfers, the world leaves, the shockwave goes out.
 function endImpactFrame() {
-  const { ball: k, planet: b } = hitstop; hitstop = null;
+  const { ball: k, planet: b, other } = hitstop; hitstop = null;
+  if (other) { endBallImpact(k, other); return; }
   const [ivx, ivy] = impactVelocity(k);
   k.vx = ivx; k.vy = ivy;
   // nudge into contact so collide() sees the overlap, then the ordinary elastic exchange
