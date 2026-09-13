@@ -1428,6 +1428,18 @@ function aiming() { return !!drag || charging || reaching || pad.aiming; }   // 
 // power: nothing inside REACH_DEAD_AU of the hull, full at reachMaxAU (times system size).
 // In table units rather than pixels, so the window size does not change the shot.
 const REACH_DEAD_AU = 0.06;
+// The power's colour: blue at nothing, green at half, yellow at 70%, red at 90%, hot pink
+// at full.
+const POWER_STOPS = [[0, [79, 140, 255]], [0.5, [90, 232, 130]], [0.7, [255, 225, 74]], [0.9, [255, 74, 58]], [1, [255, 60, 200]]];
+const POWER_PULSE_MS = 900;   // one pulse from the hull to the tip
+function powerColour(t) {
+  t = Math.max(0, Math.min(1, t));
+  for (let i = 1; i < POWER_STOPS.length; i++) {
+    const [t1, c1] = POWER_STOPS[i];
+    if (t <= t1) { const [t0, c0] = POWER_STOPS[i - 1], u = (t - t0) / (t1 - t0); return c0.map((c, j) => Math.round(c + (c1[j] - c) * u)); }
+  }
+  return POWER_STOPS[POWER_STOPS.length - 1][1];
+}
 function reachFull() { return S.reachMaxAU * S.systemScale; }
 function reachShot() {
   const [wx, wy] = screenToWorld(mouse.sx, mouse.sy);
@@ -2498,11 +2510,30 @@ function draw(realDt) {
     // charge bar and the cue
     const p = pendingShot();
     if (p && (reaching || pad.aiming)) {
-      // POWER LINE: the dashed ring is full power, the solid one is this shot's; rings
-      // rather than a line, which would lie on top of the aim line
-      const R = reachFull() * sc, r0 = REACH_DEAD_AU * sc;
-      cx.setLineDash([3, 6]); circle(sx, sy, R, null, "rgba(255,255,255,0.25)", 1); cx.setLineDash([]);
-      circle(sx, sy, r0 + (R - r0) * p[2], null, "rgba(143,232,176,0.7)", 1.5);
+      // POWER LINE: a bar laid along the shot's own direction, as long as the power, in the
+      // power's colour, with a faint tick where full power would reach. Not a ring: rings
+      // round the ship read as orbits. A pulse of light runs out along it from the hull.
+      const R = reachFull() * sc, r0 = REACH_DEAD_AU * sc, r1 = r0 + (R - r0) * p[2];
+      const [pr, pg, pb] = powerColour(p[2]);
+      const tipX = sx + p[0] * r1, tipY = sy + p[1] * r1;
+      cx.strokeStyle = "rgba(255,255,255,0.3)"; cx.lineWidth = 1; cx.beginPath();
+      const nX = -p[1], nY = p[0];
+      cx.moveTo(sx + p[0] * R + nX * 5, sy + p[1] * R + nY * 5); cx.lineTo(sx + p[0] * R - nX * 5, sy + p[1] * R - nY * 5); cx.stroke();
+      if (r1 > r0 + 0.5) {
+        const g = cx.createLinearGradient(sx + p[0] * r0, sy + p[1] * r0, tipX, tipY);
+        const ph = (performance.now() / POWER_PULSE_MS) % 1, w = Math.min(0.35, 18 / (r1 - r0));   // the pulse, about 18 px wide
+        const base = `rgba(${pr},${pg},${pb},0.85)`, hot = `rgba(${Math.min(255, pr + 120)},${Math.min(255, pg + 120)},${Math.min(255, pb + 120)},1)`;
+        g.addColorStop(0, base);
+        if (ph - w > 0) g.addColorStop(ph - w, base);
+        g.addColorStop(ph, hot);
+        if (ph + w < 1) g.addColorStop(ph + w, base);
+        g.addColorStop(1, base);
+        cx.strokeStyle = "rgba(5,7,13,0.6)"; cx.lineWidth = 6; cx.lineCap = "round";   // a dark keyline, so it lifts off the forecast
+        cx.beginPath(); cx.moveTo(sx + p[0] * r0, sy + p[1] * r0); cx.lineTo(tipX, tipY); cx.stroke();
+        cx.strokeStyle = g; cx.lineWidth = 3;
+        cx.beginPath(); cx.moveTo(sx + p[0] * r0, sy + p[1] * r0); cx.lineTo(tipX, tipY); cx.stroke();
+        cx.lineCap = "butt";
+      }
     }
     if (p && aiming()) {
       const [ax, ay] = worldToScreen(acb.x, acb.y);
