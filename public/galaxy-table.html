@@ -690,9 +690,11 @@ function endIntro() {
   if (cv.clientWidth > 0) cam.scale = Math.min(cv.clientWidth, cv.clientHeight) / 2 / S.viewRadiusAU;
 }
 function skipIntro() {
-  if (!intro || intro.done) return;
+  // once only: a held key, trigger or stick calls this every frame, and each call would
+  // put the clock back to the start of the outro
+  if (!intro || intro.done || intro.skipped) return;
   // not a cut: jump the clock to the outro, which blends to the game view
-  intro.t = introTotal() - INTRO_OUTRO_S;
+  intro.t = Math.max(intro.t, introTotal() - INTRO_OUTRO_S);   // never backwards, if the outro is already playing
   intro.skipped = true;
 }
 function introTotal() { return INTRO_TITLE_S + intro.stops.length * S.introFlyS + INTRO_OUTRO_S; }
@@ -2541,8 +2543,6 @@ function draw(realDt) {
       cx.strokeStyle = "rgba(255,255,255,0.8)"; cx.lineWidth = 3; cx.beginPath();
       cx.moveTo(ax - p[0] * (S.acbRadiusAU * sc + 8), ay - p[1] * (S.acbRadiusAU * sc + 8));
       cx.lineTo(ax - p[0] * (S.acbRadiusAU * sc + 8 + len), ay - p[1] * (S.acbRadiusAU * sc + 8 + len)); cx.stroke();
-      cx.fillStyle = "rgba(20,30,50,0.8)"; cx.fillRect(sx - 30, sy + 22, 60, 6);
-      cx.fillStyle = "#e8f0fa"; cx.fillRect(sx - 30, sy + 22, 60 * p[2], 6);
       const BR = 20;
       if (S.fateLabels) {
         cx.fillStyle = "rgba(255,255,255,0.95)"; cx.font = `10px "Share Tech Mono", monospace`; cx.textAlign = "center";
@@ -2898,7 +2898,7 @@ function pollPad(realDt) {
   if (firm || anyDown || pad.l2 > PAD_TRIGGER || pad.r2 > PAD_TRIGGER) { if (!pad.owns) mouseDrift = 0; pad.owns = true; }
   const finish = () => { pad.prev = pressed; pad.prevL2 = pad.l2; pad.prevR2 = pad.r2; pad.stickSkip = firm; };
   // the briefing: any button, a trigger, or a firm push of a stick skips it
-  if (intro) { if (anyDown || pad.l2 > PAD_TRIGGER || pad.r2 > PAD_TRIGGER || (firm && !pad.stickSkip)) skipIntro(); finish(); return; }
+  if (intro) { if (anyDown || pad.l2 > PAD_TRIGGER || pad.r2 > PAD_TRIGGER || firm) skipIntro(); finish(); return; }   // skipIntro runs once
 
   const manual = S.padScheme === "manual";
   const l2Down = pad.l2 > PAD_TRIGGER && pad.prevL2 <= PAD_TRIGGER, r2Down = pad.r2 > PAD_TRIGGER && pad.prevR2 <= PAD_TRIGGER;
