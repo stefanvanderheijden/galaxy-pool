@@ -53,6 +53,30 @@
     RMB            TELEPORT toward the pointer, up to the width of Red's ring (1.1 AU
                    on the default table), keeping the ship's velocity; 2 s to recharge
     Esc            cancel the aim
+
+  CONTROLLER (a PS5 DualSense on the browser's standard mapping; any standard pad works).
+  Connecting one swaps the keyboard list at the bottom right for a controller schematic
+  that lights up as you press. TWO SCHEMES, switched with OPTIONS or by clicking the tabs:
+    MANUAL CLOCK
+      L STICK   fly, relative to the nose (forward is along the aim), analog
+      R STICK   aim: the nose follows it and holds where it was let go
+      L1 / R1   slower / faster time (L1 held to the end pauses, as Q does)
+      SQUARE    pause on / off (as Shift)
+      L2 hold   AIM MODE: time holds, the L STICK'S THROW IS THE POWER (out for more,
+                in for less), the R stick still aims; R2 shoots and ends the aim
+      CROSS     catch a ball in reach, or load the next
+      D-PAD     left / right selects a slot (nose, chamber 1, chamber 2), up / down
+                cycles that slot's ball type
+      TRIANGLE  camera: whole table / follow the ship
+      CIRCLE    hold for the TELEPORT STATE: the R stick places the destination (its
+                angle and its throw, up to the teleport range), R2 teleports, letting go
+                of circle cancels
+    MOTION CLOCK   everything above, except time is not a control: it RUNS AS FAST AS
+      THE SHIP FLIES and stops when the ship stops (L1, R1 and square do nothing). The
+      ship flies on its own steady clock at game speed, because in this rig the ship
+      moves in game time, and a clock that slows when you slow would freeze your own
+      ship with the world. World time is game speed times the ship's speed over
+      motionRefAUyr (10 AU/yr), up to twice game speed, nothing under 0.15 AU/yr.
     After a shot that ball cannot be caught for captureLockoutS seconds (it has no
     catch ring until then; the ring appearing is the cue), and the ship takes half the shot's delta-v backwards, so it
     leaves the ring rather than catching its own shot.
@@ -316,6 +340,7 @@
   #chamber .slot .type:hover { color: #ffffff; }
   #chamber .slot.out .type, #chamber .slot.none .type { cursor: default; border-bottom: 0; color: #6f86a8; }
   #chamber .slot.active { border-color: #4fc3f7; }
+  #chamber .slot.padsel { outline: 1px solid #8fe8b0; outline-offset: 2px; }
   #cv.briefing { cursor: default; }
   #panel button { background: #182640; color: #cfe0ff; border: 1px solid #2f4468; border-radius: 4px;
     font: inherit; padding: 3px 8px; cursor: pointer; width: 100%; }
@@ -355,6 +380,8 @@ const DEFAULTS = {
   introFlyS: 4.6,         // seconds per body, whatever the hop: the camera never stops
   introSlow: 0.45,        // slow-down past a body: speed there is (1 - this) of the mean
   introPitchDeg: 52,      // camera pitch below horizontal during the flyover
+  padScheme: "manual",    // the controller: "manual" MANUAL CLOCK, "motion" MOTION CLOCK. OPTIONS switches
+  motionRefAUyr: 10,      // MOTION CLOCK: ship speed that runs the world at game speed
   aimMode: "reach",       // "reach" POWER LINE, "charge" HOLD TO POWER UP, "draw" DRAW BACK. Tab cycles
   reachMaxAU: 1.6,        // POWER LINE: the cursor distance from the ship for a full-power shot (times system size)
   thrustAntigrav: true,   // the drive lets go of gravity while it burns (hyperwarp 2)
@@ -1090,7 +1117,7 @@ function simStep(h, offGravity) {
   gravitizeAll(balls, contactList(bodies, STAR), balls, offGravity ? null : ship, h);   // the star is pulled too
   for (const b of bodies) if (b.alive) { b.x += b.vx * h; b.y += b.vy * h; b.spin += h * 40; }
   if (STAR.alive && STAR.struck) { STAR.x += STAR.vx * h; STAR.y += STAR.vy * h; }
-  ship.x += ship.vx * h; ship.y += ship.vy * h;
+  if (!shipOwnClock) { ship.x += ship.vx * h; ship.y += ship.vy * h; }
   for (const k of balls) {
     if (!k.flash) { k.x += k.vx * h; k.y += k.vy * h; continue; }
     sweepTime = simYears; sweepSections = belt; sweepShip = ship;
@@ -1215,6 +1242,14 @@ function simStep(h, offGravity) {
 // hull under the cue.
 function aimNose(realDt) {
   if (drag || reaching) { const p = pendingShot(); if (p) ship.nose = Math.atan2(p[1], p[0]); return; }   // LMB down: the nose is the pull's aim
+  if (pad.active && pad.owns) {   // THE CONTROLLER: the right stick aims, and the nose holds where it was let go
+    if (pad.teleporting || pad.rm <= 0) return;
+    let d = Math.atan2(pad.ry, pad.rx) - ship.nose;
+    while (d > Math.PI) d -= TAU;
+    while (d < -Math.PI) d += TAU;
+    ship.nose += d * Math.min(1, realDt * S.aimEase);
+    return;
+  }
   const [mwx, mwy] = screenToWorld(mouse.sx, mouse.sy);
   const adx = mwx - ship.x, ady = mwy - ship.y;
   if (adx * adx + ady * ady > 1e-12) {
@@ -1229,6 +1264,11 @@ function thrustVector() {
   const nx = Math.cos(ship.nose), ny = Math.sin(ship.nose);
   const lon = (keys.w ? 1 : 0) - (keys.s ? 1 : 0);
   const lat = (keys.a ? 1 : 0) - (keys.d ? 1 : 0);
+  // THE LEFT STICK flies relative to the nose, analog: forward is along the aim, sideways
+  // strafes. Not in aim mode, where the same stick is the power.
+  if (!lon && !lat && pad.active && pad.lm > 0 && !pad.aiming) {
+    return [nx * -pad.ly + ny * -pad.lx, ny * -pad.ly - nx * -pad.lx];   // its length is the throw
+  }
   // +y is down, so the left-hand normal of (nx, ny) is (ny, -nx): A goes to the
   // SCREEN's left. Check against the drawn hull rather than intuition.
   let fx = nx * lon + ny * lat, fy = ny * lon - nx * lat;
@@ -1236,10 +1276,11 @@ function thrustVector() {
   return mag > 1e-9 ? [fx / mag, fy / mag] : null;
 }
 let curWarp = 0;   // this frame's time speed, for the engine cap
-function applyThrust(dtYr) {
+let shipOwnClock = false;   // MOTION CLOCK: the ship integrated on its own clock this frame, not in simStep
+function applyThrust(dtYr, capped = true) {
   const f = thrustVector();
   if (!f) return;
-  const cap = curWarp > warpMid() ? warpMid() / curWarp : 1;   // see THE ENGINE AT HIGH TIME SPEED
+  const cap = capped && curWarp > warpMid() ? warpMid() / curWarp : 1;   // see THE ENGINE AT HIGH TIME SPEED
   ship.vx += f[0] * S.thrustAccel * dtYr * cap;
   ship.vy += f[1] * S.thrustAccel * dtYr * cap;
 }
@@ -1261,10 +1302,11 @@ function placeAcbOnNose() {
 // it scales with system size), keeps its velocity, and needs teleportCooldownS to
 // recharge. It lands honestly: on a world, a pocket, the star or the rocks, it dies.
 function teleportRange() { return 2 * PLANET_DEFS[0].r * S.systemScale; }
-function teleportTo(sx, sy) {
+function teleportTo(sx, sy) { const [wx, wy] = screenToWorld(sx, sy); teleportToWorld(wx, wy); }
+function teleportToWorld(wx, wy) {
   if (score.failed || aiming() || intro) return;
   if (teleportCd > 0) { note("TELEPORT RECHARGING: " + teleportCd.toFixed(1) + " s", "#8fc3e8"); return; }
-  const [wx, wy] = screenToWorld(sx, sy);
+  rumble(0.35, 70);
   const dx = wx - ship.x, dy = wy - ship.y, d = Math.hypot(dx, dy);
   if (d < 1e-6) return;
   const k = Math.min(1, teleportRange() / d);
@@ -1357,7 +1399,7 @@ const AIM_BLEND_PX = [8, 40];
 const AIM_NAMES = { reach: "POWER LINE", charge: "HOLD TO POWER UP", draw: "DRAW BACK" };
 const AIM_NEXT = { reach: "charge", charge: "draw", draw: "reach" };
 const AIM_HELP = { reach: "the cursor's distance is the power", charge: "power up, the nose aims", draw: "pull back for power, swing to pivot" };
-function aiming() { return !!drag || charging || reaching; }   // LMB is down on a shot, in any mode
+function aiming() { return !!drag || charging || reaching || pad.aiming; }   // LMB is down on a shot, in any mode
 // POWER LINE: toward the cursor, exactly, and the cursor's distance from the ship is the
 // power: nothing inside REACH_DEAD_AU of the hull, full at reachMaxAU (times system size).
 // In table units rather than pixels, so the window size does not change the shot.
@@ -1371,6 +1413,7 @@ function reachShot() {
 }
 function pendingShot() {
   if (acb.mode !== "attached" || score.failed) return null;
+  if (pad.aiming) return [Math.cos(ship.nose), Math.sin(ship.nose), pad.power, true];   // the controller: the nose aims, the L stick's throw is the power
   if (charging) return [Math.cos(ship.nose), Math.sin(ship.nose), charge, true];   // HOLD TO POWER UP: the nose aims
   if (reaching) { const r = reachShot(); return [r[0], r[1], r[2], true]; }        // POWER LINE
   if (drag) {
@@ -1382,7 +1425,7 @@ function pendingShot() {
     return [dx, dy, Math.min(1, L / S.dragMaxPx), true];
   }
   // LMB up: the idle preview. In POWER LINE it is exactly what a click here would do.
-  if (S.aimMode === "reach") { const r = reachShot(); return [r[0], r[1], r[2], false]; }
+  if (S.aimMode === "reach" && !(pad.active && pad.owns)) { const r = reachShot(); return [r[0], r[1], r[2], false]; }
   return [Math.cos(ship.nose), Math.sin(ship.nose), lastPower, false];
 }
 
@@ -1447,7 +1490,7 @@ function newBallNow(auto) {   // auto: loaded by LMB on a bare nose
   if (!chamber.length) { note("CHAMBER EMPTY: catch a ball", "#e8b463"); return; }
   acb.type = chamber.shift();
   acb.mode = "attached"; acb.cap = null; placeAcbOnNose();
-  note((auto ? "NOSE WAS EMPTY, " : "") + BALL_TYPES[acb.type].name.toUpperCase() + " LOADED" + (auto ? " from the chamber on LMB" : "") + (balls.length ? " (" + balls.length + " out)" : ""), "#e8f0fa");
+  note((auto ? "NOSE WAS EMPTY, " : "") + BALL_TYPES[acb.type].name.toUpperCase() + " LOADED" + (auto ? " from the chamber on " + (typeof auto === "string" ? auto : "LMB") : "") + (balls.length ? " (" + balls.length + " out)" : ""), "#e8f0fa");
 }
 function stepLost(realDt) {
   if (acb.mode !== "lost" || score.failed) return;
@@ -1462,6 +1505,7 @@ function burst(x, y, r, color) { flashes.push({ x, y, r, t: 0, color, kind: "fla
 // Contact. The sim stops with the ball touching the world; the flash and the shard
 // cone appear on the frozen frame (the video's order: bloom, then the held shards).
 function beginImpactFrame(k, b) {
+  rumble(0.6, 140);
   hitstop = { t: S.animeHitstopMs / 1000, ball: k, planet: b };
   fx.flashA = 0.9; fx.shake = 0.5;
   const [ivx, ivy] = impactVelocity(k);
@@ -1703,7 +1747,7 @@ function frame(now) {
   if (!manualFrame) requestAnimationFrame(frame);
   const realDt = Math.min(0.05, (now - last) / 1000);
   last = now;
-  stepFx(realDt); layoutPockets();
+  stepFx(realDt); layoutPockets(); pollPad(realDt);
   if (intro) { stepIntro(realDt); if (intro) { draw(realDt); return; } }   // the briefing: nothing moves
   if (hitstop) {
     hitstop.t -= realDt;
@@ -1715,18 +1759,26 @@ function frame(now) {
   // THE PAUSE. Shift TOGGLES it and the slider drops to the far left, as if Q were held
   // all the way; a held aim holds time too. Off again, the clock springs back.
   // Q held all the way to the left engages the pause, as Shift does; one engage per press
-  if (keys.q && qArmed && !timePaused && sliderT <= 0) { timePaused = true; qArmed = false; note("TIME PAUSED", "#8fc3e8"); }
+  const slowKey = keys.q || pad.l1, fastKey = keys.e || pad.r1;   // L1 / R1 are Q / E on the controller
+  if (slowKey && qArmed && !timePaused && sliderT <= 0) { timePaused = true; qArmed = false; note("TIME PAUSED", "#8fc3e8"); }
   const timeHeld = timePaused || aiming();
   freezeShown += ((timeHeld ? 1 : 0) - freezeShown) * Math.min(1, realDt * 8);
   const SLIDE_RATE = 0.45;
   if (timeHeld) sliderT += (0 - sliderT) * Math.min(1, realDt * 8);
   else {
-    if (keys.q) sliderT = Math.max(0, sliderT - SLIDE_RATE * realDt);
-    if (keys.e) sliderT = Math.min(1, sliderT + SLIDE_RATE * realDt);
-    if (S.driftMode && !keys.q && !keys.e) sliderT += (0.5 - sliderT) * Math.min(1, realDt * 3);
+    if (slowKey) sliderT = Math.max(0, sliderT - SLIDE_RATE * realDt);
+    if (fastKey) sliderT = Math.min(1, sliderT + SLIDE_RATE * realDt);
+    if (S.driftMode && !slowKey && !fastKey) sliderT += (0.5 - sliderT) * Math.min(1, realDt * 3);
   }
   sliderShown += (sliderT - sliderShown) * Math.min(1, realDt * 10);
-  const warp = timeHeld ? 0 : warpNow();
+  // THE MOTION CLOCK: the world's time follows the ship's speed, and stops when it stops
+  const motion = padMotion();
+  let warp = timeHeld ? 0 : warpNow();
+  if (motion && !timeHeld) {
+    const sp = Math.hypot(ship.vx, ship.vy);
+    warp = sp < MOTION_DEAD_AUYR ? 0 : warpMid() * Math.min(MOTION_MAX, sp / S.motionRefAUyr);
+    sliderT = sliderFor(warp);
+  }
   curWarp = warp;
 
   aimNose(realDt);
@@ -1740,7 +1792,16 @@ function frame(now) {
   const steps = dtYr > MAX_SUBSTEP_YR ? Math.min(MAX_SUBSTEPS, Math.ceil(dtYr / MAX_SUBSTEP_YR)) : 1;
   const h = dtYr / steps;
   let frozenAt = steps;
-  for (let i = 0; i < steps; i++) { applyThrust(h); stabiliseStep(h); if (simStep(h, offGravity)) { frozenAt = i + 1; break; } }
+  // MOTION CLOCK: the ship flies on its own steady clock (game speed) whatever the world's,
+  // so it can move to start time; simStep then leaves the ship's position alone
+  shipOwnClock = motion;
+  if (motion) {
+    const hShip = warpMid() * realDt / SPY;
+    applyThrust(hShip, false);
+    ship.x += ship.vx * hShip; ship.y += ship.vy * hShip;
+  }
+  for (let i = 0; i < steps; i++) { if (!motion) applyThrust(h); stabiliseStep(h); if (simStep(h, offGravity)) { frozenAt = i + 1; break; } }
+  shipOwnClock = false;
   simYears += h * frozenAt;
 
   // The settle, once per frame on the real clock, only while off gravity: game feel,
@@ -2411,7 +2472,7 @@ function draw(realDt) {
     }
     // charge bar and the cue
     const p = pendingShot();
-    if (p && reaching) {
+    if (p && (reaching || pad.aiming)) {
       // POWER LINE: the dashed ring is full power, the solid one is this shot's; rings
       // rather than a line, which would lie on top of the aim line
       const R = reachFull() * sc, r0 = REACH_DEAD_AU * sc;
@@ -2431,6 +2492,22 @@ function draw(realDt) {
         cx.fillStyle = "rgba(255,255,255,0.95)"; cx.font = `10px "Share Tech Mono", monospace`; cx.textAlign = "center";
         cx.fillText("PULLING BACK: RELEASE TO SHOOT", sx, sy - BR - 12); cx.textAlign = "left";
       }
+    }
+  }
+  // THE TELEPORT STATE (controller): the range, the destination the R stick has placed, and
+  // the recharge if there is one
+  if (pad.active && pad.teleporting && pad.tp) {
+    const q0 = worldToScreen(ship.x, ship.y), q1 = worldToScreen(ship.x + pad.tp.dx, ship.y + pad.tp.dy);
+    if (q0 && q1) {
+      const ready = teleportCd <= 0, col = ready ? "rgba(143,195,232,0.95)" : "rgba(232,150,99,0.9)";
+      cx.setLineDash([3, 6]); circle(q0[0], q0[1], teleportRange() * sc, null, "rgba(143,195,232,0.3)", 1);
+      cx.strokeStyle = col; cx.lineWidth = 1; cx.setLineDash([2, 4]);
+      cx.beginPath(); cx.moveTo(q0[0], q0[1]); cx.lineTo(q1[0], q1[1]); cx.stroke(); cx.setLineDash([]);
+      circle(q1[0], q1[1], 10, null, col, 1.5);
+      cx.beginPath();
+      for (const [ux, uy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { cx.moveTo(q1[0] + ux * 13, q1[1] + uy * 13); cx.lineTo(q1[0] + ux * 18, q1[1] + uy * 18); }
+      cx.stroke();
+      if (!ready) { cx.fillStyle = col; cx.font = `10px "Share Tech Mono", monospace`; cx.textAlign = "center"; cx.fillText("RECHARGING " + teleportCd.toFixed(1) + " s", q1[0], q1[1] + 30); cx.textAlign = "left"; }
     }
   }
   // flashes
@@ -2508,6 +2585,11 @@ function drawFate(f, m) {
 function drawPointer() {
   const want = drag ? "none" : "crosshair";
   if (cv.style.cursor !== want) cv.style.cursor = want;
+  if (pad.active && pad.aiming) {   // the controller's power, under the hull
+    const p = pendingShot(), q = worldToScreen(ship.x, ship.y);
+    if (p && q) { cx.fillStyle = "rgba(255,255,255,0.9)"; cx.font = `10px "Share Tech Mono", monospace`; cx.textAlign = "center"; cx.fillText((p[2] * 100).toFixed(0) + "%", q[0], q[1] + 40); cx.textAlign = "left"; }
+    return;
+  }
   if (reaching) {   // POWER LINE: the pointer is the target, so only the power under it
     const p = pendingShot(); if (!p) return;
     cx.fillStyle = "rgba(255,255,255,0.9)"; cx.font = `10px "Share Tech Mono", monospace`; cx.textAlign = "center";
@@ -2586,7 +2668,8 @@ function drawTimeBand(W, H) {
   circle(bx, by, 16, g); circle(bx, by, 4, "#e8f0fa");
   cx.fillStyle = "rgba(160,185,215,0.8)"; cx.font = `12px "Share Tech Mono", monospace`; cx.textAlign = "center";
   const w = warpNow(), held = timePaused || aiming();
-  cx.fillText(held ? "PAUSED" : w < 1000 ? w.toFixed(0) + "x" : w < 1e6 ? (w / 1000).toFixed(0) + "K" : (w / 1e6).toFixed(1) + "M", W / 2, H - 64);
+  const fmtW = v => v < 1000 ? v.toFixed(0) + "x" : v < 1e6 ? (v / 1000).toFixed(0) + "K" : (v / 1e6).toFixed(1) + "M";
+  cx.fillText(held ? "PAUSED" : padMotion() ? (curWarp <= 0 ? "STOPPED: FLY TO RUN TIME" : "MOTION " + fmtW(curWarp)) : fmtW(w), W / 2, H - 64);
   cx.textAlign = "left";
 }
 function drawHud(W, H) {
@@ -2597,17 +2680,20 @@ function drawHud(W, H) {
      "   BALLS " + ballsLeft() + "   SOLARIS " + (score.starPotted ? "POTTED" : "STILL UP"), ballsLeft() <= 1 ? "#ff8c70" : "#cfe0ff"],
     ["T " + simYears.toFixed(2) + " yr" + (score.deaths ? "   SHIP LOST " + score.deaths : ""), "#9fb4cc"],
     ["ACB " + (acb.mode === "attached" ? "ON THE NOSE" : acb.mode === "capturing" ? "WINCHING IN" :
-              acb.mode === "empty" ? "OUT, get in its ring and press Space" + (chamber.length ? " (or Space or LMB loads the next)" : "") :
+              acb.mode === "empty" ? (pad.active && pad.owns ? "OUT, get in its ring and press CROSS" + (chamber.length ? " (or CROSS or L2 loads the next)" : "") : "OUT, get in its ring and press Space" + (chamber.length ? " (or Space or LMB loads the next)" : "")) :
               score.failed ? "NONE LEFT" : chamber.length ? "DESTROYED, next loads in " + Math.max(0, S.respawnSeconds - acb.lostT).toFixed(1) + " s" : "DESTROYED, catch one")
      + (balls.length > 1 || (balls.length === 1 && acb.mode !== "empty") ? "   " + balls.length + " BALL" + (balls.length > 1 ? "S" : "") + " OUT" : ""),
      acb.mode === "attached" ? "#e8f0fa" : acb.mode === "lost" ? "#ff5030" : "#8fe8b0"],
     stab ? ["STABILISER burning, " + stab.err.toFixed(2) + " AU/yr to go.  WASD or Shift to override", "#e8b463"] : null,
-    timePaused || aiming() ? ["TIME PAUSED" + (drag ? ": pull back for power, swing round to pivot, release to shoot" : charging ? ": powering up, the nose aims, release to shoot" : reaching ? ": further from the ship is harder, release to shoot" : ".  Shift or E resumes.  Hold LMB to aim"), "#8fc3e8"] : null,
+    timePaused || aiming() ? ["TIME PAUSED" + (pad.aiming ? ": push the left stick out for power, R2 shoots" : drag ? ": pull back for power, swing round to pivot, release to shoot" : charging ? ": powering up, the nose aims, release to shoot" : reaching ? ": further from the ship is harder, release to shoot" : pad.active && pad.owns ? ".  Square resumes.  Hold L2 to aim" : ".  Shift or E resumes.  Hold LMB to aim"), "#8fc3e8"] : null,
   ].filter(Boolean);
   lines.forEach((l, i) => { cx.fillStyle = l[1]; cx.fillText(l[0], 14, 22 + i * 17); });
   notices.forEach((n, i) => { cx.fillStyle = colA(n.color, Math.min(1, (20 - n.t) / 4)); cx.fillText(n.text, 14, H - 20 - (notices.length - 1 - i) * 16); });
   renderChamber();
-  // THE CONTROLS: a list at the bottom right, on its own plate so it reads over the table
+  // THE CONTROLS: a list at the bottom right, on its own plate so it reads over the table;
+  // with a controller connected, the controller menu takes its place
+  if (pad.active) drawPadMenu(W, H);
+  else {
   const CONTROLS = [["WASD", "fly"], ["MOUSE", "aim: the nose is the shot"], ["LMB hold", AIM_HELP[S.aimMode]], ["TAB", "next aim mode: " + AIM_NAMES[AIM_NEXT[S.aimMode]].toLowerCase()],
                     ["LMB release", "shoot"], ["RMB", "teleport, short range, 2 s recharge"], ["SHIFT", "pause on / off"], ["Q / E", "slower / faster time (Q to the end pauses)"],
                     ["SPACE", "catch a ball / load the next"], ["C", "camera"], ["R", "rack again"], ["H", "hide the settings"]];
@@ -2620,6 +2706,7 @@ function drawHud(W, H) {
     cx.fillStyle = "#e8f0fa"; cx.fillText(k, px0 + 10, y);
     cx.fillStyle = "#9fb4cc"; cx.fillText(v, px0 + 100, y);
   });
+  }
   cx.textAlign = "left";
   if (score.won) {
     cx.fillStyle = "rgba(5,7,13,0.6)"; cx.fillRect(W / 2 - 200, H / 2 - 50, 400, 90);
@@ -2654,13 +2741,13 @@ function renderChamber() {
                          text: acb.mode === "empty" ? "ball out" : "empty" });
   for (let i = 0; i < 2; i++) slots.push(i < chamber.length ? { lbl: "CHAMBER " + (i + 1), type: chamber[i], state: "", idx: i }
                                                              : { lbl: "CHAMBER " + (i + 1), type: null, state: "none", idx: i, text: balls.length ? "out" : "spent" });
-  const key = JSON.stringify(slots);
+  const key = JSON.stringify(slots) + (pad.active ? "|" + pad.sel : "");
   if (key === chamberKey) return;
   chamberKey = key;
   const el = document.getElementById("chamber");
   el.innerHTML = slots.map((sl, i) => {
     const T = sl.type ? BALL_TYPES[sl.type] : null;
-    return `<div class="slot ${sl.state}" data-i="${i}"><div class="lbl">${sl.lbl}</div><div class="ball">` +
+    return `<div class="slot ${sl.state}${pad.active && i === pad.sel ? " padsel" : ""}" data-i="${i}"><div class="lbl">${sl.lbl}</div><div class="ball">` +
       (T ? `<div class="dot" style="background:radial-gradient(circle at 35% 35%, ${T.hi}, ${T.color} 55%, ${T.lo})"></div><span class="type">${T.short}</span>`
          : `<div class="dot" style="background:#1a2233;border:1px dashed #3a4a66"></div><span class="type">${sl.text}</span>`) +
       `</div></div>`;
@@ -2673,6 +2760,233 @@ function cycleSlot(sl) {
   if (sl.idx < 0) { if (acb.mode !== "attached") return; acb.type = next; }
   else chamber[sl.idx] = next;
   note((sl.idx < 0 ? "NOSE" : "CHAMBER " + (sl.idx + 1)) + ": " + BALL_TYPES[next].name, "#cfe0ff");
+}
+
+// ============================== THE CONTROLLER ==================================
+// The browser's standard mapping, which a PS5 DualSense reports in Chrome and Safari.
+const PADB = { CROSS: 0, CIRCLE: 1, SQUARE: 2, TRIANGLE: 3, L1: 4, R1: 5, L2: 6, R2: 7, CREATE: 8, OPTIONS: 9, L3: 10, R3: 11, UP: 12, DOWN: 13, LEFT: 14, RIGHT: 15 };
+const PAD_DEAD = 0.15, PAD_AIM_DEAD = 0.25, PAD_TRIGGER = 0.5;
+const MOTION_DEAD_AUYR = 0.15, MOTION_MAX = 2;
+const PAD_SCHEMES = { manual: "MANUAL CLOCK", motion: "MOTION CLOCK" };
+const SLOT_NAMES = ["ON THE NOSE", "CHAMBER 1", "CHAMBER 2"];
+const pad = { active: false, index: -1, id: "", standard: true, prev: [], heldList: [], prevL2: 0, prevR2: 0,
+              lx: 0, ly: 0, lm: 0, rx: 0, ry: 0, rm: 0, l2: 0, r2: 0, l1: false, r1: false,
+              owns: false, aiming: false, aimLatch: false, power: 0, teleporting: false, tp: null, sel: 0 };
+let padMenuTabs = [];
+// A stick past its deadzone, rescaled so the first movement is smooth: [x, y, throw 0..1].
+function stickVec(ax, ay, dead) {
+  const m = Math.hypot(ax, ay);
+  if (m < dead) return [0, 0, 0];
+  const t = Math.min(1, (m - dead) / (1 - dead));
+  return [ax / m * t, ay / m * t, t];
+}
+function rumble(strength, ms) {
+  if (!pad.active) return;
+  const gp = navigator.getGamepads ? navigator.getGamepads()[pad.index] : null;
+  if (!gp || !gp.vibrationActuator) return;
+  try { gp.vibrationActuator.playEffect("dual-rumble", { duration: ms, strongMagnitude: Math.min(1, strength), weakMagnitude: Math.min(1, strength * 0.6) }); } catch {}
+}
+function padMotion() { return pad.active && pad.owns && S.padScheme === "motion"; }
+// The time band's position for a given time speed: the inverse of warpNow.
+function sliderFor(warp) {
+  if (warp <= 1) return 0;
+  const mid = warpMid(), max = warpMax();
+  return warp <= mid ? 0.5 * Math.log10(warp) / Math.log10(mid) : Math.min(1, 0.5 + 0.5 * Math.log10(warp / mid) / Math.log10(max / mid));
+}
+function switchPadScheme(to) {
+  S.padScheme = to || (S.padScheme === "manual" ? "motion" : "manual");
+  if (S.padScheme === "motion") timePaused = false;   // the motion clock is the only clock
+  saveSettings();
+  note("CONTROLLER: " + PAD_SCHEMES[S.padScheme], "#8fc3e8");
+}
+function padSelect(dir) {
+  pad.sel = (pad.sel + dir + 3) % 3;
+  note("SELECTED: " + SLOT_NAMES[pad.sel], "#cfe0ff");
+}
+function padCycleType(dir) {
+  const idx = pad.sel - 1;   // -1 is the nose
+  const cur = idx < 0 ? (acb.mode === "attached" ? acb.type : null) : chamber[idx];
+  if (!cur) { note("NOTHING TO CHANGE: " + SLOT_NAMES[pad.sel] + " is empty", "#e8b463"); return; }
+  const next = TYPE_ORDER[(TYPE_ORDER.indexOf(cur) + dir + TYPE_ORDER.length) % TYPE_ORDER.length];
+  if (idx < 0) acb.type = next; else chamber[idx] = next;
+  note(SLOT_NAMES[pad.sel] + ": " + BALL_TYPES[next].name, "#cfe0ff");
+}
+function pollPad(realDt) {
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  let gp = null;
+  for (const g of pads) if (g && g.connected) { gp = g; break; }
+  if (!gp) {
+    if (pad.active) { Object.assign(pad, { active: false, owns: false, aiming: false, teleporting: false, tp: null, l1: false, r1: false }); note("CONTROLLER DISCONNECTED", "#e8b463"); }
+    return;
+  }
+  const pressed = gp.buttons.map(b => !!(b && b.pressed));
+  if (!pad.active) {
+    Object.assign(pad, { active: true, index: gp.index, id: gp.id, standard: gp.mapping === "standard", prev: pressed.slice() });
+    note("CONTROLLER CONNECTED" + (pad.standard ? "" : " (non-standard mapping: buttons may be misread)"), "#8fe8b0");
+  }
+  pad.index = gp.index;
+  const val = i => gp.buttons[i] ? gp.buttons[i].value : 0;
+  const held = i => !!pressed[i];
+  const down = i => pressed[i] && !pad.prev[i];
+  const [lx, ly, lm] = stickVec(gp.axes[0] || 0, gp.axes[1] || 0, PAD_DEAD);
+  const [rx, ry, rm] = stickVec(gp.axes[2] || 0, gp.axes[3] || 0, PAD_AIM_DEAD);
+  Object.assign(pad, { lx, ly, lm, rx, ry, rm, l2: val(PADB.L2), r2: val(PADB.R2), heldList: pressed });
+  if (lm > 0 || rm > 0 || pressed.some(Boolean)) pad.owns = true;   // the controller has the ship until the mouse moves
+  const finish = () => { pad.prev = pressed; pad.prevL2 = pad.l2; pad.prevR2 = pad.r2; };
+  if (intro) { if (pressed.some((b, i) => b && !pad.prev[i])) skipIntro(); finish(); return; }
+
+  const manual = S.padScheme === "manual";
+  const l2Down = pad.l2 > PAD_TRIGGER && pad.prevL2 <= PAD_TRIGGER, r2Down = pad.r2 > PAD_TRIGGER && pad.prevR2 <= PAD_TRIGGER;
+  if (down(PADB.OPTIONS)) switchPadScheme();
+
+  // CIRCLE held: the teleport state. The R stick places the destination by its angle and
+  // throw, up to the range, and the last placement holds when the stick is let go.
+  pad.teleporting = held(PADB.CIRCLE) && !score.failed;
+  if (pad.teleporting) {
+    const R = teleportRange();
+    if (rm > 0) pad.tp = { dx: rx * R, dy: ry * R };
+    else if (!pad.tp) pad.tp = { dx: Math.cos(ship.nose) * R * 0.5, dy: Math.sin(ship.nose) * R * 0.5 };
+    if (r2Down) teleportToWorld(ship.x + pad.tp.dx, ship.y + pad.tp.dy);
+  } else pad.tp = null;
+
+  // L2: AIM MODE. A bare nose with a ball in the chamber loads it instead, and that press
+  // only loads, as LMB does. While held, the L stick's throw is the power; R2 shoots and
+  // ends the aim until L2 is pressed again.
+  if (l2Down && (acb.mode === "empty" || acb.mode === "lost") && chamber.length && !score.failed && !score.won) { newBallNow("L2"); pad.aimLatch = true; }
+  if (pad.l2 <= PAD_TRIGGER) pad.aimLatch = false;
+  pad.aiming = pad.l2 > PAD_TRIGGER && !pad.aimLatch && !pad.teleporting && acb.mode === "attached" && !score.failed && !score.won;
+  if (pad.aiming) {
+    pad.power = lm;
+    if (r2Down) {
+      const p = pendingShot();
+      if (p && p[2] > 0.02) { lastPower = p[2]; fireAcb(p[0], p[1], p[2]); rumble(0.3, 90); }
+      else note("NO SHOT: push the left stick out for power", "#8fc3e8");
+      pad.aimLatch = true; pad.aiming = false;
+    }
+  }
+
+  if (down(PADB.CROSS)) spaceKey();
+  if (down(PADB.TRIANGLE)) { S.camFollow = !S.camFollow; saveSettings(); buildPanel(); note("CAMERA: " + (S.camFollow ? "FOLLOWS THE SHIP" : "WHOLE TABLE"), "#8fc3e8"); }
+  if (down(PADB.LEFT)) padSelect(-1);
+  if (down(PADB.RIGHT)) padSelect(1);
+  if (down(PADB.UP)) padCycleType(1);
+  if (down(PADB.DOWN)) padCycleType(-1);
+  if (manual) {
+    if (down(PADB.SQUARE)) { timePaused = !timePaused; note(timePaused ? "TIME PAUSED" : "TIME RESUMED", "#8fc3e8"); }
+    if (down(PADB.L1)) qArmed = true;                                          // L1 held to the end pauses, as Q does
+    if (down(PADB.R1) && timePaused) { timePaused = false; note("TIME RESUMED", "#8fc3e8"); }   // as E does
+  }
+  pad.l1 = manual && held(PADB.L1); pad.r1 = manual && held(PADB.R1);
+  finish();
+}
+
+// THE CONTROLLER MENU, in place of the keyboard list: a lineart controller (drawn here, in
+// the proportions of a DualSense), each control's job on a label with a leader line to it,
+// lit while it is pressed, and the two schemes on tabs that OPTIONS or a click switches.
+function drawPadMenu(W, H) {
+  const pw = 372, ph = 212, x0 = W - pw - 14, y0 = H - ph - 14;
+  const G = "#8fe8b0", GD = "rgba(143,232,176,0.3)", T = "#e8f0fa", M = "rgba(159,180,204,0.5)";
+  const manual = S.padScheme === "manual", hl = pad.heldList || [];
+  // the plate, two corners cut
+  const c = 10;
+  cx.beginPath(); cx.moveTo(x0 + c, y0); cx.lineTo(x0 + pw, y0); cx.lineTo(x0 + pw, y0 + ph - c); cx.lineTo(x0 + pw - c, y0 + ph); cx.lineTo(x0, y0 + ph); cx.lineTo(x0, y0 + c); cx.closePath();
+  cx.fillStyle = "rgba(8,12,22,0.9)"; cx.fill(); cx.strokeStyle = "#2a3a55"; cx.lineWidth = 1; cx.stroke();
+  cx.textAlign = "left"; cx.font = `10px "Share Tech Mono", monospace`; cx.fillStyle = M; cx.fillText("CONTROLLER", x0 + 14, y0 + 19);
+  // the scheme tabs
+  cx.font = `9px "Share Tech Mono", monospace`;
+  padMenuTabs = [];
+  let tx = x0 + pw - 10;
+  for (const key of ["motion", "manual"]) {
+    const w = cx.measureText(PAD_SCHEMES[key]).width + 14, on = S.padScheme === key;
+    tx -= w;
+    cx.fillStyle = on ? G : "rgba(20,30,50,0.9)"; cx.fillRect(tx, y0 + 8, w, 15);
+    cx.strokeStyle = on ? G : GD; cx.strokeRect(tx + 0.5, y0 + 8.5, w - 1, 14);
+    cx.fillStyle = on ? "#05070d" : M; cx.fillText(PAD_SCHEMES[key], tx + 7, y0 + 19);
+    padMenuTabs.push({ x: tx, y: y0 + 8, w, h: 15, scheme: key });
+    tx -= 4;
+  }
+  // the lineart, in its own units round the controller's centre
+  const k = 0.95, ox = x0 + pw / 2, oy = y0 + 100;
+  const P = (u, v) => [ox + u * k, oy + v * k];
+  const L = "rgba(143,232,176,0.85)", FILL = "rgba(143,232,176,0.55)";
+  cx.strokeStyle = L; cx.lineWidth = 1.2;
+  cx.beginPath();
+  cx.moveTo(...P(0, -34)); cx.lineTo(...P(44, -34));
+  cx.quadraticCurveTo(...P(58, -44), ...P(74, -40)); cx.quadraticCurveTo(...P(90, -34), ...P(92, -12));
+  cx.quadraticCurveTo(...P(96, 30), ...P(86, 52)); cx.quadraticCurveTo(...P(78, 64), ...P(66, 58));
+  cx.quadraticCurveTo(...P(58, 52), ...P(50, 34)); cx.quadraticCurveTo(...P(42, 18), ...P(26, 18));
+  cx.lineTo(...P(-26, 18));
+  cx.quadraticCurveTo(...P(-42, 18), ...P(-50, 34)); cx.quadraticCurveTo(...P(-58, 52), ...P(-66, 58));
+  cx.quadraticCurveTo(...P(-78, 64), ...P(-86, 52)); cx.quadraticCurveTo(...P(-96, 30), ...P(-92, -12));
+  cx.quadraticCurveTo(...P(-90, -34), ...P(-74, -40)); cx.quadraticCurveTo(...P(-58, -44), ...P(-44, -34));
+  cx.closePath(); cx.stroke();
+  const rrect = (u, v, w, h, r, lit, frac) => {
+    const [a, b] = P(u, v);
+    if (frac > 0) { cx.fillStyle = FILL; cx.fillRect(a, b, w * k * Math.min(1, frac), h * k); }
+    cx.beginPath(); cx.roundRect(a, b, w * k, h * k, r);
+    if (lit) { cx.fillStyle = FILL; cx.fill(); }
+    cx.stroke();
+  };
+  rrect(-26, -32, 52, 26, 4, hl[17], 0);                              // touchpad
+  rrect(-37, -35, 4, 10, 2, hl[PADB.CREATE], 0);                      // create
+  rrect(33, -35, 4, 10, 2, hl[PADB.OPTIONS], 0);                      // options
+  for (let i = -2; i <= 2; i++) circle(...P(i * 3, -1), 0.8, GD);     // the speaker
+  rrect(-78, -47, 22, 5, 2, hl[PADB.L1], 0); rrect(56, -47, 22, 5, 2, hl[PADB.R1], 0);
+  rrect(-78, -56, 22, 6, 2, false, pad.l2); rrect(56, -56, 22, 6, 2, false, pad.r2);
+  for (const [u, v, b] of [[-58, -21, PADB.UP], [-58, -3, PADB.DOWN], [-67, -12, PADB.LEFT], [-49, -12, PADB.RIGHT]]) rrect(u - 4, v - 4, 8, 8, 1.5, hl[b], 0);
+  const face = (u, v, b, glyph) => {
+    const [a, bb] = P(u, v), r = 4.6 * k;
+    cx.beginPath(); cx.arc(a, bb, r, 0, TAU); if (hl[b]) { cx.fillStyle = FILL; cx.fill(); } cx.stroke();
+    cx.beginPath(); const g = 2.3 * k;
+    if (glyph === "tri") { cx.moveTo(a, bb - g); cx.lineTo(a + g, bb + g * 0.8); cx.lineTo(a - g, bb + g * 0.8); cx.closePath(); }
+    else if (glyph === "o") cx.arc(a, bb, g, 0, TAU);
+    else if (glyph === "x") { cx.moveTo(a - g, bb - g); cx.lineTo(a + g, bb + g); cx.moveTo(a + g, bb - g); cx.lineTo(a - g, bb + g); }
+    else cx.rect(a - g * 0.9, bb - g * 0.9, g * 1.8, g * 1.8);
+    cx.stroke();
+  };
+  face(58, -22, PADB.TRIANGLE, "tri"); face(67, -12, PADB.CIRCLE, "o"); face(58, -2, PADB.CROSS, "x"); face(49, -12, PADB.SQUARE, "sq");
+  for (const [u, sx_, sy_, m] of [[-24, pad.lx, pad.ly, pad.lm], [24, pad.rx, pad.ry, pad.rm]]) {
+    const [a, b] = P(u, 6);
+    cx.beginPath(); cx.arc(a, b, 11 * k, 0, TAU); cx.stroke();
+    circle(a + sx_ * 5 * k, b + sy_ * 5 * k, 3.5 * k, m > 0 ? G : null, m > 0 ? null : L, 1);
+  }
+  // the labels, with leader lines
+  const off = t => ({ text: "OFF", off: true, ...t });
+  const left = [
+    { key: "L2", text: "AIM MODE", u: -67, v: -53, y: -52, lit: pad.l2 > PAD_TRIGGER },
+    manual ? { key: "L1", text: "SLOWER", u: -67, v: -45, y: -37, lit: hl[PADB.L1] } : off({ key: "L1", u: -67, v: -45, y: -37 }),
+    { key: "D-PAD", text: "BALL TYPE", u: -58, v: -25, y: -20, lit: hl[PADB.UP] || hl[PADB.DOWN] },
+    { key: "D-PAD", text: "SELECT BALL", u: -71, v: -12, y: -5, lit: hl[PADB.LEFT] || hl[PADB.RIGHT] },
+    { key: "L STICK", text: pad.aiming ? "POWER" : "FLY", u: -24, v: 6, y: 22, lit: pad.lm > 0 },
+  ];
+  const right = [
+    { key: "R2", text: pad.teleporting ? "TELEPORT" : "SHOOT", u: 67, v: -53, y: -52, lit: pad.r2 > PAD_TRIGGER },
+    manual ? { key: "R1", text: "FASTER", u: 67, v: -45, y: -37, lit: hl[PADB.R1] } : off({ key: "R1", u: 67, v: -45, y: -37 }),
+    { key: "△", text: "CAMERA", u: 58, v: -22, y: -22, lit: hl[PADB.TRIANGLE] },
+    { key: "○", text: "HOLD TELEPORT", u: 67, v: -12, y: -8, lit: hl[PADB.CIRCLE] },
+    manual ? { key: "□", text: "PAUSE", u: 49, v: -12, y: 6, lit: hl[PADB.SQUARE] } : off({ key: "□", u: 49, v: -12, y: 6 }),
+    { key: "✕", text: "BALL / CATCH", u: 58, v: -2, y: 20, lit: hl[PADB.CROSS] },
+    { key: "R STICK", text: pad.teleporting ? "TARGET" : "AIM", u: 24, v: 6, y: 36, lit: pad.rm > 0 },
+  ];
+  const drawLabel = (lab, side) => {
+    const [px, py] = P(lab.u, lab.v), y = oy + lab.y;
+    cx.font = `9px "Share Tech Mono", monospace`; cx.textAlign = "left";
+    const keyT = lab.key + " ", wk = cx.measureText(keyT).width, wb = cx.measureText(lab.text).width;
+    const xl = side < 0 ? x0 + 88 - wk - wb : x0 + pw - 92;
+    cx.fillStyle = lab.off ? M : T; cx.fillText(keyT, xl, y);
+    cx.fillStyle = lab.off ? M : lab.lit ? "#ffffff" : G; cx.fillText(lab.text, xl + wk, y);
+    const ex = side < 0 ? x0 + 91 : x0 + pw - 95;
+    cx.strokeStyle = lab.lit ? G : GD; cx.lineWidth = 1;
+    cx.beginPath(); cx.moveTo(ex, y - 3); cx.lineTo(px, py); cx.stroke();
+    circle(px, py, 1.6, lab.lit ? G : GD);
+  };
+  left.forEach(l => drawLabel(l, -1)); right.forEach(l => drawLabel(l, 1));
+  // the notes
+  cx.font = `9px "Share Tech Mono", monospace`; cx.textAlign = "left";
+  cx.fillStyle = M;
+  cx.fillText(manual ? "TIME: L1 SLOWER, R1 FASTER, SQUARE PAUSES" : "TIME RUNS AS FAST AS YOU FLY. STOP, AND IT STOPS", x0 + 14, y0 + ph - 25);
+  cx.fillStyle = pad.standard ? M : "#e8b463";
+  cx.fillText(pad.standard ? "OPTIONS SWITCHES THE SCHEME" : "NON-STANDARD MAPPING: BUTTONS MAY BE MISREAD", x0 + 14, y0 + ph - 11);
 }
 
 // ============================== INPUT ===========================================
@@ -2698,9 +3012,13 @@ addEventListener("keydown", e => {
 });
 addEventListener("keyup", e => { if (KEYMAP[e.code]) keys[KEYMAP[e.code]] = false; });
 addEventListener("blur", () => { for (const k in keys) keys[k] = false; });
-cv.addEventListener("mousemove", e => { mouse.sx = e.clientX; mouse.sy = e.clientY; });
+cv.addEventListener("mousemove", e => { mouse.sx = e.clientX; mouse.sy = e.clientY; pad.owns = false; });   // the mouse takes the ship back
 cv.addEventListener("mousedown", e => {
   if (intro) { skipIntro(); return; }
+  if (e.button === 0 && pad.active) {   // a click on a scheme tab in the controller menu
+    const t = padMenuTabs.find(r => e.clientX >= r.x && e.clientX <= r.x + r.w && e.clientY >= r.y && e.clientY <= r.y + r.h);
+    if (t) { switchPadScheme(t.scheme); return; }
+  }
   if (e.button === 2) { teleportTo(e.clientX, e.clientY); return; }
   // A BARE NOSE (the ball is out, or was destroyed and the next is on its way) with a ball
   // in the chamber: LMB loads it now. This press only loads; the next one aims.
@@ -2722,7 +3040,7 @@ cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { cam.zoom = Math.max(0.4, Math.min(6, cam.zoom * Math.exp(-e.deltaY * 0.0012))); e.preventDefault(); }, { passive: false });
 
 // ============================== TEST PANEL ======================================
-const STORE_KEY = "galaxytable.v29";   // bumped: saved settings would otherwise hide the new default
+const STORE_KEY = "galaxytable.v30";   // bumped: saved settings would otherwise hide the new default
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
   catch { return { ...DEFAULTS }; }
