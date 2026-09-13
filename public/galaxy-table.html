@@ -65,10 +65,11 @@
       L1 / R1   slower / faster time (L1 held to the end pauses, as Q does)
       SQUARE    pause on / off (as Shift)
       L2 hold   AIM MODE: time holds and the R stick still aims. The power follows the
-                aim style. POWER LINE: starts at 50%, the L STICK TRIMS IT (along the aim
-                for more, against it for less, let go and it holds), R2 shoots. DRAW BACK:
-                the same trim pulled back. HOLD TO POWER UP: hold R2 to charge, release
-                to shoot. A shot ends the aim
+                aim style. POWER LINE and DRAW BACK: starts at 50%, the L STICK TRIMS IT
+                (up for more, down for less, let go and it holds), R2 shoots. The panel's
+                "Relative power" swaps that for the old trim: along the aim for more
+                (DRAW BACK: pulled back against it). HOLD TO POWER UP: hold R2 to charge,
+                release to shoot. A shot ends the aim
       CREATE    cycles the aim style (as Tab)
       CROSS     catch a ball in reach, or load the next
       D-PAD     left / right selects a slot (nose, chamber 1, chamber 2), up / down
@@ -327,14 +328,16 @@
 <style>
   html, body { margin: 0; height: 100%; background: #05070d; overflow: hidden; }
   canvas { display: block; }
-  #panel { position: fixed; top: 10px; right: 10px; width: 290px; background: rgba(8,12,22,0.86);
+  #panel { position: fixed; top: 10px; right: 10px; width: 330px; background: rgba(8,12,22,0.86);
     border: 1px solid #2a3a55; border-radius: 6px; font: 11px/1.5 "Share Tech Mono", Menlo, monospace;
     color: #9fb4cc; padding: 10px 12px; user-select: none; max-height: calc(100vh - 40px); overflow-y: auto; }
   #panel h1 { font-size: 12px; margin: 0 0 6px; color: #cfe0ff; letter-spacing: 1px; display: flex; justify-content: space-between; }
   #panel #collapse { cursor: pointer; color: #6f86a8; }
-  #panel .row { margin: 2px 0; }
   #panel label { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
-  #panel label span:first-child { flex: 1; line-height: 1.2; }
+  #panel label span:first-child { flex: 1; line-height: 1.2; display: flex; flex-direction: column; }
+  #panel label b { font-weight: 700; color: #e2ecff; }
+  #panel label i { font-style: italic; color: #8fa6c8; font-size: 10px; margin-top: 1px; }
+  #panel .row { margin: 5px 0; }
   #panel input[type=range] { width: 90px; flex: none; }
   #panel .val { width: 44px; text-align: right; color: #e2ecff; }
   #panel .adv { cursor: pointer; color: #8fa6c8; font-size: 11px; letter-spacing: 1px; margin: 2px 0 4px; user-select: none; }
@@ -388,6 +391,7 @@ const DEFAULTS = {
   introFlyS: 4.6,         // seconds per body, whatever the hop: the camera never stops
   introSlow: 0.45,        // slow-down past a body: speed there is (1 - this) of the mean
   introPitchDeg: 52,      // camera pitch below horizontal during the flyover
+  padPowerRelative: false, // controller power trim: false = L stick up is more, down is less; true = along the aim (DRAW BACK: against it)
   padScheme: "manual",    // the controller: "manual" MANUAL CLOCK, "motion" MOTION CLOCK. OPTIONS switches
   motionRefAUyr: 10,      // MOTION CLOCK: ship speed that runs the world at game speed
   aimMode: "reach",       // "reach" POWER LINE, "charge" HOLD TO POWER UP, "draw" DRAW BACK. Tab cycles
@@ -2779,7 +2783,7 @@ function drawHud(W, H) {
      + (balls.length > 1 || (balls.length === 1 && acb.mode !== "empty") ? "   " + balls.length + " BALL" + (balls.length > 1 ? "S" : "") + " OUT" : ""),
      acb.mode === "attached" ? "#e8f0fa" : acb.mode === "lost" ? "#ff5030" : "#8fe8b0"],
     stab ? ["STABILISER burning, " + stab.err.toFixed(2) + " AU/yr to go.  WASD or Shift to override", "#e8b463"] : null,
-    timePaused || aiming() ? ["TIME PAUSED" + (pad.aiming ? (S.aimMode === "charge" ? ": hold R2 to power up, release to shoot" : S.aimMode === "draw" ? ": pull the left stick back for more power, push it forward for less, R2 shoots" : ": left stick along the aim for more power, against it for less, R2 shoots") : drag ? ": pull back for power, swing round to pivot, release to shoot" : charging ? ": powering up, the nose aims, release to shoot" : reaching ? ": further from the ship is harder, release to shoot" : pad.active && pad.owns ? ".  Square resumes.  Hold L2 to aim" : ".  Shift or E resumes.  Hold LMB to aim"), "#8fc3e8"] : null,
+    timePaused || aiming() ? ["TIME PAUSED" + (pad.aiming ? (S.aimMode === "charge" ? ": hold R2 to power up, release to shoot" : !S.padPowerRelative ? ": left stick up for more power, down for less, R2 shoots" : S.aimMode === "draw" ? ": pull the left stick back for more power, push it forward for less, R2 shoots" : ": left stick along the aim for more power, against it for less, R2 shoots") : drag ? ": pull back for power, swing round to pivot, release to shoot" : charging ? ": powering up, the nose aims, release to shoot" : reaching ? ": further from the ship is harder, release to shoot" : pad.active && pad.owns ? ".  Square resumes.  Hold L2 to aim" : ".  Shift or E resumes.  Hold LMB to aim"), "#8fc3e8"] : null,
   ].filter(Boolean);
   lines.forEach((l, i) => { cx.fillStyle = l[1]; cx.fillText(l[0], 14, 22 + i * 17); });
   notices.forEach((n, i) => { cx.fillStyle = colA(n.color, Math.min(1, (20 - n.t) / 4)); cx.fillText(n.text, 14, H - 20 - (notices.length - 1 - i) * 16); });
@@ -2974,7 +2978,7 @@ function pollPad(realDt) {
   const padFire = (min) => {
     const p = pendingShot();
     if (p && Math.max(min, p[2]) > 0.02) { const pw = Math.max(min, p[2]); lastPower = pw; fireAcb(p[0], p[1], pw); rumble(0.3, 90); }
-    else note(S.aimMode === "draw" ? "NO SHOT: pull the left stick back for power" : "NO SHOT: push the left stick along the aim for power", "#8fc3e8");
+    else note(!S.padPowerRelative ? "NO SHOT: push the left stick up for power" : S.aimMode === "draw" ? "NO SHOT: pull the left stick back for power" : "NO SHOT: push the left stick along the aim for power", "#8fc3e8");
     pad.aimLatch = true; pad.aiming = false; pad.charging = false;
   };
   if (pad.aiming && chargeStyle) {
@@ -2990,7 +2994,9 @@ function pollPad(realDt) {
     // along the nose, so "out" is the way the power line points (DRAW BACK: the way the pull
     // goes); squared, so a light push is a fine trim and a full push crosses the range in
     // 1 / PAD_POWER_RATE seconds
-    const along = (lx * Math.cos(ship.nose) + ly * Math.sin(ship.nose)) * (S.aimMode === "draw" ? -1 : 1);
+    // the default is the stick's up and down (+y is down on the stick, so up is -ly); the
+    // relative trim is the backup, on the panel
+    const along = S.padPowerRelative ? (lx * Math.cos(ship.nose) + ly * Math.sin(ship.nose)) * (S.aimMode === "draw" ? -1 : 1) : -ly;
     const before = pad.power;
     pad.power = Math.max(0, Math.min(1, pad.power + Math.sign(along) * along * along * PAD_POWER_RATE * realDt));
     if (Math.floor(pad.power * 10 + 1e-9) !== Math.floor(before * 10 + 1e-9)) rumble(0.08, 18);   // a tick every 10%
@@ -3179,7 +3185,7 @@ cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { cam.zoom = Math.max(0.4, Math.min(6, cam.zoom * Math.exp(-e.deltaY * 0.0012))); e.preventDefault(); }, { passive: false });
 
 // ============================== TEST PANEL ======================================
-const STORE_KEY = "galaxytable.v31";   // bumped: saved settings would otherwise hide the new default
+const STORE_KEY = "galaxytable.v32";   // bumped: saved settings would otherwise hide the new default
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
   catch { return { ...DEFAULTS }; }
@@ -3190,17 +3196,19 @@ function saveSettings() { try { localStorage.setItem(STORE_KEY, JSON.stringify(S
 // DEFAULTS entry and still tunable from the console (RIG.set), it is just not on screen.
 const PANEL = [
   ["h", "GALAXY TABLE SETTINGS"],
-  ["r", "ballScale", "planet size", 2, 20, 0.5],
-  ["r", "systemScale", "system size (distance between planets)", 1, 2.5, 0.05],
-  ["l", "thrustAccel", "engine power (AU/yr\u00b2)", 300, 30000],
-  ["r", "linearDamp", "ship drift settle (0 = drifts forever)", 0, 2, 0.05],
+  // labels are "Heading|description": a heading of two words at most, the rest under it
+  ["r", "ballScale", "Planet size|how big the worlds are", 2, 20, 0.5],
+  ["r", "systemScale", "System size|distance between the planets", 1, 2.5, 0.05],
+  ["l", "thrustAccel", "Engine power|ship acceleration, AU/yr\u00b2", 300, 30000],
+  ["r", "linearDamp", "Drift settle|how fast the ship's drift dies away; 0 drifts forever", 0, 2, 0.05],
+  ["b", "padPowerRelative", "Relative power|controller: trim the power along the aim, instead of left stick up and down"],
   ["a", "ADVANCED"],   // folded by default; the camera is an in-game control (C), not a dial
-  ["r", "gravPull", "gravitizer pull strength", 0.005, 0.2, 0.005],
-  ["r", "gravReachAU", "gravitizer pull reach (AU)", 0.1, 2, 0.05],
-  ["l", "maxWarpM", "max time speed (millions x)", 1, 50],
-  ["b", "fateLabels", "in-world labels (POTTED, HITS THE SHIP, aim caption)"],
-  ["r", "introFlyS", "briefing: seconds per body", 1, 10, 0.1],
-  ["r", "introSlow", "briefing: slow-down past each body (0 = none, 1 = a stop)", 0, 1, 0.05],
+  ["r", "gravPull", "Gravitizer pull|how hard the gravitizer pulls", 0.005, 0.2, 0.005],
+  ["r", "gravReachAU", "Gravitizer reach|how far the pull reaches, AU", 0.1, 2, 0.05],
+  ["l", "maxWarpM", "Max time|top time speed, millions x", 1, 50],
+  ["b", "fateLabels", "World labels|POTTED, HITS THE SHIP and the aim caption, drawn in the world"],
+  ["r", "introFlyS", "Briefing pace|seconds per body", 1, 10, 0.1],
+  ["r", "introSlow", "Briefing slowdown|how much it slows past each body; 0 none, 1 a stop", 0, 1, 0.05],
 ];
 
 let advShown = false;   // the ADVANCED fold, per page load
@@ -3212,7 +3220,9 @@ function buildPanel() {
     if (row[0] === "h") { html += `<h1>${row[1]} <span id="collapse">[-]</span></h1><div id="panelBody">`; continue; }
     if (row[0] === "-") { html += "<hr>"; continue; }
     if (row[0] === "a") { advOpen = true; html += `<hr><div id="advToggle" class="adv">${advShown ? "[-]" : "[+]"} ${row[1]}</div><div id="advBody" style="display:${advShown ? "" : "none"}">`; continue; }
-    const [kind, key, label, min, max, step] = row;
+    const [kind, key, text, min, max, step] = row;
+    const [head, desc] = text.split("|");
+    const label = `<b>${head}</b>` + (desc ? `<i>${desc}</i>` : "");
     // "l" is a log-scaled range: the slider travels an exponent, so each doubling gets
     // the same room and the slow end is not three pixels wide.
     if (kind === "l") {
