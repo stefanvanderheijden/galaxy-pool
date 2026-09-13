@@ -1703,8 +1703,10 @@ function buildGhost() {
       if (k.type === "thermo") thermoAftermath(k, hit);
       if (!track.has(hit.id)) track.set(hit.id, { color: hit.color, direct: true, pts: [{ x: hit.x, y: hit.y }] });
     } else {
-      // the FLASH TERMINUS: where the flash burns out and the ball drops to coasting
-      if (k === pending) out.terminus = { x: k.x, y: k.y, a: Math.atan2(k.vy, k.vx) };
+      // the FLASH TERMINUS: where the flash burns out and the ball drops to coasting. Only
+      // with the terminus on: off, the flash ends here only because it left the table, and a
+      // mark at the table's edge would name something that is not there
+      if (k === pending && S.flashTerminus) out.terminus = { x: k.x, y: k.y, a: Math.atan2(k.vy, k.vx) };
       burnOut(k);
     }
     k.flash = null;
@@ -3185,7 +3187,7 @@ cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { cam.zoom = Math.max(0.4, Math.min(6, cam.zoom * Math.exp(-e.deltaY * 0.0012))); e.preventDefault(); }, { passive: false });
 
 // ============================== TEST PANEL ======================================
-const STORE_KEY = "galaxytable.v32";   // bumped: saved settings would otherwise hide the new default
+const STORE_KEY = "galaxytable.v33";   // bumped: saved settings would otherwise hide the new default
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
   catch { return { ...DEFAULTS }; }
@@ -3206,6 +3208,7 @@ const PANEL = [
   ["r", "gravPull", "Gravitizer pull|how hard the gravitizer pulls", 0.005, 0.2, 0.005],
   ["r", "gravReachAU", "Gravitizer reach|how far the pull reaches, AU", 0.1, 2, 0.05],
   ["l", "maxWarpM", "Max time|top time speed, millions x", 1, 50],
+  ["b", "flashTerminus", "Flash terminus|the flash burns out after a range set by the shot's power, marked on the aim line"],
   ["b", "fateLabels", "World labels|POTTED, HITS THE SHIP and the aim caption, drawn in the world"],
   ["r", "introFlyS", "Briefing pace|seconds per body", 1, 10, 0.1],
   ["r", "introSlow", "Briefing slowdown|how much it slows past each body; 0 none, 1 a stop", 0, 1, 0.05],
@@ -3304,7 +3307,7 @@ window.RIG = {
   setType: (i, t) => { if (i < 0) acb.type = t; else chamber[i] = t; },
   starTo: (x, y, vx, vy, struck) => { STAR.x = x; STAR.y = y; STAR.vx = vx; STAR.vy = vy; if (struck != null) STAR.struck = struck; },
   teleportBody: (i, x, y, vx, vy, struck) => { const b = bodies[i]; b.x = x; b.y = y; b.vx = vx; b.vy = vy; if (struck != null) b.struck = struck; },
-  ghostNow: () => { buildGhost(); return ghost ? { pts: ghost.pending ? ghost.pending.length : 0, hit: ghost.hit, balls: ghost.balls.length, worlds: ghost.worlds.length } : null; },
+  ghostNow: () => { buildGhost(); return ghost ? { pts: ghost.pending ? ghost.pending.length : 0, hit: ghost.hit, terminus: !!ghost.terminus, balls: ghost.balls.length, worlds: ghost.worlds.length } : null; },
   realTick: (s) => { checkCapture(s); stepCapture(s); stepLost(s); },
   intro: () => intro ? { t: intro.t, total: introTotal(), stops: intro.stops.map(s => s.key), pose: intro.pose, skipped: !!intro.skipped } : null,
   introTo: (t) => { if (!intro) startIntro(); intro.t = t; intro.pose = introPose(t); setPersp(intro.pose); },
