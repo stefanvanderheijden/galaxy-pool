@@ -58,7 +58,7 @@
   Connecting one swaps the keyboard list at the bottom right for a controller schematic
   that lights up as you press. TWO SCHEMES, switched with OPTIONS or by clicking the tabs:
     MANUAL CLOCK
-      L STICK   fly, relative to the nose (forward is along the aim), analog
+      L STICK   fly in screen directions (up is up), analog
       R STICK   aim: the nose follows it and holds where it was let go
       L1 / R1   slower / faster time (L1 held to the end pauses, as Q does)
       SQUARE    pause on / off (as Shift)
@@ -67,8 +67,9 @@
       CROSS     catch a ball in reach, or load the next
       D-PAD     left / right selects a slot (nose, chamber 1, chamber 2), up / down
                 cycles that slot's ball type
-      TRIANGLE  camera: whole table / follow the ship
-      CIRCLE    hold for the TELEPORT STATE: the R stick places the destination (its
+      TRIANGLE  reset (as R)
+      TOUCHPAD  camera: whole table / follow the ship (as C)
+      CIRCLE    hold for the TELEPORT STATE: the L stick places the destination (its
                 angle and its throw, up to the teleport range), R2 teleports, letting go
                 of circle cancels
     MOTION CLOCK   everything above, except time is not a control: it RUNS AS FAST AS
@@ -330,6 +331,7 @@
   #panel label span:first-child { flex: 1; line-height: 1.2; }
   #panel input[type=range] { width: 90px; flex: none; }
   #panel .val { width: 44px; text-align: right; color: #e2ecff; }
+  #panel .adv { cursor: pointer; color: #8fa6c8; font-size: 11px; letter-spacing: 1px; margin: 2px 0 4px; user-select: none; }
   #panel hr { border: 0; border-top: 1px solid #22304a; margin: 6px 0; }
   #chamber { position: fixed; left: 14px; bottom: 112px; display: flex; gap: 8px; font: 11px/1.4 "Share Tech Mono", Menlo, monospace; user-select: none; }
   #chamber .slot { width: 96px; background: rgba(8,12,22,0.8); border: 1px solid #2a3a55; border-radius: 6px; padding: 6px 8px; color: #9fb4cc; }
@@ -397,7 +399,7 @@ const DEFAULTS = {
   fauxSpheres: true,      // worlds drawn as the Galaxy 64 planet card: a band turning under a shading pass
   sphereLightZ: 0.25,     // the star's light lifted toward the viewer, so a top-down world is not half dark
   thrustAccel: 3000,      // AU/yr^2. The designer found 400 too slow at 200K; slider is log around this
-  linearDamp: 0.9,        // settle per real second while off gravity. 0 = honest space
+  linearDamp: 0.35,       // settle per real second while off gravity. 0 = honest space. Was 0.9: the designer wanted more drift
   aimEase: 24,            // how fast the nose swings to the cursor, per second
   shotPower: 8.0,         // AU/yr of delta-v at full charge / full pull
   chargeSeconds: 1.2,     // real seconds from empty to full charge
@@ -1243,7 +1245,7 @@ function simStep(h, offGravity) {
 function aimNose(realDt) {
   if (drag || reaching) { const p = pendingShot(); if (p) ship.nose = Math.atan2(p[1], p[0]); return; }   // LMB down: the nose is the pull's aim
   if (pad.active && pad.owns) {   // THE CONTROLLER: the right stick aims, and the nose holds where it was let go
-    if (pad.teleporting || pad.rm <= 0) return;
+    if (pad.rm <= 0) return;
     let d = Math.atan2(pad.ry, pad.rx) - ship.nose;
     while (d > Math.PI) d -= TAU;
     while (d < -Math.PI) d += TAU;
@@ -1264,10 +1266,10 @@ function thrustVector() {
   const nx = Math.cos(ship.nose), ny = Math.sin(ship.nose);
   const lon = (keys.w ? 1 : 0) - (keys.s ? 1 : 0);
   const lat = (keys.a ? 1 : 0) - (keys.d ? 1 : 0);
-  // THE LEFT STICK flies relative to the nose, analog: forward is along the aim, sideways
-  // strafes. Not in aim mode, where the same stick is the power.
-  if (!lon && !lat && pad.active && pad.lm > 0 && !pad.aiming) {
-    return [nx * -pad.ly + ny * -pad.lx, ny * -pad.ly - nx * -pad.lx];   // its length is the throw
+  // THE LEFT STICK flies in screen directions, analog: up is up, whatever the nose does.
+  // Not in aim mode, where it is the power, nor in the teleport state, where it is the target.
+  if (!lon && !lat && pad.active && pad.lm > 0 && !pad.aiming && !pad.teleporting) {
+    return [pad.lx, pad.ly];   // its length is the throw; +y is down on screen and on the stick
   }
   // +y is down, so the left-hand normal of (nx, ny) is (ny, -nx): A goes to the
   // SCREEN's left. Check against the drawn hull rather than intuition.
@@ -1337,6 +1339,13 @@ function flashHitsBall(k, o) {
   const [ivx, ivy] = impactVelocity(k); k.vx = ivx; k.vy = ivy;
   const dx = o.x - k.x, dy = o.y - k.y, d = Math.hypot(dx, dy) || 1, R = 2 * S.acbRadiusAU;
   k.x = o.x - dx / d * R * 0.995; k.y = o.y - dy / d * R * 0.995;
+  // the same cone, bloom and shockwave as a flash into a world (no hitstop: the frame
+  // freeze needs a world to hand the energy to at its end)
+  const dir = Math.atan2(ivy, ivx), lines = [];
+  for (let i = 0; i < 18; i++) lines.push({ ang: dir + (Math.random() - 0.5) * 1.2, len: 0.12 + Math.random() * 0.4, w: 0.6 + Math.random() * 1.6 });
+  fx.shards.push({ x: k.x, y: k.y, t: 0, lines });
+  fx.shocks.push({ x: k.x, y: k.y, t: 0 });
+  fx.flashA = Math.max(fx.flashA, 0.6); fx.shake = Math.max(fx.shake, 0.6); rumble(0.5, 120);
   collide(k, 1, S.acbRadiusAU, o, 1, S.acbRadiusAU);
   flash(k.x, k.y, 0.1, "#ffffff"); note("CUE BALLS COLLIDE", "#e8f0fa");
   fx.trails.push(k.flash.pts); k.flash = null;
@@ -2445,7 +2454,7 @@ function draw(realDt) {
     cx.setLineDash([4, 4]); circle(sx, sy, S.captureRadiusAU * sc, null, col, 1.5); cx.setLineDash([]);
     if (inside) {
       cx.fillStyle = col; cx.font = `10px "Share Tech Mono", monospace`; cx.textAlign = "center";
-      cx.fillText(!S.autoCapture ? "SPACE TO CATCH" : slow ? "MATCHED" : "REL " + rel.toFixed(1) + " AU/yr", sx, sy - S.captureRadiusAU * sc - 6);
+      cx.fillText(!S.autoCapture ? (pad.active && pad.owns ? "CROSS TO CATCH" : "SPACE TO CATCH") : slow ? "MATCHED" : "REL " + rel.toFixed(1) + " AU/yr", sx, sy - S.captureRadiusAU * sc - 6);
     }
     drawBall(sx, sy, k.type, true);
   }
@@ -2494,7 +2503,7 @@ function draw(realDt) {
       }
     }
   }
-  // THE TELEPORT STATE (controller): the range, the destination the R stick has placed, and
+  // THE TELEPORT STATE (controller): the range, the destination the L stick has placed, and
   // the recharge if there is one
   if (pad.active && pad.teleporting && pad.tp) {
     const q0 = worldToScreen(ship.x, ship.y), q1 = worldToScreen(ship.x + pad.tp.dx, ship.y + pad.tp.dy);
@@ -2821,7 +2830,8 @@ function pollPad(realDt) {
   }
   const pressed = gp.buttons.map(b => !!(b && b.pressed));
   if (!pad.active) {
-    Object.assign(pad, { active: true, index: gp.index, id: gp.id, standard: gp.mapping === "standard", prev: pressed.slice() });
+    // prev starts all up, so the press that made the browser show the controller counts
+    Object.assign(pad, { active: true, index: gp.index, id: gp.id, standard: gp.mapping === "standard", prev: pressed.map(() => false) });
     note("CONTROLLER CONNECTED" + (pad.standard ? "" : " (non-standard mapping: buttons may be misread)"), "#8fe8b0");
   }
   pad.index = gp.index;
@@ -2831,20 +2841,26 @@ function pollPad(realDt) {
   const [lx, ly, lm] = stickVec(gp.axes[0] || 0, gp.axes[1] || 0, PAD_DEAD);
   const [rx, ry, rm] = stickVec(gp.axes[2] || 0, gp.axes[3] || 0, PAD_AIM_DEAD);
   Object.assign(pad, { lx, ly, lm, rx, ry, rm, l2: val(PADB.L2), r2: val(PADB.R2), heldList: pressed });
-  if (lm > 0 || rm > 0 || pressed.some(Boolean)) pad.owns = true;   // the controller has the ship until the mouse moves
-  const finish = () => { pad.prev = pressed; pad.prevL2 = pad.l2; pad.prevR2 = pad.r2; };
-  if (intro) { if (pressed.some((b, i) => b && !pad.prev[i])) skipIntro(); finish(); return; }
+  // Any real controller input hands it the game (the menu, the hints, the aim) until the
+  // keyboard or a deliberate mouse move takes it back. A firm push, so drift does not.
+  const firm = Math.hypot(gp.axes[0] || 0, gp.axes[1] || 0) > 0.4 || Math.hypot(gp.axes[2] || 0, gp.axes[3] || 0) > 0.4;
+  const anyDown = pressed.some((b, i) => b && !pad.prev[i]);
+  if (firm || anyDown || pad.l2 > PAD_TRIGGER || pad.r2 > PAD_TRIGGER) { if (!pad.owns) mouseDrift = 0; pad.owns = true; }
+  const finish = () => { pad.prev = pressed; pad.prevL2 = pad.l2; pad.prevR2 = pad.r2; pad.stickSkip = firm; };
+  // the briefing: any button, a trigger, or a firm push of a stick skips it
+  if (intro) { if (anyDown || pad.l2 > PAD_TRIGGER || pad.r2 > PAD_TRIGGER || (firm && !pad.stickSkip)) skipIntro(); finish(); return; }
 
   const manual = S.padScheme === "manual";
   const l2Down = pad.l2 > PAD_TRIGGER && pad.prevL2 <= PAD_TRIGGER, r2Down = pad.r2 > PAD_TRIGGER && pad.prevR2 <= PAD_TRIGGER;
   if (down(PADB.OPTIONS)) switchPadScheme();
 
-  // CIRCLE held: the teleport state. The R stick places the destination by its angle and
-  // throw, up to the range, and the last placement holds when the stick is let go.
+  // CIRCLE held: the teleport state. The L stick places the destination by its angle and
+  // throw, up to the range (and does not fly meanwhile); the last placement holds when the
+  // stick is let go.
   pad.teleporting = held(PADB.CIRCLE) && !score.failed;
   if (pad.teleporting) {
     const R = teleportRange();
-    if (rm > 0) pad.tp = { dx: rx * R, dy: ry * R };
+    if (lm > 0) pad.tp = { dx: lx * R, dy: ly * R };
     else if (!pad.tp) pad.tp = { dx: Math.cos(ship.nose) * R * 0.5, dy: Math.sin(ship.nose) * R * 0.5 };
     if (r2Down) teleportToWorld(ship.x + pad.tp.dx, ship.y + pad.tp.dy);
   } else pad.tp = null;
@@ -2866,7 +2882,8 @@ function pollPad(realDt) {
   }
 
   if (down(PADB.CROSS)) spaceKey();
-  if (down(PADB.TRIANGLE)) { S.camFollow = !S.camFollow; saveSettings(); buildPanel(); note("CAMERA: " + (S.camFollow ? "FOLLOWS THE SHIP" : "WHOLE TABLE"), "#8fc3e8"); }
+  if (down(PADB.TRIANGLE)) { resetWorld(); note("RESET", "#8fc3e8"); }   // as R
+  if (down(17)) { S.camFollow = !S.camFollow; saveSettings(); note("CAMERA: " + (S.camFollow ? "FOLLOWS THE SHIP" : "WHOLE TABLE"), "#8fc3e8"); }   // the touchpad click, as C
   if (down(PADB.LEFT)) padSelect(-1);
   if (down(PADB.RIGHT)) padSelect(1);
   if (down(PADB.UP)) padCycleType(1);
@@ -2957,16 +2974,17 @@ function drawPadMenu(W, H) {
     manual ? { key: "L1", text: "SLOWER", u: -67, v: -45, y: -37, lit: hl[PADB.L1] } : off({ key: "L1", u: -67, v: -45, y: -37 }),
     { key: "D-PAD", text: "BALL TYPE", u: -58, v: -25, y: -20, lit: hl[PADB.UP] || hl[PADB.DOWN] },
     { key: "D-PAD", text: "SELECT BALL", u: -71, v: -12, y: -5, lit: hl[PADB.LEFT] || hl[PADB.RIGHT] },
-    { key: "L STICK", text: pad.aiming ? "POWER" : "FLY", u: -24, v: 6, y: 22, lit: pad.lm > 0 },
+    { key: "L STICK", text: pad.teleporting ? "TARGET" : pad.aiming ? "POWER" : "FLY", u: -24, v: 6, y: 22, lit: pad.lm > 0 },
+    { key: "TOUCHPAD", text: "CAMERA", u: -14, v: -26, y: 36, lit: hl[17] },
   ];
   const right = [
     { key: "R2", text: pad.teleporting ? "TELEPORT" : "SHOOT", u: 67, v: -53, y: -52, lit: pad.r2 > PAD_TRIGGER },
     manual ? { key: "R1", text: "FASTER", u: 67, v: -45, y: -37, lit: hl[PADB.R1] } : off({ key: "R1", u: 67, v: -45, y: -37 }),
-    { key: "△", text: "CAMERA", u: 58, v: -22, y: -22, lit: hl[PADB.TRIANGLE] },
+    { key: "△", text: "RESET", u: 58, v: -22, y: -22, lit: hl[PADB.TRIANGLE] },
     { key: "○", text: "HOLD TELEPORT", u: 67, v: -12, y: -8, lit: hl[PADB.CIRCLE] },
     manual ? { key: "□", text: "PAUSE", u: 49, v: -12, y: 6, lit: hl[PADB.SQUARE] } : off({ key: "□", u: 49, v: -12, y: 6 }),
     { key: "✕", text: "BALL / CATCH", u: 58, v: -2, y: 20, lit: hl[PADB.CROSS] },
-    { key: "R STICK", text: pad.teleporting ? "TARGET" : "AIM", u: 24, v: 6, y: 36, lit: pad.rm > 0 },
+    { key: "R STICK", text: "AIM", u: 24, v: 6, y: 36, lit: pad.rm > 0 },
   ];
   const drawLabel = (lab, side) => {
     const [px, py] = P(lab.u, lab.v), y = oy + lab.y;
@@ -2994,6 +3012,7 @@ const KEYMAP = { KeyW: "w", KeyA: "a", KeyS: "s", KeyD: "d", KeyQ: "q", KeyE: "e
 addEventListener("keydown", e => {
   if (e.target.tagName === "INPUT") return;
   if (intro) { skipIntro(); e.preventDefault(); return; }
+  pad.owns = false;   // a key takes the game back from the controller
   if (KEYMAP[e.code]) { keys[KEYMAP[e.code]] = true; e.preventDefault(); }
   // Shift toggles the pause; E, the other way along the slider, also ends it
   if ((e.code === "ShiftLeft" || e.code === "ShiftRight") && !e.repeat) { timePaused = !timePaused; note(timePaused ? "TIME PAUSED" : "TIME RESUMED", "#8fc3e8"); }
@@ -3012,7 +3031,13 @@ addEventListener("keydown", e => {
 });
 addEventListener("keyup", e => { if (KEYMAP[e.code]) keys[KEYMAP[e.code]] = false; });
 addEventListener("blur", () => { for (const k in keys) keys[k] = false; });
-cv.addEventListener("mousemove", e => { mouse.sx = e.clientX; mouse.sy = e.clientY; pad.owns = false; });   // the mouse takes the ship back
+// The mouse takes the game back from the controller, but only a deliberate move: a hand
+// brushing the trackpad mid-play must not flip the controls.
+let mouseDrift = 0;
+cv.addEventListener("mousemove", e => {
+  if (pad.owns) { mouseDrift += Math.hypot(e.clientX - mouse.sx, e.clientY - mouse.sy); if (mouseDrift > 60) pad.owns = false; }
+  mouse.sx = e.clientX; mouse.sy = e.clientY;
+});
 cv.addEventListener("mousedown", e => {
   if (intro) { skipIntro(); return; }
   if (e.button === 0 && pad.active) {   // a click on a scheme tab in the controller menu
@@ -3040,7 +3065,7 @@ cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { cam.zoom = Math.max(0.4, Math.min(6, cam.zoom * Math.exp(-e.deltaY * 0.0012))); e.preventDefault(); }, { passive: false });
 
 // ============================== TEST PANEL ======================================
-const STORE_KEY = "galaxytable.v30";   // bumped: saved settings would otherwise hide the new default
+const STORE_KEY = "galaxytable.v31";   // bumped: saved settings would otherwise hide the new default
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
   catch { return { ...DEFAULTS }; }
@@ -3053,22 +3078,26 @@ const PANEL = [
   ["h", "GALAXY TABLE SETTINGS"],
   ["r", "ballScale", "planet size", 2, 20, 0.5],
   ["r", "systemScale", "system size (distance between planets)", 1, 2.5, 0.05],
+  ["l", "thrustAccel", "engine power (AU/yr\u00b2)", 300, 30000],
+  ["r", "linearDamp", "ship drift settle (0 = drifts forever)", 0, 2, 0.05],
+  ["a", "ADVANCED"],   // folded by default; the camera is an in-game control (C), not a dial
   ["r", "gravPull", "gravitizer pull strength", 0.005, 0.2, 0.005],
   ["r", "gravReachAU", "gravitizer pull reach (AU)", 0.1, 2, 0.05],
   ["l", "maxWarpM", "max time speed (millions x)", 1, 50],
-  ["b", "camFollow", "camera follows the ship  [C]"],
   ["b", "fateLabels", "in-world labels (POTTED, HITS THE SHIP, aim caption)"],
   ["r", "introFlyS", "briefing: seconds per body", 1, 10, 0.1],
   ["r", "introSlow", "briefing: slow-down past each body (0 = none, 1 = a stop)", 0, 1, 0.05],
 ];
 
+let advShown = false;   // the ADVANCED fold, per page load
 function fmtLog(v) { return v < 100 ? v.toFixed(1) : v.toFixed(0); }
 function buildPanel() {
   const el = document.getElementById("panel");
-  let html = "";
+  let html = "", advOpen = false;
   for (const row of PANEL) {
     if (row[0] === "h") { html += `<h1>${row[1]} <span id="collapse">[-]</span></h1><div id="panelBody">`; continue; }
     if (row[0] === "-") { html += "<hr>"; continue; }
+    if (row[0] === "a") { advOpen = true; html += `<hr><div id="advToggle" class="adv">${advShown ? "[-]" : "[+]"} ${row[1]}</div><div id="advBody" style="display:${advShown ? "" : "none"}">`; continue; }
     const [kind, key, label, min, max, step] = row;
     // "l" is a log-scaled range: the slider travels an exponent, so each doubling gets
     // the same room and the slow end is not three pixels wide.
@@ -3080,6 +3109,7 @@ function buildPanel() {
     else
       html += `<div class="row"><label><span>${label}</span><input type="range" data-k="${key}" min="${min}" max="${max}" step="${step}" value="${S[key]}"><span class="val" id="v_${key}">${S[key]}</span></label></div>`;
   }
+  if (advOpen) html += `</div>`;
   html += `<hr><button id="resetBtn">reset to defaults</button></div>`;
   el.innerHTML = html;
   el.querySelectorAll("input").forEach(inp => {
@@ -3100,6 +3130,7 @@ function buildPanel() {
   document.getElementById("resetBtn").addEventListener("click", () => {
     localStorage.removeItem(STORE_KEY); S = { ...DEFAULTS }; buildPanel();
   });
+  document.getElementById("advToggle").addEventListener("click", () => { advShown = !advShown; buildPanel(); });
   document.getElementById("collapse").addEventListener("click", () => {
     const b = document.getElementById("panelBody");
     b.style.display = b.style.display === "none" ? "" : "none";
@@ -3155,6 +3186,7 @@ window.RIG = {
   introTo: (t) => { if (!intro) startIntro(); intro.t = t; intro.pose = introPose(t); setPersp(intro.pose); },
   introTick: (s) => { if (intro) stepIntro(s); },
   skipIntro: () => skipIntro(),
+  pad: () => ({ active: pad.active, owns: pad.owns, teleporting: pad.teleporting, aiming: pad.aiming }),
   project: (x, y) => worldToScreen(x, y),
   cam: () => ({ ...cam }),
 };
