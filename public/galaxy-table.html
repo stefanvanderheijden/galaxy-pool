@@ -2518,9 +2518,10 @@ function draw(realDt) {
       const R = reachFull() * sc, r0 = REACH_DEAD_AU * sc, r1 = r0 + (R - r0) * p[2];
       const [pr, pg, pb] = powerColour(p[2]);
       const tipX = sx + p[0] * r1, tipY = sy + p[1] * r1;
-      cx.strokeStyle = "rgba(255,255,255,0.3)"; cx.lineWidth = 1; cx.beginPath();
+      // the full-power mark: a short crossbar on the aim line, nothing written
+      cx.strokeStyle = "rgba(255,255,255,0.7)"; cx.lineWidth = 1.5; cx.beginPath();
       const nX = -p[1], nY = p[0];
-      cx.moveTo(sx + p[0] * R + nX * 5, sy + p[1] * R + nY * 5); cx.lineTo(sx + p[0] * R - nX * 5, sy + p[1] * R - nY * 5); cx.stroke();
+      cx.moveTo(sx + p[0] * R + nX * 6, sy + p[1] * R + nY * 6); cx.lineTo(sx + p[0] * R - nX * 6, sy + p[1] * R - nY * 6); cx.stroke();
       if (r1 > r0 + 0.5) {
         const g = cx.createLinearGradient(sx + p[0] * r0, sy + p[1] * r0, tipX, tipY);
         const ph = (performance.now() / POWER_PULSE_MS) % 1, w = Math.min(0.35, 18 / (r1 - r0));   // the pulse, about 18 px wide
@@ -2536,6 +2537,15 @@ function draw(realDt) {
         cx.beginPath(); cx.moveTo(sx + p[0] * r0, sy + p[1] * r0); cx.lineTo(tipX, tipY); cx.stroke();
         cx.lineCap = "butt";
       }
+      // the number, beside the tip and moving with it: the side of the line that points up
+      // the screen, so it does not flip about as the aim swings past vertical
+      const side = nY > 0 ? -1 : 1, off = 13;
+      const lx_ = tipX + nX * off * side, ly_ = tipY + nY * off * side;
+      cx.font = `11px "Share Tech Mono", monospace`; cx.textAlign = "center"; cx.textBaseline = "middle";
+      const label = (p[2] * 100).toFixed(0);
+      cx.lineWidth = 3; cx.strokeStyle = "rgba(5,7,13,0.8)"; cx.strokeText(label, lx_, ly_);
+      cx.fillStyle = `rgb(${pr},${pg},${pb})`; cx.fillText(label, lx_, ly_);
+      cx.textAlign = "left"; cx.textBaseline = "alphabetic";
     }
     if (p && aiming()) {
       const [ax, ay] = worldToScreen(acb.x, acb.y);
@@ -2642,16 +2652,11 @@ function drawFate(f, m) {
 function drawPointer() {
   const want = drag ? "none" : "crosshair";
   if (cv.style.cursor !== want) cv.style.cursor = want;
-  if (pad.active && pad.aiming) {   // the controller's power, under the hull
-    const p = pendingShot(), q = worldToScreen(ship.x, ship.y);
-    if (p && q) { cx.fillStyle = "rgba(255,255,255,0.9)"; cx.font = `10px "Share Tech Mono", monospace`; cx.textAlign = "center"; cx.fillText((p[2] * 100).toFixed(0) + "%", q[0], q[1] + 40); cx.textAlign = "left"; }
-    return;
+  if (pad.active && pad.aiming) {   // the controller
+    return;   // the number rides the power line's tip, drawn with the ship
   }
-  if (reaching) {   // POWER LINE: the pointer is the target, so only the power under it
-    const p = pendingShot(); if (!p) return;
-    cx.fillStyle = "rgba(255,255,255,0.9)"; cx.font = `10px "Share Tech Mono", monospace`; cx.textAlign = "center";
-    cx.fillText((p[2] * 100).toFixed(0) + "%", mouse.sx, mouse.sy + 24); cx.textAlign = "left";
-    return;
+  if (reaching) {   // POWER LINE: the pointer is the target
+    return;   // the number rides the power line's tip, drawn with the ship
   }
   if (!drag) return;
   const p = pendingShot(); if (!p) return;
