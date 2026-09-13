@@ -391,6 +391,7 @@ const DEFAULTS = {
   introFlyS: 4.6,         // seconds per body, whatever the hop: the camera never stops
   introSlow: 0.45,        // slow-down past a body: speed there is (1 - this) of the mean
   introPitchDeg: 52,      // camera pitch below horizontal during the flyover
+  wasdRelative: false,    // keyboard flight: false = W up, A left (screen); true = W along the aim, A/D strafe
   padPowerRelative: false, // controller power trim: false = L stick up is more, down is less; true = along the aim (DRAW BACK: against it)
   padScheme: "manual",    // the controller: "manual" MANUAL CLOCK, "motion" MOTION CLOCK. OPTIONS switches
   motionRefAUyr: 10,      // MOTION CLOCK: ship speed that runs the world at game speed
@@ -1313,9 +1314,11 @@ function thrustVector() {
   if (!lon && !lat && pad.active && pad.lm > 0 && !pad.aiming && !pad.teleporting) {
     return [pad.lx, pad.ly];   // its length is the throw; +y is down on screen and on the stick
   }
-  // +y is down, so the left-hand normal of (nx, ny) is (ny, -nx): A goes to the
-  // SCREEN's left. Check against the drawn hull rather than intuition.
-  let fx = nx * lon + ny * lat, fy = ny * lon - nx * lat;
+  // WASD in screen directions by default (W up, A left, like the stick; +y is down, so W
+  // is -y). Relative, W flies along the aim and A/D strafe: +y is down, so the left-hand
+  // normal of (nx, ny) is (ny, -nx) and A goes to the SCREEN's left. Check against the
+  // drawn hull rather than intuition.
+  let fx = S.wasdRelative ? nx * lon + ny * lat : -lat, fy = S.wasdRelative ? ny * lon - nx * lat : -lon;
   const mag = Math.hypot(fx, fy);
   return mag > 1e-9 ? [fx / mag, fy / mag] : null;
 }
@@ -3187,7 +3190,7 @@ cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { cam.zoom = Math.max(0.4, Math.min(6, cam.zoom * Math.exp(-e.deltaY * 0.0012))); e.preventDefault(); }, { passive: false });
 
 // ============================== TEST PANEL ======================================
-const STORE_KEY = "galaxytable.v33";   // bumped: saved settings would otherwise hide the new default
+const STORE_KEY = "galaxytable.v34";   // bumped: saved settings would otherwise hide the new default
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
   catch { return { ...DEFAULTS }; }
@@ -3203,6 +3206,7 @@ const PANEL = [
   ["r", "systemScale", "System size|distance between the planets", 1, 2.5, 0.05],
   ["l", "thrustAccel", "Engine power|ship acceleration, AU/yr\u00b2", 300, 30000],
   ["r", "linearDamp", "Drift settle|how fast the ship's drift dies away; 0 drifts forever", 0, 2, 0.05],
+  ["b", "wasdRelative", "Relative WASD|keyboard: W flies along the aim and A and D strafe, instead of W up and A left"],
   ["b", "padPowerRelative", "Relative power|controller: trim the power along the aim, instead of left stick up and down"],
   ["a", "ADVANCED"],   // folded by default; the camera is an in-game control (C), not a dial
   ["r", "gravPull", "Gravitizer pull|how hard the gravitizer pulls", 0.005, 0.2, 0.005],
