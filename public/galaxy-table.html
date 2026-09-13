@@ -3202,20 +3202,20 @@ function saveSettings() { try { localStorage.setItem(STORE_KEY, JSON.stringify(S
 const PANEL = [
   ["h", "GALAXY TABLE SETTINGS"],
   // labels are "Heading|description": a heading of two words at most, the rest under it
-  ["r", "ballScale", "Planet size|how big the worlds are", 2, 20, 0.5],
-  ["r", "systemScale", "System size|distance between the planets", 1, 2.5, 0.05],
-  ["l", "thrustAccel", "Engine power|ship acceleration, AU/yr\u00b2", 300, 30000],
-  ["r", "linearDamp", "Drift settle|how fast the ship's drift dies away; 0 drifts forever", 0, 2, 0.05],
-  ["b", "wasdRelative", "Relative WASD|keyboard: W flies along the aim and A and D strafe, instead of W up and A left"],
-  ["b", "padPowerRelative", "Relative power|controller: trim the power along the aim, instead of left stick up and down"],
+  ["r", "ballScale", "Planet size|bigger planets", 2, 20, 0.5],
+  ["r", "systemScale", "System size|more space between planets", 1, 2.5, 0.05],
+  ["l", "thrustAccel", "Engine power|how fast the ship speeds up", 300, 30000],
+  ["r", "linearDamp", "Ship braking|how fast the ship stops on its own", 0, 2, 0.05],
+  ["b", "wasdRelative", "Relative WASD|W flies where you aim"],
+  ["b", "padPowerRelative", "Relative power|controller: push toward the aim for power"],
   ["a", "ADVANCED"],   // folded by default; the camera is an in-game control (C), not a dial
-  ["r", "gravPull", "Gravitizer pull|how hard the gravitizer pulls", 0.005, 0.2, 0.005],
-  ["r", "gravReachAU", "Gravitizer reach|how far the pull reaches, AU", 0.1, 2, 0.05],
-  ["l", "maxWarpM", "Max time|top time speed, millions x", 1, 50],
-  ["b", "flashTerminus", "Flash terminus|the flash burns out after a range set by the shot's power, marked on the aim line"],
-  ["b", "fateLabels", "World labels|POTTED, HITS THE SHIP and the aim caption, drawn in the world"],
-  ["r", "introFlyS", "Briefing pace|seconds per body", 1, 10, 0.1],
-  ["r", "introSlow", "Briefing slowdown|how much it slows past each body; 0 none, 1 a stop", 0, 1, 0.05],
+  ["r", "gravPull", "Gravitizer pull|how strong", 0.005, 0.2, 0.005],
+  ["r", "gravReachAU", "Gravitizer reach|how far", 0.1, 2, 0.05],
+  ["l", "maxWarpM", "Time speed|fastest the clock goes", 1, 50],
+  ["b", "flashTerminus", "Flash terminus|the flash stops after a set distance"],
+  ["b", "fateLabels", "Labels|text on the table"],
+  ["r", "introFlyS", "Briefing pace|seconds per planet", 1, 10, 0.1],
+  ["r", "introSlow", "Briefing slowdown|slow down at each planet", 0, 1, 0.05],
 ];
 
 let advShown = false;   // the ADVANCED fold, per page load
