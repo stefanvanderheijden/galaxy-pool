@@ -59,7 +59,9 @@
   that lights up as you press. TWO SCHEMES, switched with OPTIONS or by clicking the tabs:
     MANUAL CLOCK
       L STICK   fly in screen directions (up is up), analog
-      R STICK   aim: the nose follows it and holds where it was let go
+      R STICK   aim: a push well away from the nose points it there; after that the
+                stick turns the aim, 1:1 at half a push and 5x finer at the rim, smoothed
+                and eased; the nose holds where it was let go
       L1 / R1   slower / faster time (L1 held to the end pauses, as Q does)
       SQUARE    pause on / off (as Shift)
       L2 hold   AIM MODE: time holds and the R stick still aims. The power follows the
@@ -1248,16 +1250,46 @@ function simStep(h, offGravity) {
 // THE HAND AIMS, THE DRIVE MOVES, and they are independent (hyperwarp 2). The nose
 // chases the cursor except mid-drag, when it holds: a pull-back shot must not spin the
 // hull under the cue.
+//
+// THE CONTROLLER'S AIM. A thumb cannot hold an absolute angle to a degree, so the right stick
+// is absolute only to pick a direction and relative after that:
+//   - the stick is smoothed first (PAD_AIM_SMOOTH_S), which takes out the rim's jitter
+//   - coming out of the deadzone well away from the nose (PAD_AIM_SNAP), the nose goes
+//     where the stick points; near the nose, it carries on from where it is, so letting go
+//     and touching the stick again does not throw away a fine adjustment
+//   - after that, turning the stick turns the aim by the stick's turn times a gain that
+//     falls with the throw: 1 at half a push (big swings), PAD_AIM_FINE at the rim (fine work)
+//   - the nose eases onto that target (PAD_AIM_EASE), slower than the mouse's, so it glides
+const PAD_AIM_SMOOTH_S = 0.06, PAD_AIM_SNAP = 25 * Math.PI / 180, PAD_AIM_FINE = 0.2, PAD_AIM_EASE = 12;
+const PAD_AIM_GAIN_FULL_AT = 0.55, PAD_AIM_GAIN_FINE_AT = 0.92;   // throw where the gain starts to fall, and where it bottoms out
+function wrapAng(a) { while (a > Math.PI) a -= TAU; while (a < -Math.PI) a += TAU; return a; }
+function padAimGain(m) {
+  const u = Math.max(0, Math.min(1, (m - PAD_AIM_GAIN_FULL_AT) / (PAD_AIM_GAIN_FINE_AT - PAD_AIM_GAIN_FULL_AT)));
+  return 1 + (PAD_AIM_FINE - 1) * u * u * (3 - 2 * u);
+}
+function padAim(realDt) {
+  // something else turned the nose (a reset, the mouse, a pull-back): the target follows it
+  if (pad.aimTarget != null && pad.aimNose !== ship.nose) pad.aimTarget = ship.nose;
+  if (pad.rm <= 0) { pad.aimSx = pad.aimSy = 0; pad.aimAng = null; }
+  else {
+    const k = 1 - Math.exp(-realDt / PAD_AIM_SMOOTH_S);
+    if (pad.aimAng == null) { pad.aimSx = pad.rx; pad.aimSy = pad.ry; }   // a fresh push starts from the stick, not from zero
+    else { pad.aimSx += (pad.rx - pad.aimSx) * k; pad.aimSy += (pad.ry - pad.aimSy) * k; }
+    const a = Math.atan2(pad.aimSy, pad.aimSx), m = Math.min(1, Math.hypot(pad.aimSx, pad.aimSy));
+    if (pad.aimAng == null) {
+      if (pad.aimTarget == null || Math.abs(wrapAng(a - ship.nose)) > PAD_AIM_SNAP) pad.aimTarget = a;
+    } else pad.aimTarget += wrapAng(a - pad.aimAng) * padAimGain(m);
+    pad.aimAng = a;
+  }
+  if (pad.aimTarget == null) return;
+  const d = wrapAng(pad.aimTarget - ship.nose), e = d * Math.min(1, realDt * PAD_AIM_EASE);
+  ship.nose += e;
+  pad.aimTarget = ship.nose + (d - e);   // the target kept on the nose's winding
+  pad.aimNose = ship.nose;
+}
 function aimNose(realDt) {
   if (drag || reaching) { const p = pendingShot(); if (p) ship.nose = Math.atan2(p[1], p[0]); return; }   // LMB down: the nose is the pull's aim
-  if (pad.active && pad.owns) {   // THE CONTROLLER: the right stick aims, and the nose holds where it was let go
-    if (pad.rm <= 0) return;
-    let d = Math.atan2(pad.ry, pad.rx) - ship.nose;
-    while (d > Math.PI) d -= TAU;
-    while (d < -Math.PI) d += TAU;
-    ship.nose += d * Math.min(1, realDt * S.aimEase);
-    return;
-  }
+  if (pad.active && pad.owns) { padAim(realDt); return; }
   const [mwx, mwy] = screenToWorld(mouse.sx, mouse.sy);
   const adx = mwx - ship.x, ady = mwy - ship.y;
   if (adx * adx + ady * ady > 1e-12) {
