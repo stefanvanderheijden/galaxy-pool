@@ -65,7 +65,8 @@
                 Dynamic aim instead makes it relative, 1:1 at half a push and 5x finer
                 at the rim. The nose holds where it was let go
       L1 / R1   slower / faster time (L1 held to the end pauses, as Q does)
-      SQUARE    pause on / off (as Shift)
+      SQUARE    camera: whole table / follow the ship (as C). L2 already holds time, so
+                there is no pause button; L1 to the end pauses and R1 resumes
       L2 hold   AIM MODE: time holds and the R stick still aims. The power follows the
                 aim style. POWER LINE and DRAW BACK: starts at 50%, the L STICK TRIMS IT
                 (up for more, down for less, let go and it holds), R2 shoots. The panel's
@@ -82,13 +83,11 @@
       D-PAD     left / right selects a slot (nose, chamber 1, chamber 2), up / down
                 cycles that slot's ball type
       TRIANGLE  reset (as R)
-      R3        camera: whole table / follow the ship (as C); the touchpad click too, where
-                the browser reports it
       CIRCLE    hold for the TELEPORT STATE: the L stick places the destination (its
                 angle and its throw, up to the teleport range), R2 teleports, letting go
                 of circle cancels
     MOTION CLOCK   everything above, except time is not a control: it RUNS AS FAST AS
-      THE SHIP FLIES and stops when the ship stops (L1, R1 and square do nothing). The
+      THE SHIP FLIES and stops when the ship stops (L1 and R1 do nothing). The
       ship flies on its own steady clock at game speed, because in this rig the ship
       moves in game time, and a clock that slows when you slow would freeze your own
       ship with the world. World time is game speed times the ship's speed over
@@ -3015,7 +3014,7 @@ function drawHud(W, H) {
     stab ? ["STABILISER burning, " + stab.err.toFixed(2) + " AU/yr to go.  WASD or Shift to override", "#e8b463"] : null,
     charging && !mouseADS && !timePaused ? ["POWERING UP: release LMB to shoot.  RMB holds time (let go of RMB to cancel)", "#8fc3e8"] : null,
     pad.hipCharging ? ["POWERING UP: release R2 to shoot.  L2 holds time (let go of L2 to cancel)", "#8fc3e8"] : null,
-    timePaused || aiming() ? ["TIME PAUSED" + (pad.aiming ? (S.padAimMode === "charge" ? ": hold R2 to power up, release to shoot" : !S.padPowerRelative ? ": left stick up for more power, down for less, R2 shoots" : S.padAimMode === "draw" ? ": pull the left stick back for more power, push it forward for less, R2 shoots" : ": left stick along the aim for more power, against it for less, R2 shoots") : drag ? ": pull back for power, swing round to pivot, release to shoot" : mouseADS ? ": aiming down sights, release LMB to shoot, release RMB to cancel" : reaching ? ": further from the ship is harder, release to shoot" : pad.active && pad.owns ? ".  Square resumes.  Hold L2 to aim" : ".  Shift or E resumes.  Hold LMB to aim"), "#8fc3e8"] : null,
+    timePaused || aiming() ? ["TIME PAUSED" + (pad.aiming ? (S.padAimMode === "charge" ? ": hold R2 to power up, release to shoot" : !S.padPowerRelative ? ": left stick up for more power, down for less, R2 shoots" : S.padAimMode === "draw" ? ": pull the left stick back for more power, push it forward for less, R2 shoots" : ": left stick along the aim for more power, against it for less, R2 shoots") : drag ? ": pull back for power, swing round to pivot, release to shoot" : mouseADS ? ": aiming down sights, release LMB to shoot, release RMB to cancel" : reaching ? ": further from the ship is harder, release to shoot" : pad.active && pad.owns ? ".  R1 resumes.  Hold L2 to aim" : ".  Shift or E resumes.  Hold LMB to aim"), "#8fc3e8"] : null,
   ].filter(Boolean);
   lines.forEach((l, i) => { cx.fillStyle = l[1]; cx.fillText(l[0], 14, 22 + i * 17); });
   notices.forEach((n, i) => { cx.fillStyle = colA(n.color, Math.min(1, (20 - n.t) / 4)); cx.fillText(n.text, 14, H - 20 - (notices.length - 1 - i) * 16); });
@@ -3272,15 +3271,13 @@ function pollPad(realDt) {
 
   if (down(PADB.CROSS)) spaceKey();
   if (down(PADB.TRIANGLE)) { resetWorld(); note("RESET", "#8fc3e8"); }   // as R
-  // R3 (the right stick's click): Chrome on macOS often does not report the DualSense
-  // touchpad click at all, so the touchpad (17) is only a second way in
-  if (down(PADB.R3) || down(17)) { S.camFollow = !S.camFollow; saveSettings(); note("CAMERA: " + (S.camFollow ? "FOLLOWS THE SHIP" : "WHOLE TABLE"), "#8fc3e8"); }   // the touchpad click, as C
+  // SQUARE swaps the camera, as C: L2 already holds time, so a pause button was a spare
+  if (down(PADB.SQUARE)) { S.camFollow = !S.camFollow; saveSettings(); note("CAMERA: " + (S.camFollow ? "FOLLOWS THE SHIP" : "WHOLE TABLE"), "#8fc3e8"); }   // the touchpad click, as C
   if (down(PADB.LEFT)) padSelect(-1);
   if (down(PADB.RIGHT)) padSelect(1);
   if (down(PADB.UP)) padCycleType(1);
   if (down(PADB.DOWN)) padCycleType(-1);
   if (manual) {
-    if (down(PADB.SQUARE)) { timePaused = !timePaused; note(timePaused ? "TIME PAUSED" : "TIME RESUMED", "#8fc3e8"); }
     if (down(PADB.L1)) qArmed = true;                                          // L1 held to the end pauses, as Q does
     if (down(PADB.R1) && timePaused) { timePaused = false; note("TIME RESUMED", "#8fc3e8"); }   // as E does
   }
@@ -3373,10 +3370,9 @@ function drawPadMenu(W, H) {
     manual ? { key: "R1", text: "FASTER", u: 67, v: -45, y: -37, lit: hl[PADB.R1] } : off({ key: "R1", u: 67, v: -45, y: -37 }),
     { key: "△", text: "RESET", u: 58, v: -22, y: -22, lit: hl[PADB.TRIANGLE] },
     { key: "○", text: "HOLD TELEPORT", u: 67, v: -12, y: -8, lit: hl[PADB.CIRCLE] },
-    manual ? { key: "□", text: "PAUSE", u: 49, v: -12, y: 6, lit: hl[PADB.SQUARE] } : off({ key: "□", u: 49, v: -12, y: 6 }),
+    { key: "□", text: "CAMERA", u: 49, v: -12, y: 6, lit: hl[PADB.SQUARE] },
     { key: "✕", text: "BALL / CATCH", u: 58, v: -2, y: 20, lit: hl[PADB.CROSS] },
     { key: "R STICK", text: "AIM", u: 24, v: 6, y: 36, lit: pad.rm > 0 },
-    { key: "R3", text: "CAMERA", u: 28, v: 10, y: 50, lit: hl[PADB.R3] || hl[17] },
   ];
   const drawLabel = (lab, side) => {
     const [px, py] = P(lab.u, lab.v), y = oy + lab.y;
@@ -3394,7 +3390,7 @@ function drawPadMenu(W, H) {
   // the notes
   cx.font = `9px "Share Tech Mono", monospace`; cx.textAlign = "left";
   cx.fillStyle = M;
-  cx.fillText(manual ? "TIME: L1 SLOWER, R1 FASTER, SQUARE PAUSES" : "TIME RUNS AS FAST AS YOU FLY. STOP, AND IT STOPS", x0 + 14, y0 + ph - 25);
+  cx.fillText(manual ? "TIME: L1 SLOWER (TO THE END PAUSES), R1 FASTER" : "TIME RUNS AS FAST AS YOU FLY. STOP, AND IT STOPS", x0 + 14, y0 + ph - 25);
   cx.fillStyle = pad.standard ? M : "#e8b463";
   cx.fillText(pad.standard ? "OPTIONS SWITCHES THE SCHEME" : "NON-STANDARD MAPPING: BUTTONS MAY BE MISREAD", x0 + 14, y0 + ph - 11);
 }
