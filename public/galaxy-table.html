@@ -70,7 +70,10 @@
                 "Relative power" swaps that for the old trim: along the aim for more
                 (DRAW BACK: pulled back against it). HOLD TO POWER UP: hold R2 to charge,
                 release to shoot. A shot ends the aim
-      CREATE    cycles the aim style (as Tab)
+      CREATE    cycles the controller's aim style (as Tab does the mouse's). The two are kept
+                apart: HOLD TO POWER UP is the controller's default, POWER LINE the mouse's
+      R2        outside aim mode: HIP FIRE, along the nose at the last power aim mode set
+                (50% before any); a bare nose loads the next ball and sends it at once
       CROSS     catch a ball in reach, or load the next
       D-PAD     left / right selects a slot (nose, chamber 1, chamber 2), up / down
                 cycles that slot's ball type
@@ -395,7 +398,8 @@ const DEFAULTS = {
   padPowerRelative: false, // controller power trim: false = L stick up is more, down is less; true = along the aim (DRAW BACK: against it)
   padScheme: "manual",    // the controller: "manual" MANUAL CLOCK, "motion" MOTION CLOCK. OPTIONS switches
   motionRefAUyr: 10,      // MOTION CLOCK: ship speed that runs the world at game speed
-  aimMode: "reach",       // "reach" POWER LINE, "charge" HOLD TO POWER UP, "draw" DRAW BACK. Tab cycles
+  aimMode: "reach",       // mouse and keyboard: "reach" POWER LINE, "charge" HOLD TO POWER UP, "draw" DRAW BACK. Tab cycles
+  padAimMode: "charge",   // the controller's own aim style, same names; CREATE cycles. HOLD TO POWER UP suits a trigger
   reachMaxAU: 1.6,        // POWER LINE: the cursor distance from the ship for a full-power shot (times system size)
   thrustAntigrav: true,   // the drive lets go of gravity while it burns (hyperwarp 2)
   driftMode: true,        // the time slider springs home to 1M when released
@@ -1462,10 +1466,14 @@ function overrideStabiliser(why) {
 const AIM_BLEND_PX = [8, 40];
 const AIM_NAMES = { reach: "POWER LINE", charge: "HOLD TO POWER UP", draw: "DRAW BACK" };
 const AIM_NEXT = { reach: "charge", charge: "draw", draw: "reach" };
-function cycleAimMode() {
-  S.aimMode = AIM_NEXT[S.aimMode] || "reach"; charging = false; charge = 0; drag = null; reaching = false; saveSettings();
+// Two aim styles are kept, one per hand: the mouse's (Tab) and the controller's (CREATE),
+// so picking up the controller does not change how the mouse shoots, or the other way round.
+function activeAimMode() { return pad.active && pad.owns ? S.padAimMode : S.aimMode; }
+function cycleAimMode(forPad) {
+  const k = forPad ? "padAimMode" : "aimMode";
+  S[k] = AIM_NEXT[S[k]] || (forPad ? "charge" : "reach"); charging = false; charge = 0; drag = null; reaching = false; saveSettings();
   pad.wasAiming = false;   // a held L2 starts the new style fresh
-  note("AIM: " + AIM_NAMES[S.aimMode], "#8fc3e8"); aimSwitchAt = performance.now();
+  note("AIM" + (forPad ? " (CONTROLLER): " : ": ") + AIM_NAMES[S[k]], "#8fc3e8"); aimSwitchAt = performance.now();
 }
 const AIM_HELP = { reach: "the cursor's distance is the power", charge: "power up, the nose aims", draw: "pull back for power, swing to pivot" };
 function aiming() { return !!drag || charging || reaching || pad.aiming; }   // LMB is down on a shot, in any mode
@@ -2651,7 +2659,7 @@ function draw(realDt) {
 // Narrow on purpose: a strip of all three names ran into the controls list at 1024 px.
 let aimSwitchAt = -1e9;   // when Tab last changed the mode: the border flashes for 0.8 s
 function drawAimMode(W, H) {
-  const name = AIM_NAMES[S.aimMode], order = ["reach", "charge", "draw"], idx = order.indexOf(S.aimMode);
+  const mode = activeAimMode(), name = AIM_NAMES[mode], order = ["reach", "charge", "draw"], idx = order.indexOf(mode);
   const k = Math.max(0, 1 - (performance.now() - aimSwitchAt) / 800);
   cx.font = `13px "Share Tech Mono", monospace`;
   const w = cx.measureText(name).width + 140, h = 36, x0 = Math.round(W / 2 - w / 2), y0 = H - 112 - h;
@@ -2792,7 +2800,7 @@ function drawHud(W, H) {
      + (balls.length > 1 || (balls.length === 1 && acb.mode !== "empty") ? "   " + balls.length + " BALL" + (balls.length > 1 ? "S" : "") + " OUT" : ""),
      acb.mode === "attached" ? "#e8f0fa" : acb.mode === "lost" ? "#ff5030" : "#8fe8b0"],
     stab ? ["STABILISER burning, " + stab.err.toFixed(2) + " AU/yr to go.  WASD or Shift to override", "#e8b463"] : null,
-    timePaused || aiming() ? ["TIME PAUSED" + (pad.aiming ? (S.aimMode === "charge" ? ": hold R2 to power up, release to shoot" : !S.padPowerRelative ? ": left stick up for more power, down for less, R2 shoots" : S.aimMode === "draw" ? ": pull the left stick back for more power, push it forward for less, R2 shoots" : ": left stick along the aim for more power, against it for less, R2 shoots") : drag ? ": pull back for power, swing round to pivot, release to shoot" : charging ? ": powering up, the nose aims, release to shoot" : reaching ? ": further from the ship is harder, release to shoot" : pad.active && pad.owns ? ".  Square resumes.  Hold L2 to aim" : ".  Shift or E resumes.  Hold LMB to aim"), "#8fc3e8"] : null,
+    timePaused || aiming() ? ["TIME PAUSED" + (pad.aiming ? (S.padAimMode === "charge" ? ": hold R2 to power up, release to shoot" : !S.padPowerRelative ? ": left stick up for more power, down for less, R2 shoots" : S.padAimMode === "draw" ? ": pull the left stick back for more power, push it forward for less, R2 shoots" : ": left stick along the aim for more power, against it for less, R2 shoots") : drag ? ": pull back for power, swing round to pivot, release to shoot" : charging ? ": powering up, the nose aims, release to shoot" : reaching ? ": further from the ship is harder, release to shoot" : pad.active && pad.owns ? ".  Square resumes.  Hold L2 to aim" : ".  Shift or E resumes.  Hold LMB to aim"), "#8fc3e8"] : null,
   ].filter(Boolean);
   lines.forEach((l, i) => { cx.fillStyle = l[1]; cx.fillText(l[0], 14, 22 + i * 17); });
   notices.forEach((n, i) => { cx.fillStyle = colA(n.color, Math.min(1, (20 - n.t) / 4)); cx.fillText(n.text, 14, H - 20 - (notices.length - 1 - i) * 16); });
@@ -2874,6 +2882,7 @@ function cycleSlot(sl) {
 const PADB = { CROSS: 0, CIRCLE: 1, SQUARE: 2, TRIANGLE: 3, L1: 4, R1: 5, L2: 6, R2: 7, CREATE: 8, OPTIONS: 9, L3: 10, R3: 11, UP: 12, DOWN: 13, LEFT: 14, RIGHT: 15 };
 const PAD_DEAD = 0.15, PAD_AIM_DEAD = 0.25, PAD_TRIGGER = 0.5;
 const PAD_POWER_START = 0.5;   // aim mode opens here, so either way is half a push away
+const HIP_POWER_START = 0.5;   // the hip fire's power before aim mode has set one
 const PAD_POWER_RATE = 0.5;    // power per second at a full push along the aim: 0 to 100% in 2 s
 const MOTION_DEAD_AUYR = 0.15, MOTION_MAX = 2;
 const PAD_SCHEMES = { manual: "MANUAL CLOCK", motion: "MOTION CLOCK" };
@@ -2953,7 +2962,7 @@ function pollPad(realDt) {
   const manual = S.padScheme === "manual";
   const l2Down = pad.l2 > PAD_TRIGGER && pad.prevL2 <= PAD_TRIGGER, r2Down = pad.r2 > PAD_TRIGGER && pad.prevR2 <= PAD_TRIGGER;
   if (down(PADB.OPTIONS)) switchPadScheme();
-  if (down(PADB.CREATE)) cycleAimMode();   // as Tab
+  if (down(PADB.CREATE)) cycleAimMode(true);   // as Tab, for the controller's own style
 
   // CIRCLE held: the teleport state. The L stick places the destination by its angle and
   // throw, up to the range (and does not fly meanwhile); the last placement holds when the
@@ -2977,17 +2986,17 @@ function pollPad(realDt) {
   if (l2Down && (acb.mode === "empty" || acb.mode === "lost") && chamber.length && !score.failed && !score.won) { newBallNow("L2"); pad.aimLatch = true; }
   if (pad.l2 <= PAD_TRIGGER) pad.aimLatch = false;
   pad.aiming = pad.l2 > PAD_TRIGGER && !pad.aimLatch && !pad.teleporting && acb.mode === "attached" && !score.failed && !score.won;
-  const chargeStyle = S.aimMode === "charge";
+  const chargeStyle = S.padAimMode === "charge";
   if (pad.aiming && !pad.wasAiming) {
     pad.power = chargeStyle ? 0 : PAD_POWER_START; pad.charging = false;
     note(chargeStyle ? "AIM: hold R2 to power up" : "AIM: power at 50%", "#8fc3e8");
   }
   pad.wasAiming = pad.aiming;
-  if (!pad.aiming) pad.charging = false;
+  if (!pad.aiming) { if (pad.charging && pad.power > 0.02) pad.hipPower = pad.power; pad.charging = false; }   // a cancelled charge still sets the hip fire
   const padFire = (min) => {
     const p = pendingShot();
-    if (p && Math.max(min, p[2]) > 0.02) { const pw = Math.max(min, p[2]); lastPower = pw; fireAcb(p[0], p[1], pw); rumble(0.3, 90); }
-    else note(!S.padPowerRelative ? "NO SHOT: push the left stick up for power" : S.aimMode === "draw" ? "NO SHOT: pull the left stick back for power" : "NO SHOT: push the left stick along the aim for power", "#8fc3e8");
+    if (p && Math.max(min, p[2]) > 0.02) { const pw = Math.max(min, p[2]); lastPower = pw; pad.hipPower = pw; fireAcb(p[0], p[1], pw); rumble(0.3, 90); }
+    else note(!S.padPowerRelative ? "NO SHOT: push the left stick up for power" : S.padAimMode === "draw" ? "NO SHOT: pull the left stick back for power" : "NO SHOT: push the left stick along the aim for power", "#8fc3e8");
     pad.aimLatch = true; pad.aiming = false; pad.charging = false;
   };
   if (pad.aiming && chargeStyle) {
@@ -3005,11 +3014,21 @@ function pollPad(realDt) {
     // 1 / PAD_POWER_RATE seconds
     // the default is the stick's up and down (+y is down on the stick, so up is -ly); the
     // relative trim is the backup, on the panel
-    const along = S.padPowerRelative ? (lx * Math.cos(ship.nose) + ly * Math.sin(ship.nose)) * (S.aimMode === "draw" ? -1 : 1) : -ly;
+    const along = S.padPowerRelative ? (lx * Math.cos(ship.nose) + ly * Math.sin(ship.nose)) * (S.padAimMode === "draw" ? -1 : 1) : -ly;
     const before = pad.power;
     pad.power = Math.max(0, Math.min(1, pad.power + Math.sign(along) * along * along * PAD_POWER_RATE * realDt));
+    if (pad.power !== before && pad.power > 0.02) pad.hipPower = pad.power;   // a trim sets the hip fire's power, shot or not
     if (Math.floor(pad.power * 10 + 1e-9) !== Math.floor(before * 10 + 1e-9)) rumble(0.08, 18);   // a tick every 10%
     if (r2Down) padFire(0);
+  } else if (r2Down && !pad.teleporting && !score.failed && !score.won) {
+    // HIP FIRE: R2 outside aim mode shoots along the nose at the last power set in aim mode
+    // (HIP_POWER_START before any). A bare nose loads the next ball and sends it at once.
+    if ((acb.mode === "empty" || acb.mode === "lost") && chamber.length) newBallNow("R2");
+    if (acb.mode === "attached") {
+      const pw = pad.hipPower || HIP_POWER_START;
+      lastPower = pw; fireAcb(Math.cos(ship.nose), Math.sin(ship.nose), pw); rumble(0.3, 90);
+      note("HIP FIRE at " + Math.round(pw * 100) + "%", "#8fc3e8");
+    }
   }
 
   if (down(PADB.CROSS)) spaceKey();
@@ -3105,12 +3124,12 @@ function drawPadMenu(W, H) {
     manual ? { key: "L1", text: "SLOWER", u: -67, v: -45, y: -37, lit: hl[PADB.L1] } : off({ key: "L1", u: -67, v: -45, y: -37 }),
     { key: "D-PAD", text: "BALL TYPE", u: -58, v: -25, y: -20, lit: hl[PADB.UP] || hl[PADB.DOWN] },
     { key: "D-PAD", text: "SELECT BALL", u: -71, v: -12, y: -5, lit: hl[PADB.LEFT] || hl[PADB.RIGHT] },
-    { key: "L STICK", text: pad.teleporting ? "TARGET" : pad.aiming && S.aimMode !== "charge" ? "POWER" : "FLY", u: -24, v: 6, y: 22, lit: pad.lm > 0 },
+    { key: "L STICK", text: pad.teleporting ? "TARGET" : pad.aiming && S.padAimMode !== "charge" ? "POWER" : "FLY", u: -24, v: 6, y: 22, lit: pad.lm > 0 },
     { key: "TOUCHPAD", text: "CAMERA", u: -14, v: -26, y: 36, lit: hl[17] },
     { key: "CREATE", text: "AIM STYLE", u: -35, v: -30, y: 50, lit: hl[PADB.CREATE] },
   ];
   const right = [
-    { key: "R2", text: pad.teleporting ? "TELEPORT" : S.aimMode === "charge" ? "HOLD, RELEASE" : "SHOOT", u: 67, v: -53, y: -52, lit: pad.r2 > PAD_TRIGGER },
+    { key: "R2", text: pad.teleporting ? "TELEPORT" : pad.aiming && S.padAimMode === "charge" ? "HOLD, RELEASE" : "SHOOT", u: 67, v: -53, y: -52, lit: pad.r2 > PAD_TRIGGER },
     manual ? { key: "R1", text: "FASTER", u: 67, v: -45, y: -37, lit: hl[PADB.R1] } : off({ key: "R1", u: 67, v: -45, y: -37 }),
     { key: "△", text: "RESET", u: 58, v: -22, y: -22, lit: hl[PADB.TRIANGLE] },
     { key: "○", text: "HOLD TELEPORT", u: 67, v: -12, y: -8, lit: hl[PADB.CIRCLE] },
@@ -3151,7 +3170,7 @@ addEventListener("keydown", e => {
   if (e.code === "KeyE" && timePaused) { timePaused = false; note("TIME RESUMED", "#8fc3e8"); }
   if (e.code === "KeyQ" && !e.repeat) qArmed = true;
   if (e.code === "KeyC") { S.camFollow = !S.camFollow; saveSettings(); buildPanel(); }
-  if (e.code === "Tab") { cycleAimMode(); e.preventDefault(); }
+  if (e.code === "Tab") { cycleAimMode(false); e.preventDefault(); }
   if (e.code === "KeyR") resetWorld();
   if (e.code === "KeyP") paused = !paused;
   if (e.code === "KeyH") { const p = document.getElementById("panel"); p.style.display = p.style.display === "none" ? "" : "none"; }
@@ -3194,7 +3213,7 @@ cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { cam.zoom = Math.max(0.4, Math.min(6, cam.zoom * Math.exp(-e.deltaY * 0.0012))); e.preventDefault(); }, { passive: false });
 
 // ============================== TEST PANEL ======================================
-const STORE_KEY = "galaxytable.v34";   // bumped: saved settings would otherwise hide the new default
+const STORE_KEY = "galaxytable.v35";   // bumped: saved settings would otherwise hide the new default
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
   catch { return { ...DEFAULTS }; }
