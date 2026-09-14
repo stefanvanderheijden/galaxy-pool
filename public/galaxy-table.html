@@ -253,15 +253,22 @@
   from a wide view of the whole system past every body in turn (Solaris, Red, Terra,
   Vera, Styx, Lethe, Acheron, then the ark) and settles into the top-down view the game
   is played in. One spline through every body, introFlyS seconds per hop whatever its
-  length. It PAUSES AT EVERY PLANET, arriving and leaving from rest, and passes the
-  other bodies at (1 - introSlow) of the mean pace. The INSPECTOR, lower centre (the
-  designer's sketch), types itself out: picture and name, type, mass, size,
-  composition (classes derived from level-01.json's mass and diameter), anomalies
-  (inhabited, fragile), and under it Robert Cupboard's portrait with a bubble that is
-  a placeholder ("RC ONELINER") until his lines are written. At a planet the player
-  is prompted to NAME it: type and Enter (or click); if the bar on top runs out, or on
-  CROSS with a controller, Robert names it, which is the level's own name. Names hold
-  for the page, across racks. Esc (or any other controller button) skips the rest;
+  length. It PAUSES AT EVERY CELESTIAL BODY not yet named (the star, the planets, the
+  holes), arriving and leaving from rest, and passes the ark at (1 - introSlow) of the
+  mean pace. The INSPECTOR, lower centre (the designer's sketch), types itself out:
+  picture and name, type, mass, size, composition (classes derived from level-01.json's
+  mass and diameter), anomalies (inhabited, fragile), a planet's INTEGRITY bar on top,
+  and under it Robert Cupboard's portrait with a bubble that is a placeholder ("RC
+  ONELINER") until his lines are written. Every body is "???" until named. The player
+  types a name and Enter (or click); Enter on nothing, or CROSS with a controller, lets
+  Robert name it, which is the level's own name; skipping leaves him the rest. Names
+  hold for the page, across racks, and a named body is not asked about again.
+
+  INTEGRITY. Each planet starts at 100%. A cue ball's hit takes off BALL_DAMAGE for its
+  type (standard 25%, thermonuclear 60%, gravitizer 10%, Night 35%) times the shot's
+  power (a flash's own shot power, or a coasting ball's closing speed over shotPower).
+  At zero the planet shatters, a foul (integrityBreaks, on). A damaged planet carries
+  a small bar under it in play, and the forecast takes the damage too. Esc (or any other controller button) skips the rest;
   between bodies any key or click skips, as before. The bodies sit at INTRO_CY of the
   screen height while the inspector is up, and come back to centre for the handoff.
   The sim is frozen for the duration, so the rack the briefing shows is the rack
@@ -402,7 +409,7 @@ const TAU = Math.PI * 2;
 // ============================== TUNABLES (test panel) ===========================
 const DEFAULTS = {
   introFlyover: true,     // the mission briefing flyover at the start of every rack
-  nameSeconds: 12,        // briefing: seconds at a planet before Robert names it for you
+  integrityBreaks: true,  // a planet whose integrity reaches zero shatters (a foul)
   introFlyS: 4.6,         // seconds per body, whatever the hop: the camera never stops
   introSlow: 0.45,        // slow-down past a body: speed there is (1 - this) of the mean
   introPitchDeg: 52,      // camera pitch below horizontal during the flyover
@@ -524,7 +531,7 @@ const POCKETS = [
   { name: "Styx",    a: STYX_A },
   { name: "Lethe",   a: STYX_A + TAU / 3 },
   { name: "Acheron", a: STYX_A + 2 * TAU / 3 },
-].map(p => ({ name: p.name, a: p.a, x: STYX_R * Math.cos(p.a), y: STYX_R * Math.sin(p.a), color: "#b48cff" }));
+].map(p => ({ id: p.name, name: p.name, a: p.a, x: STYX_R * Math.cos(p.a), y: STYX_R * Math.sin(p.a), color: "#b48cff" }));
 // Styx alone moves with the toggle; the other two stay. Called every frame and at reset.
 function layoutPockets() {
   for (const p of POCKETS) { const r = STYX_R * S.systemScale; p.x = r * Math.cos(p.a); p.y = r * Math.sin(p.a); }
@@ -603,12 +610,14 @@ function orbitState(r, a, over) {
   const v = Math.sqrt(G * STAR.mass / r) * (over || 1);
   return { x: STAR.x + r * Math.cos(a), y: STAR.y + r * Math.sin(a), vx: -v * Math.sin(a), vy: v * Math.cos(a) };
 }
-// The names the player gave in the briefing, per body id, kept across racks for the page.
-const playerNames = {};
+// NAMES. Every celestial body is "???" until the briefing names it, by the player or by
+// Robert (the level's own name). Per body key, kept across racks for the page.
+const bodyNames = {};   // key -> { name, by: "player" | "rc" }
+function nameFor(key, def) { return bodyNames[key] ? bodyNames[key].name : def; }
 function derivePlanet(d) {
   const r = d.r * S.systemScale;
-  return { ...orbitState(r, d.a), id: d.id, name: playerNames[d.id] || d.name, sprite: d.sprite, mass: d.mass, drawR: d.drawR,
-           color: d.color, fragile: !!d.fragile, orbitR: r, struck: false, alive: true, trail: [], spin: Math.random() * TAU };
+  return { ...orbitState(r, d.a), id: d.id, name: nameFor(d.id, d.name), sprite: d.sprite, mass: d.mass, drawR: d.drawR,
+           color: d.color, fragile: !!d.fragile, integrity: 1, orbitR: r, struck: false, alive: true, trail: [], spin: Math.random() * TAU };
 }
 // SYSTEM SIZE. One slider scales every authored radius: the orbits and the ship's ring
 // at reset, and the pockets, the belt, Styx's eating radius and the view live, all from
@@ -624,6 +633,8 @@ function contactList(list, star) { return star.alive ? list.concat([star]) : lis
 
 function resetWorld() {
   applySystemScale();
+  STAR.name = nameFor("star", "Solaris");
+  for (const p of POCKETS) p.name = nameFor(p.id, p.id);
   // The star goes home FIRST: the worlds' orbits are derived around it, and after a rack
   // where Solaris was struck or potted they were derived around where it had got to, so R
   // racked the worlds out past the belt and they flew off the table.
@@ -691,12 +702,12 @@ function introStops() {
   // range is derived per frame from R and px, so a resize mid-briefing reframes
   const framing = (o, R, px) => ({ o, R, px });
   const stops = [];
-  stops.push({ ...framing(STAR, starR(), 130), key: "star", name: STAR.name, mass: STAR.mass, unit: "solar masses", speed: 0, sprite: "sun", tint: true });
+  stops.push({ ...framing(STAR, starR(), 130), key: "star", name: STAR.name, defName: "Solaris", pause: !bodyNames.star, mass: STAR.mass, unit: "solar masses", speed: 0, sprite: "sun", tint: true });
   for (const b of bodies) {
     const d = PLANET_DEFS.find(q => q.id === b.id);
-    stops.push({ ...framing(b, ballR(b), 110), key: b.id, name: b.name, defName: d ? d.name : b.name, mass: b.mass / 3.003e-6, unit: "Earth masses", speed: Math.hypot(b.vx, b.vy), sprite: b.sprite, pause: true });
+    stops.push({ ...framing(b, ballR(b), 110), key: b.id, name: b.name, defName: d ? d.name : b.name, mass: b.mass / 3.003e-6, unit: "Earth masses", speed: Math.hypot(b.vx, b.vy), sprite: b.sprite, pause: !bodyNames[b.id] });
   }
-  for (const p of POCKETS) stops.push({ ...framing(p, S.pocketRadiusAU, 110), key: p.name, name: p.name, mass: S.pocketMass, unit: "solar masses", speed: 0, sprite: "blackhole", pocket: true });
+  for (const p of POCKETS) stops.push({ ...framing(p, S.pocketRadiusAU, 110), key: p.id, name: p.name, defName: p.id, pause: !bodyNames[p.id], mass: S.pocketMass, unit: "solar masses", speed: 0, sprite: "blackhole", pocket: true });
   stops.push({ ...framing(ship, HULL_LEN * 2.5, 60), key: "ship", name: "THE ARK", mass: null, unit: "", speed: Math.hypot(ship.vx, ship.vy), sprite: null, ship: true });
   return stops;
 }
@@ -705,6 +716,7 @@ const INTRO_TITLE_S = 3.0, INTRO_OUTRO_S = 1.8;
 const INTRO_CY = 0.36;   // where the body sits on screen during the flyover (fraction of height): above the inspector
 function startIntro() {
   intro = { t: 0, realT: 0, stops: introStops(), done: false, naming: null };
+  for (const st of intro.stops) if (st.pause) st.o.name = "???";   // unnamed until the briefing names it
   const p = document.getElementById("panel");
   panelWasHidden = p.style.display === "none";
   p.style.display = "none"; document.getElementById("chamber").style.display = "none";
@@ -712,6 +724,8 @@ function startIntro() {
   charging = false; charge = 0; drag = null; reaching = false;
 }
 function endIntro() {
+  // skipped or not, whatever is still unnamed Robert names, with the level's own name
+  if (intro) for (const st of intro.stops) if (st.pause && !bodyNames[st.key]) { st.o.name = st.defName; bodyNames[st.key] = { name: st.defName, by: "rc" }; }
   intro = null; persp = null;
   document.getElementById("panel").style.display = panelWasHidden ? "none" : "";
   document.getElementById("chamber").style.display = "";
@@ -843,13 +857,13 @@ function stepIntro(realDt) {
   if (intro.naming) stepNaming(realDt);
   else {
     let t = intro.t + realDt * (intro.skipped ? 2 : 1);   // a skip plays the outro at double speed
-    // THE PAUSE AT A PLANET: the clock holds on the first planet not yet named, at the
-    // moment the camera arrives (the end of its hop), until it has a name
+    // THE PAUSE AT A BODY: the clock holds on the first celestial body not yet named, at
+    // the moment the camera arrives (the end of its hop), until it has a name
     if (!intro.skipped) for (let i = 0; i < intro.stops.length; i++) {
       const st = intro.stops[i];
       if (!st.pause || st.resolved) continue;
       const at = INTRO_TITLE_S + (i + 1) * S.introFlyS;
-      if (t >= at) { t = at; intro.naming = { idx: i, typed: "", timer: S.nameSeconds, done: null, doneT: 0 }; }
+      if (t >= at) { t = at; intro.naming = { idx: i, typed: "", done: null, doneT: 0 }; }
       break;
     }
     intro.t = t;
@@ -860,19 +874,19 @@ function stepIntro(realDt) {
   const ci = intro.pose.cardIdx;
   if (ci >= 0 && intro.stops[ci].typeT0 == null) intro.stops[ci].typeT0 = intro.realT;   // the typing starts as the card comes up
 }
-// NAMING. The inspector types itself out; then the player types a name (Enter keeps it),
-// or lets the bar run out and Robert names it, which is the level's own name for it.
+// NAMING. The inspector types itself out; the player types a name and Enter (or a click)
+// keeps it. Enter on nothing, or CROSS on a controller, lets Robert name it: the level's
+// own name for it.
 const TYPE_CPS = 42;   // inspector characters per second
 function stepNaming(realDt) {
   const n = intro.naming, st = intro.stops[n.idx];
   if (n.done) { n.doneT -= realDt; if (n.doneT <= 0) { st.resolved = true; intro.naming = null; } return; }
-  if (inspectorTyped(st) && !n.typed.length) { n.timer -= realDt; if (n.timer <= 0) resolveName(); }
 }
 function resolveName() {
   const n = intro && intro.naming; if (!n || n.done) return;
   const st = intro.stops[n.idx], typed = n.typed.trim();
   st.name = typed || st.defName; st.o.name = st.name;
-  if (typed) playerNames[st.key] = typed; else delete playerNames[st.key];
+  bodyNames[st.key] = { name: st.name, by: typed ? "player" : "rc" };
   n.done = typed ? "player" : "rc"; n.doneT = 1.4;
   st.typeDone = true;
 }
@@ -910,7 +924,7 @@ function drawBriefing(W, H) {
     cx.fillStyle = `rgba(232,240,250,${pose.title})`; cx.font = `26px "Share Tech Mono", monospace`;
     cx.fillText("MISSION BRIEFING", W / 2, H * 0.36);
     cx.font = `13px "Share Tech Mono", monospace`; cx.fillStyle = `rgba(159,180,204,${pose.title})`;
-    cx.fillText("SOLARIS SYSTEM   .   TABLE 01", W / 2, H * 0.36 + 26);
+    cx.fillText(STAR.name.toUpperCase() + " SYSTEM   .   TABLE 01", W / 2, H * 0.36 + 26);
     cx.fillText("mission notes by Robert Cupboard", W / 2, H * 0.36 + 46);
   }
   cx.font = `11px "Share Tech Mono", monospace`; cx.fillStyle = "rgba(160,185,215,0.7)"; cx.textAlign = "right";
@@ -969,17 +983,20 @@ function drawInspector(st, a, W, H) {
   const bubY = H - bar - 14 - bubH, y0 = bubY - 12 - ph;
   const mono = px => `${px}px "Share Tech Mono", monospace`;
   cx.globalAlpha = a;
-  // the bar: the time left before Robert names it, draining from the left, hatched
-  if (st.pause && !st.resolved) {
-    const by = y0 - 16, bh = 8, frac = naming ? (naming.done ? 0 : Math.max(0, naming.timer / S.nameSeconds)) : 1;
+  // the bar: the planet's INTEGRITY, hatched, full at 100% and shortening from the left as
+  // hits take it down. Planets only: the star and the holes do not have one.
+  if (st.o && st.o.integrity != null) {
+    const by = y0 - 16, bh = 8, frac = Math.max(0, st.o.integrity), col = integrityColour(frac);
     cx.fillStyle = "rgba(8,12,22,0.88)"; cx.fillRect(x0, by, pw, bh);
     const fw = pw * frac;
     cx.save(); cx.beginPath(); cx.rect(x0 + pw - fw, by, fw, bh); cx.clip();
-    cx.fillStyle = naming && naming.typed.length ? "rgba(143,195,232,0.35)" : "rgba(232,180,99,0.35)"; cx.fillRect(x0, by, pw, bh);
-    cx.strokeStyle = naming && naming.typed.length ? "#8fc3e8" : "#e8b463"; cx.lineWidth = 1.5; cx.beginPath();
+    cx.fillStyle = colA(col, 0.35); cx.fillRect(x0, by, pw, bh);
+    cx.strokeStyle = col; cx.lineWidth = 1.5; cx.beginPath();
     for (let xx = x0 - bh; xx < x0 + pw + bh; xx += 5) { cx.moveTo(xx, by + bh); cx.lineTo(xx + bh, by); }
     cx.stroke(); cx.restore();
     cx.strokeStyle = "#2a3a55"; cx.lineWidth = 1; cx.strokeRect(x0 + 0.5, by + 0.5, pw - 1, bh - 1);
+    cx.font = mono(9); cx.fillStyle = "rgba(159,180,204,0.8)"; cx.textAlign = "left";
+    cx.fillText("INTEGRITY " + Math.round(frac * 100) + "%", x0, by - 4);
   }
   // the panel
   cx.fillStyle = "rgba(8,12,22,0.9)"; cx.fillRect(x0, y0, pw, ph);
@@ -1000,12 +1017,12 @@ function drawInspector(st, a, W, H) {
   if (naming && !naming.done) {
     cx.font = mono(22);
     if (naming.typed.length) { cx.fillStyle = "#e8f0fa"; cx.fillText(naming.typed.toUpperCase(), nx, y0 + 40); }
-    else { cx.fillStyle = "rgba(159,180,204,0.45)"; cx.fillText("NAME", nx + 16, y0 + 40); }   // past the cursor
+    else { cx.fillStyle = "rgba(159,180,204,0.45)"; cx.fillText("???", nx + 16, y0 + 40); }   // unnamed, past the cursor
     if (blink && !padUser) { const cw_ = naming.typed.length ? cx.measureText(naming.typed.toUpperCase()).width : 0; cx.fillStyle = "#8fe8b0"; cx.fillRect(nx + cw_ + 2, y0 + 22, 10, 22); }
     cx.font = mono(10); cx.fillStyle = "#8fc3e8";
-    cx.fillText(padUser ? "NAME IT, OR ✕ LETS ROBERT PICK" : "NAME IT: TYPE, THEN ENTER", nx, y0 + 58);
+    cx.fillText(padUser ? "NAME IT, OR ✕ LETS ROBERT PICK" : "TYPE A NAME, THEN ENTER", nx, y0 + 58);
   } else {
-    cx.font = mono(22); cx.fillStyle = "#e8f0fa"; cx.fillText(st.name.toUpperCase(), nx, y0 + 40);
+    cx.font = mono(22); cx.fillStyle = "#e8f0fa"; cx.fillText((st.o && st.o.name || st.name).toUpperCase(), nx, y0 + 40);
     if (naming && naming.done) { cx.font = mono(10); cx.fillStyle = naming.done === "player" ? "#8fe8b0" : "#e8b463"; cx.fillText(naming.done === "player" ? "NAMED BY YOU" : "NAMED BY R. CUPBOARD", nx, y0 + 58); }
   }
   // the lines, typed out
@@ -1109,7 +1126,7 @@ function gravityAt(x, y, feelWorlds) {
     const dx = bx - x, dy = by - y, d2 = dx * dx + dy * dy + SOFT2, k = gm / (d2 * Math.sqrt(d2));
     parts.push({ name, ax: dx * k, ay: dy * k, mag: gm / d2 });
   };
-  if (STAR.alive) add("Solaris", STAR.x, STAR.y, G * STAR.mass);
+  if (STAR.alive) add(STAR.name, STAR.x, STAR.y, G * STAR.mass);
   if (feelWorlds) for (const b of bodies) if (b.alive) add(b.name, b.x, b.y, G * b.mass * S.planetBoost);
   for (const p of POCKETS) if (dist(x, y, p.x, p.y) < S.pocketInfluenceAU) add(p.name, p.x, p.y, G * S.pocketMass);
   let ax = 0, ay = 0, top = parts[0];
@@ -1147,9 +1164,12 @@ function resolveContacts(list, freeBalls, events) {
     }
     // a thermonuclear hits with thermoEnergy times the energy: scale its speed going in
     const boost = ball.type === "thermo" ? Math.sqrt(S.thermoEnergy) : 1;
+    const closing = Math.hypot(ball.vx - b.vx, ball.vy - b.vy);   // before the boost: the shot's own speed
     ball.vx *= boost; ball.vy *= boost;
     const hit = collide(ball, S.acbMassRatio * b.mass, rA, b, b.mass, ballR(b));
     if (!hit) { ball.vx /= boost; ball.vy /= boost; continue; }
+    const dmg = damageWorld(b, ball.type, closing / S.shotPower);
+    if (dmg > 0) events.push({ kind: "damage", b, dmg, x: b.x, y: b.y });
     if (!b.struck) { b.struck = true; events.push({ kind: "struck", b, ball, x: b.x, y: b.y }); }
     else events.push({ kind: "hit", b, ball, x: b.x, y: b.y });
   }
@@ -1257,8 +1277,21 @@ function burnOut(k) {
 // Shared with the forecast, so the aim line shows a world breaking too.
 function thermoAftermath(ball, b) {
   ball.dead = true; ball.spent = true;
-  if (b && b.fragile && b.alive) { b.alive = false; b.broken = true; }
+  if (b && b.fragile && b.alive) { b.alive = false; b.broken = true; b.breakCause = "shattered by the thermonuclear"; }
 }
+// INTEGRITY. A planet's hit points, 1 when racked. A cue ball that hits it takes off
+// BALL_DAMAGE for its type times the shot's power: the flash's own shot power, or a
+// coasting ball's closing speed over shotPower, capped at 1. At zero it shatters, a foul
+// (integrityBreaks). Shared by the sim and the forecast, so it writes no notes.
+const BALL_DAMAGE = { standard: 0.25, thermo: 0.6, grav: 0.1, night: 0.35 };
+function damageWorld(b, type, power) {
+  if (!b || b.integrity == null || !b.alive) return 0;
+  const d = (BALL_DAMAGE[type] || 0.25) * Math.max(0, Math.min(1, power));
+  b.integrity = Math.max(0, b.integrity - d);
+  if (b.integrity <= 1e-9 && S.integrityBreaks) { b.alive = false; b.broken = true; b.breakCause = "integrity gone"; }
+  return d;
+}
+function integrityColour(f) { return f > 0.6 ? "#8fe8b0" : f > 0.3 ? "#e8b463" : "#ff5030"; }
 // The gravitizer's pull on one object: softened point mass, inside its reach only.
 function gravitize(k, o, h) {
   if (o === k || dist(k.x, k.y, o.x, o.y) > S.gravReachAU) return false;
@@ -1321,6 +1354,7 @@ function simStep(h, offGravity) {
   for (const e of events) {
     if (e.kind === "struck") { flash(e.x, e.y, 0.15, e.b.color); note("STRUCK: " + e.b.name, e.b.color); }
     if (e.kind === "balls") { flash(e.x, e.y, 0.08, "#ffffff"); note("CUE BALLS COLLIDE", "#e8f0fa"); }
+    if (e.kind === "damage" && e.dmg > 0.005) { note(e.b.name + " INTEGRITY " + Math.round(e.b.integrity * 100) + "%", integrityColour(e.b.integrity)); continue; }
     if (e.kind === "burned") { burst(e.x, e.y, 0.15, "#ff8a3c"); flash(e.x, e.y, 0.2, "#ff5030"); continue; }
     if (e.ball && e.ball.type === "thermo") thermoGoesOff(e.ball, e.b);
   }
@@ -1343,18 +1377,18 @@ function simStep(h, offGravity) {
       STAR.alive = false; score.starPotted = true;
       flash(STAR.x, STAR.y, 0.8, "#ff4b2b"); burst(STAR.x, STAR.y, 0.4, "#ffd9a0"); burst(STAR.x, STAR.y, 0.25, "#ffffff");
       fx.flashA = Math.max(fx.flashA, 0.8); fx.shake = Math.max(fx.shake, 1);
-      note("SOLARIS POTTED into " + p.name, "#ffe08a");
+      note(STAR.name.toUpperCase() + " POTTED into " + p.name, "#ffe08a");
     }
   }
   for (const b of bodies) if (b.broken && !b.brokenNoted) {
     b.brokenNoted = true; score.burned++; score.fouls++;
     burst(b.x, b.y, 0.2, b.color); burst(b.x, b.y, 0.12, "#ffffff"); flash(b.x, b.y, 0.3, b.color);
-    note("BROKEN: " + b.name + " shattered by the thermonuclear (foul)", "#ff5030");
+    note("BROKEN: " + b.name + " " + (b.breakCause || "shattered") + " (foul)", "#ff5030");
   }
   if (S.beltOn && S.styxEats) styxEatsBelt(h);
   const gone = [];
   for (const k of balls) {
-    if (k.dead) { gone.push({ k, why: k.burned ? "ACB BURNED in Solaris" : "THERMONUCLEAR SPENT" }); continue; }
+    if (k.dead) { gone.push({ k, why: k.burned ? "ACB BURNED in " + STAR.name : "THERMONUCLEAR SPENT" }); continue; }
     const p = pocketAt(k.x, k.y, 0);
     if (p) {
       k.dead = true;
@@ -1375,7 +1409,7 @@ function simStep(h, offGravity) {
   if (beltI >= 0) { belt[beltI] = 0; beltBreak(beltI, ship.x, ship.y); shipCause = shipCause || "wrecked on the asteroid belt"; }
   const shipPk = pocketAt(ship.x, ship.y, 0);
   if (!shipCause && shipPk) shipCause = "fell into " + shipPk.name;
-  if (!shipCause && STAR.alive && dist(ship.x, ship.y, STAR.x, STAR.y) < starR() + SHIP_R) shipCause = "burned in Solaris";
+  if (!shipCause && STAR.alive && dist(ship.x, ship.y, STAR.x, STAR.y) < starR() + SHIP_R) shipCause = "burned in " + STAR.name;
   // a respawned hull has SHIP_SAFE_S of grace against worlds and balls (see below)
   const safe = ship.safeT > 0;
   if (!shipCause && !safe) for (const b of bodies) if (b.alive && dist(ship.x, ship.y, b.x, b.y) < ballR(b) + SHIP_R) { shipCause = "crashed into " + b.name; break; }
@@ -1400,7 +1434,7 @@ function simStep(h, offGravity) {
   const worldsGone = bodies.every(b => !b.alive);
   if (worldsGone && !score.worldsCleared) {
     score.worldsCleared = true;
-    if (!score.starPotted) note("WORLDS CLEARED: Solaris is still up, and it is the last ball", "#ffe08a");
+    if (!score.starPotted) note("WORLDS CLEARED: " + STAR.name + " is still up, and it is the last ball", "#ffe08a");
   }
   if (!score.won && worldsGone && score.starPotted) { score.won = true; score.wonAt = simYears; note("TABLE CLEARED", "#ffe08a"); }
   return false;
@@ -1774,6 +1808,7 @@ function endImpactFrame() {
   k.vx *= boost; k.vy *= boost;
   collide(k, S.acbMassRatio * b.mass, S.acbRadiusAU, b, b.mass, ballR(b));
   if (!b.struck) { b.struck = true; note("STRUCK: " + b.name, b.color); }
+  if (damageWorld(b, k.type, k.flash.normalDv / S.shotPower) > 0) note(b.name + " INTEGRITY " + Math.round(b.integrity * 100) + "%", integrityColour(b.integrity));
   fx.shocks.push({ x: k.x, y: k.y, t: 0 });
   fx.shake = Math.max(fx.shake, 0.8);
   fx.trails.push(k.flash.pts); k.flash = null;
@@ -1872,6 +1907,7 @@ function buildGhost() {
       const boost = k.type === "thermo" ? Math.sqrt(S.thermoEnergy) : 1; k.vx *= boost; k.vy *= boost;
       collide(k, S.acbMassRatio * hit.mass, S.acbRadiusAU, hit, hit.mass, ballR(hit));
       hit.struck = true;
+      damageWorld(hit, k.type, k.flash.normalDv / S.shotPower);   // the forecast breaks what the shot would break
       if (k.type === "thermo") thermoAftermath(k, hit);
       if (!track.has(hit.id)) track.set(hit.id, { color: hit.color, direct: true, pts: [{ x: hit.x, y: hit.y }] });
     } else {
@@ -1920,7 +1956,7 @@ function buildGhost() {
       if (pk) { b.alive = false; if (track.has(b.id)) addFate("pot", b.x, b.y, b.name); }
       else if (gstar.alive && dist(b.x, b.y, gstar.x, gstar.y) < starR() + ballR(b)) { b.alive = false; if (track.has(b.id)) addFate("star", b.x, b.y, b.name); }
     }
-    if (gstar.alive && pocketAt(gstar.x, gstar.y, 0)) { gstar.alive = false; addFate("pot", gstar.x, gstar.y, "Solaris"); }
+    if (gstar.alive && pocketAt(gstar.x, gstar.y, 0)) { gstar.alive = false; addFate("pot", gstar.x, gstar.y, STAR.name); }
     for (const k of live) if (pocketAt(k.x, k.y, 0)) { k.dead = true; if (k === pending) addFate("pot", k.x, k.y, null, true); }
     // THE SHIP IN THE FORECAST sits where it is (zerograv), so a world coming round on its
     // ring, or your own ball off a cushion, is marked on it
@@ -2664,6 +2700,11 @@ function draw(realDt) {
     const [sx, sy] = q, R = ballR(b) * (persp ? q[2] : sc);
     if (!drawWorld(b, sx, sy, R)) circle(sx, sy, R, b.color);
     if (b.struck) circle(sx, sy, R + 3, null, colA(b.color, 0.5), 1);
+    if (b.integrity < 0.999 && !persp) {   // integrity, once it has been touched
+      const w = Math.max(22, R * 2), y = sy + R + 6;
+      cx.fillStyle = "rgba(8,12,22,0.8)"; cx.fillRect(sx - w / 2 - 1, y - 1, w + 2, 5);
+      cx.fillStyle = integrityColour(b.integrity); cx.fillRect(sx - w / 2, y, w * b.integrity, 3);
+    }
   }
   // the balls: every free one with its catch ring, then the one on the nose
   const drawBall = (x, y, type, live) => {
@@ -2949,7 +2990,7 @@ function drawHud(W, H) {
   const alive = bodies.filter(b => b.alive).length;
   const lines = [
     ["SHOTS " + score.shots + "   FOULS " + score.fouls + "   POTTED " + score.potted + "/" + bodies.length +
-     "   BALLS " + ballsLeft() + "   SOLARIS " + (score.starPotted ? "POTTED" : "STILL UP"), ballsLeft() <= 1 ? "#ff8c70" : "#cfe0ff"],
+     "   BALLS " + ballsLeft() + "   " + STAR.name.toUpperCase() + " " + (score.starPotted ? "POTTED" : "STILL UP"), ballsLeft() <= 1 ? "#ff8c70" : "#cfe0ff"],
     ["T " + simYears.toFixed(2) + " yr" + (score.deaths ? "   SHIP LOST " + score.deaths : ""), "#9fb4cc"],
     ["ACB " + (acb.mode === "attached" ? "ON THE NOSE" : acb.mode === "capturing" ? "WINCHING IN" :
               acb.mode === "empty" ? (pad.active && pad.owns ? "OUT, get in its ring and press CROSS" + (chamber.length ? " (or CROSS or L2 loads the next)" : "") : "OUT, get in its ring and press Space" + (chamber.length ? " (or Space or LMB loads the next)" : "")) :
@@ -3396,7 +3437,7 @@ cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { cam.zoom = Math.max(0.4, Math.min(6, cam.zoom * Math.exp(-e.deltaY * 0.0012))); e.preventDefault(); }, { passive: false });
 
 // ============================== TEST PANEL ======================================
-const STORE_KEY = "galaxytable.v38";   // bumped: saved settings would otherwise hide the new default
+const STORE_KEY = "galaxytable.v39";   // bumped: saved settings would otherwise hide the new default
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
   catch { return { ...DEFAULTS }; }
@@ -3421,6 +3462,7 @@ const PANEL = [
   ["r", "gravReachAU", "Gravitizer reach|how far", 0.1, 2, 0.05],
   ["l", "maxWarpM", "Time speed|fastest the clock goes", 1, 50],
   ["b", "flashTerminus", "Flash terminus|the flash stops after a set distance"],
+  ["b", "integrityBreaks", "Integrity breaks|a planet at zero integrity shatters"],
   ["b", "fateLabels", "Labels|text on the table"],
   ["r", "introFlyS", "Briefing pace|seconds per planet", 1, 10, 0.1],
   ["r", "introSlow", "Briefing slowdown|slow down at each planet", 0, 1, 0.05],
@@ -3525,8 +3567,9 @@ window.RIG = {
   introTo: (t) => { if (!intro) startIntro(); intro.t = t; intro.pose = introPose(t); setPersp(intro.pose); },
   introTick: (s) => { if (intro) stepIntro(s); },
   skipIntro: () => skipIntro(),
-  naming: () => intro && intro.naming ? { idx: intro.naming.idx, key: intro.stops[intro.naming.idx].key, typed: intro.naming.typed, timer: intro.naming.timer, done: intro.naming.done, typedOut: inspectorTyped(intro.stops[intro.naming.idx]) } : null,
-  names: () => bodies.map(b => b.name),
+  naming: () => intro && intro.naming ? { idx: intro.naming.idx, key: intro.stops[intro.naming.idx].key, typed: intro.naming.typed, done: intro.naming.done, typedOut: inspectorTyped(intro.stops[intro.naming.idx]) } : null,
+  names: () => [STAR.name, ...bodies.map(b => b.name), ...POCKETS.map(p => p.name)],
+  integrity: () => bodies.map(b => +b.integrity.toFixed(3)),
   pad: () => ({ active: pad.active, owns: pad.owns, teleporting: pad.teleporting, aiming: pad.aiming, power: pad.power }),
   project: (x, y) => worldToScreen(x, y),
   cam: () => ({ ...cam }),
