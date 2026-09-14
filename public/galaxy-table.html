@@ -60,8 +60,9 @@
     MANUAL CLOCK
       L STICK   fly in screen directions (up is up), analog
       R STICK   aim: in flight the nose points where the stick points (smoothed, eased).
-                With L2 held, the fine aim: the stick turns the aim, 1:1 at half a push
-                and 5x finer at the rim. The nose holds where it was let go
+                With L2 held, the stick turns the aim at the panel's Aim sensitivity (0.35
+                of the stick's turn); Dynamic aim instead makes it 1:1 at half a push and
+                5x finer at the rim. The nose holds where it was let go
       L1 / R1   slower / faster time (L1 held to the end pauses, as Q does)
       SQUARE    pause on / off (as Shift)
       L2 hold   AIM MODE: time holds and the R stick still aims. The power follows the
@@ -78,7 +79,8 @@
       D-PAD     left / right selects a slot (nose, chamber 1, chamber 2), up / down
                 cycles that slot's ball type
       TRIANGLE  reset (as R)
-      TOUCHPAD  camera: whole table / follow the ship (as C)
+      R3        camera: whole table / follow the ship (as C); the touchpad click too, where
+                the browser reports it
       CIRCLE    hold for the TELEPORT STATE: the L stick places the destination (its
                 angle and its throw, up to the teleport range), R2 teleports, letting go
                 of circle cancels
@@ -395,6 +397,8 @@ const DEFAULTS = {
   introSlow: 0.45,        // slow-down past a body: speed there is (1 - this) of the mean
   introPitchDeg: 52,      // camera pitch below horizontal during the flyover
   wasdRelative: false,    // keyboard flight: false = W up, A left (screen); true = W along the aim, A/D strafe
+  padAimSens: 0.35,       // controller, L2 held: aim turn per stick turn, flat (1 = the stick's own angle)
+  padAimDynamic: false,   // controller, L2 held: the older gain that falls with the throw (1 at half, 0.2 at the rim)
   padPowerRelative: false, // controller power trim: false = L stick up is more, down is less; true = along the aim (DRAW BACK: against it)
   padScheme: "manual",    // the controller: "manual" MANUAL CLOCK, "motion" MOTION CLOCK. OPTIONS switches
   motionRefAUyr: 10,      // MOTION CLOCK: ship speed that runs the world at game speed
@@ -1269,6 +1273,8 @@ function simStep(h, offGravity) {
 //     and touching the stick again does not throw away a fine adjustment
 //   - after that, turning the stick turns the aim by the stick's turn times a gain that
 //     falls with the throw: 1 at half a push (big swings), PAD_AIM_FINE at the rim (fine work)
+//   - the gain by throw is the panel's Dynamic aim, off by default; otherwise the stick's
+//     turn is scaled by one flat Aim sensitivity (padAimSens)
 //   - all of that only in AIM MODE (L2 held). In flight the stick points the nose where it
 //     points, smoothed and eased, and L2 then carries on from there
 //   - the nose eases onto that target (PAD_AIM_EASE), slower than the mouse's, so it glides
@@ -1291,7 +1297,7 @@ function padAim(realDt) {
     if (!pad.aiming) pad.aimTarget = a;   // in flight the stick simply points the nose; the fine aim is for L2
     else if (pad.aimAng == null) {
       if (pad.aimTarget == null || Math.abs(wrapAng(a - ship.nose)) > PAD_AIM_SNAP) pad.aimTarget = a;
-    } else pad.aimTarget += wrapAng(a - pad.aimAng) * padAimGain(m);
+    } else pad.aimTarget += wrapAng(a - pad.aimAng) * (S.padAimDynamic ? padAimGain(m) : S.padAimSens);
     pad.aimAng = a;
   }
   if (pad.aimTarget == null) return;
@@ -3033,7 +3039,9 @@ function pollPad(realDt) {
 
   if (down(PADB.CROSS)) spaceKey();
   if (down(PADB.TRIANGLE)) { resetWorld(); note("RESET", "#8fc3e8"); }   // as R
-  if (down(17)) { S.camFollow = !S.camFollow; saveSettings(); note("CAMERA: " + (S.camFollow ? "FOLLOWS THE SHIP" : "WHOLE TABLE"), "#8fc3e8"); }   // the touchpad click, as C
+  // R3 (the right stick's click): Chrome on macOS often does not report the DualSense
+  // touchpad click at all, so the touchpad (17) is only a second way in
+  if (down(PADB.R3) || down(17)) { S.camFollow = !S.camFollow; saveSettings(); note("CAMERA: " + (S.camFollow ? "FOLLOWS THE SHIP" : "WHOLE TABLE"), "#8fc3e8"); }   // the touchpad click, as C
   if (down(PADB.LEFT)) padSelect(-1);
   if (down(PADB.RIGHT)) padSelect(1);
   if (down(PADB.UP)) padCycleType(1);
@@ -3125,8 +3133,7 @@ function drawPadMenu(W, H) {
     { key: "D-PAD", text: "BALL TYPE", u: -58, v: -25, y: -20, lit: hl[PADB.UP] || hl[PADB.DOWN] },
     { key: "D-PAD", text: "SELECT BALL", u: -71, v: -12, y: -5, lit: hl[PADB.LEFT] || hl[PADB.RIGHT] },
     { key: "L STICK", text: pad.teleporting ? "TARGET" : pad.aiming && S.padAimMode !== "charge" ? "POWER" : "FLY", u: -24, v: 6, y: 22, lit: pad.lm > 0 },
-    { key: "TOUCHPAD", text: "CAMERA", u: -14, v: -26, y: 36, lit: hl[17] },
-    { key: "CREATE", text: "AIM STYLE", u: -35, v: -30, y: 50, lit: hl[PADB.CREATE] },
+    { key: "CREATE", text: "AIM STYLE", u: -35, v: -30, y: 36, lit: hl[PADB.CREATE] },
   ];
   const right = [
     { key: "R2", text: pad.teleporting ? "TELEPORT" : pad.aiming && S.padAimMode === "charge" ? "HOLD, RELEASE" : "SHOOT", u: 67, v: -53, y: -52, lit: pad.r2 > PAD_TRIGGER },
@@ -3136,6 +3143,7 @@ function drawPadMenu(W, H) {
     manual ? { key: "□", text: "PAUSE", u: 49, v: -12, y: 6, lit: hl[PADB.SQUARE] } : off({ key: "□", u: 49, v: -12, y: 6 }),
     { key: "✕", text: "BALL / CATCH", u: 58, v: -2, y: 20, lit: hl[PADB.CROSS] },
     { key: "R STICK", text: "AIM", u: 24, v: 6, y: 36, lit: pad.rm > 0 },
+    { key: "R3", text: "CAMERA", u: 28, v: 10, y: 50, lit: hl[PADB.R3] || hl[17] },
   ];
   const drawLabel = (lab, side) => {
     const [px, py] = P(lab.u, lab.v), y = oy + lab.y;
@@ -3213,7 +3221,7 @@ cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { cam.zoom = Math.max(0.4, Math.min(6, cam.zoom * Math.exp(-e.deltaY * 0.0012))); e.preventDefault(); }, { passive: false });
 
 // ============================== TEST PANEL ======================================
-const STORE_KEY = "galaxytable.v35";   // bumped: saved settings would otherwise hide the new default
+const STORE_KEY = "galaxytable.v36";   // bumped: saved settings would otherwise hide the new default
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
   catch { return { ...DEFAULTS }; }
@@ -3230,6 +3238,8 @@ const PANEL = [
   ["l", "thrustAccel", "Engine power|how fast the ship speeds up", 300, 30000],
   ["r", "linearDamp", "Ship braking|how fast the ship stops on its own", 0, 2, 0.05],
   ["b", "wasdRelative", "Relative WASD|W flies where you aim"],
+  ["r", "padAimSens", "Aim sensitivity|controller: aim speed while holding L2", 0.1, 1, 0.05],
+  ["b", "padAimDynamic", "Dynamic aim|controller: finer aim at the stick's edge"],
   ["b", "padPowerRelative", "Relative power|controller: push toward the aim for power"],
   ["a", "ADVANCED"],   // folded by default; the camera is an in-game control (C), not a dial
   ["r", "gravPull", "Gravitizer pull|how strong", 0.005, 0.2, 0.005],
