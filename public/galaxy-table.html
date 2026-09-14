@@ -74,8 +74,10 @@
                 release to shoot. A shot ends the aim
       CREATE    cycles the controller's aim style (as Tab does the mouse's). The two are kept
                 apart: HOLD TO POWER UP is the controller's default, POWER LINE the mouse's
-      R2        outside aim mode: HIP FIRE, along the nose at the last power aim mode set
-                (50% before any); a bare nose loads the next ball and sends it at once
+      R2        outside aim mode: HIP FIRE. Hold to power up (time and the ship carry on),
+                release to shoot along the nose; a bare nose loads the next ball first.
+                L2 mid-charge takes the power (and the charge, if R2 is held) into aim
+                down sights; letting go of L2 then cancels, as with any aimed shot
       CROSS     catch a ball in reach, or load the next
       D-PAD     left / right selects a slot (nose, chamber 1, chamber 2), up / down
                 cycles that slot's ball type
@@ -1657,7 +1659,7 @@ function reachShot() {
 }
 function pendingShot() {
   if (acb.mode !== "attached" || score.failed) return null;
-  if (pad.aiming) return [Math.cos(ship.nose), Math.sin(ship.nose), pad.power, true];   // the controller: the nose aims, the L stick trims the power
+  if (pad.aiming || pad.hipCharging) return [Math.cos(ship.nose), Math.sin(ship.nose), pad.power, true];   // the controller: the nose aims, the L stick trims the power
   if (charging) return [Math.cos(ship.nose), Math.sin(ship.nose), charge, true];   // HOLD TO POWER UP: the nose aims
   if (reaching) { const r = reachShot(); return [r[0], r[1], r[2], true]; }        // POWER LINE
   if (drag) {
@@ -2719,7 +2721,7 @@ function draw(realDt) {
     }
     // charge bar and the cue
     const p = pendingShot();
-    if (p && (reaching || pad.aiming)) {
+    if (p && (reaching || pad.aiming || pad.hipCharging)) {
       // POWER LINE: a bar laid along the shot's own direction, as long as the power, in the
       // power's colour, with a faint tick where full power would reach. Not a ring: rings
       // round the ship read as orbits. A pulse of light runs out along it from the hull.
@@ -3037,7 +3039,6 @@ function cycleSlot(sl) {
 const PADB = { CROSS: 0, CIRCLE: 1, SQUARE: 2, TRIANGLE: 3, L1: 4, R1: 5, L2: 6, R2: 7, CREATE: 8, OPTIONS: 9, L3: 10, R3: 11, UP: 12, DOWN: 13, LEFT: 14, RIGHT: 15 };
 const PAD_DEAD = 0.15, PAD_AIM_DEAD = 0.25, PAD_TRIGGER = 0.5;
 const PAD_POWER_START = 0.5;   // aim mode opens here, so either way is half a push away
-const HIP_POWER_START = 0.5;   // the hip fire's power before aim mode has set one
 const PAD_POWER_RATE = 0.5;    // power per second at a full push along the aim: 0 to 100% in 2 s
 const MOTION_DEAD_AUYR = 0.15, MOTION_MAX = 2;
 const PAD_SCHEMES = { manual: "MANUAL CLOCK", motion: "MOTION CLOCK" };
@@ -3089,7 +3090,7 @@ function pollPad(realDt) {
   let gp = null;
   for (const g of pads) if (g && g.connected) { gp = g; break; }
   if (!gp) {
-    if (pad.active) { Object.assign(pad, { active: false, owns: false, aiming: false, teleporting: false, tp: null, l1: false, r1: false }); note("CONTROLLER DISCONNECTED", "#e8b463"); }
+    if (pad.active) { Object.assign(pad, { active: false, owns: false, aiming: false, hipCharging: false, teleporting: false, tp: null, l1: false, r1: false }); note("CONTROLLER DISCONNECTED", "#e8b463"); }
     return;
   }
   const pressed = gp.buttons.map(b => !!(b && b.pressed));
@@ -3148,14 +3149,23 @@ function pollPad(realDt) {
   pad.aiming = pad.l2 > PAD_TRIGGER && !pad.aimLatch && !pad.teleporting && acb.mode === "attached" && !score.failed && !score.won;
   const chargeStyle = S.padAimMode === "charge";
   if (pad.aiming && !pad.wasAiming) {
-    pad.power = chargeStyle ? 0 : PAD_POWER_START; pad.charging = false;
-    note(chargeStyle ? "AIM: hold R2 to power up" : "AIM: power at 50%", "#8fc3e8");
+    if (pad.hipCharging) {
+      // L2 in the middle of a hip charge: the power carries into aim down sights, and so does
+      // the charge if R2 is still held. Letting go of L2 from here cancels, as any aimed shot
+      pad.hipCharging = false;
+      pad.charging = chargeStyle && pad.r2 > PAD_TRIGGER;
+      note("AIM: power held at " + Math.round(pad.power * 100) + "%", "#8fc3e8");
+    } else {
+      pad.power = chargeStyle ? 0 : PAD_POWER_START; pad.charging = false;
+      note(chargeStyle ? "AIM: hold R2 to power up" : "AIM: power at 50%", "#8fc3e8");
+    }
   }
+  if (!pad.aiming && pad.wasAiming && pad.charging) note("SHOT CANCELLED", "#8fc3e8");
   pad.wasAiming = pad.aiming;
-  if (!pad.aiming) { if (pad.charging && pad.power > 0.02) pad.hipPower = pad.power; pad.charging = false; }   // a cancelled charge still sets the hip fire
+  if (!pad.aiming) pad.charging = false;
   const padFire = (min) => {
     const p = pendingShot();
-    if (p && Math.max(min, p[2]) > 0.02) { const pw = Math.max(min, p[2]); lastPower = pw; pad.hipPower = pw; fireAcb(p[0], p[1], pw); rumble(0.3, 90); }
+    if (p && Math.max(min, p[2]) > 0.02) { const pw = Math.max(min, p[2]); lastPower = pw; fireAcb(p[0], p[1], pw); rumble(0.3, 90); }
     else note(!S.padPowerRelative ? "NO SHOT: push the left stick up for power" : S.padAimMode === "draw" ? "NO SHOT: pull the left stick back for power" : "NO SHOT: push the left stick along the aim for power", "#8fc3e8");
     pad.aimLatch = true; pad.aiming = false; pad.charging = false;
   };
@@ -3177,18 +3187,29 @@ function pollPad(realDt) {
     const along = S.padPowerRelative ? (lx * Math.cos(ship.nose) + ly * Math.sin(ship.nose)) * (S.padAimMode === "draw" ? -1 : 1) : -ly;
     const before = pad.power;
     pad.power = Math.max(0, Math.min(1, pad.power + Math.sign(along) * along * along * PAD_POWER_RATE * realDt));
-    if (pad.power !== before && pad.power > 0.02) pad.hipPower = pad.power;   // a trim sets the hip fire's power, shot or not
     if (Math.floor(pad.power * 10 + 1e-9) !== Math.floor(before * 10 + 1e-9)) rumble(0.08, 18);   // a tick every 10%
     if (r2Down) padFire(0);
-  } else if (r2Down && !pad.teleporting && !score.failed && !score.won) {
-    // HIP FIRE: R2 outside aim mode shoots along the nose at the last power set in aim mode
-    // (HIP_POWER_START before any). A bare nose loads the next ball and sends it at once.
-    if ((acb.mode === "empty" || acb.mode === "lost") && chamber.length) newBallNow("R2");
-    if (acb.mode === "attached") {
-      const pw = pad.hipPower || HIP_POWER_START;
-      lastPower = pw; fireAcb(Math.cos(ship.nose), Math.sin(ship.nose), pw); rumble(0.3, 90);
-      note("HIP FIRE at " + Math.round(pw * 100) + "%", "#8fc3e8");
+  } else if (pad.hipCharging) {
+    // HIP FIRE, powering up: time and the ship carry on (nothing like L2's hold); release R2
+    // to shoot along the nose. L2 now takes the charge into aim down sights (above).
+    if (pad.teleporting || score.failed || score.won || acb.mode !== "attached") pad.hipCharging = false;
+    else {
+      const before = pad.power;
+      pad.power = Math.min(1, pad.power + realDt / S.chargeSeconds);
+      if (Math.floor(pad.power * 10 + 1e-9) !== Math.floor(before * 10 + 1e-9)) rumble(0.08, 18);
+      const r2Up = pad.r2 <= PAD_TRIGGER && pad.prevR2 > PAD_TRIGGER;
+      if (r2Up) {
+        const pw = Math.max(0.08, pad.power);   // the mouse's floor: a tap still sends the ball
+        lastPower = pw; fireAcb(Math.cos(ship.nose), Math.sin(ship.nose), pw); rumble(0.3, 90);
+        note("HIP FIRE at " + Math.round(pw * 100) + "%", "#8fc3e8");
+        pad.hipCharging = false;
+      }
     }
+  } else if (r2Down && !pad.teleporting && !score.failed && !score.won) {
+    // HIP FIRE: R2 outside aim mode starts a charge from empty. A bare nose loads the next
+    // ball first.
+    if ((acb.mode === "empty" || acb.mode === "lost") && chamber.length) newBallNow("R2");
+    if (acb.mode === "attached") { pad.hipCharging = true; pad.power = 0; }
   }
 
   if (down(PADB.CROSS)) spaceKey();
@@ -3290,7 +3311,7 @@ function drawPadMenu(W, H) {
     { key: "CREATE", text: "AIM STYLE", u: -35, v: -30, y: 36, lit: hl[PADB.CREATE] },
   ];
   const right = [
-    { key: "R2", text: pad.teleporting ? "TELEPORT" : pad.aiming && S.padAimMode === "charge" ? "HOLD, RELEASE" : "SHOOT", u: 67, v: -53, y: -52, lit: pad.r2 > PAD_TRIGGER },
+    { key: "R2", text: pad.teleporting ? "TELEPORT" : pad.aiming && S.padAimMode !== "charge" ? "SHOOT" : "HOLD, RELEASE", u: 67, v: -53, y: -52, lit: pad.r2 > PAD_TRIGGER },
     manual ? { key: "R1", text: "FASTER", u: 67, v: -45, y: -37, lit: hl[PADB.R1] } : off({ key: "R1", u: 67, v: -45, y: -37 }),
     { key: "△", text: "RESET", u: 58, v: -22, y: -22, lit: hl[PADB.TRIANGLE] },
     { key: "○", text: "HOLD TELEPORT", u: 67, v: -12, y: -8, lit: hl[PADB.CIRCLE] },
