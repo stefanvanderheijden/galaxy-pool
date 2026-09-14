@@ -60,9 +60,10 @@
     MANUAL CLOCK
       L STICK   fly in screen directions (up is up), analog
       R STICK   aim: in flight the nose points where the stick points (smoothed, eased).
-                With L2 held, the stick turns the aim at the panel's Aim sensitivity (0.35
-                of the stick's turn); Dynamic aim instead makes it 1:1 at half a push and
-                5x finer at the rim. The nose holds where it was let go
+                With L2 held (aim down sights), tank controls: the nose turns toward the
+                stick at no more than Aim turn speed (45 deg/s), however it is pushed.
+                Dynamic aim instead makes it relative, 1:1 at half a push and 5x finer
+                at the rim. The nose holds where it was let go
       L1 / R1   slower / faster time (L1 held to the end pauses, as Q does)
       SQUARE    pause on / off (as Shift)
       L2 hold   AIM MODE: time holds and the R stick still aims. The power follows the
@@ -249,12 +250,18 @@
   Mario Kart style: a 2.5D camera, pitched introPitchDeg down and circling slowly, sweeps
   from a wide view of the whole system past every body in turn (Solaris, Red, Terra,
   Vera, Styx, Lethe, Acheron, then the ark) and settles into the top-down view the game
-  is played in. The camera never stops: one spline through every body, introFlyS
-  seconds per body whatever the hop, slowing past each body to (1 - introSlow) of
-  the mean pace and never stopping, while each body's INSPECTOR CARD fades in and out: the body's picture and its properties (mass, density, diameter, travel speed, inhabited,
-  surface temperature, from level-01.json's own numbers), and under them a MISSION
-  NOTE by Robert Cupboard, the advisor, in his voice: what the body is for on this
-  table and nothing about who set the table. Any key or click skips to the game.
+  is played in. One spline through every body, introFlyS seconds per hop whatever its
+  length. It PAUSES AT EVERY PLANET, arriving and leaving from rest, and passes the
+  other bodies at (1 - introSlow) of the mean pace. The INSPECTOR, lower centre (the
+  designer's sketch), types itself out: picture and name, type, mass, size,
+  composition (classes derived from level-01.json's mass and diameter), anomalies
+  (inhabited, fragile), and under it Robert Cupboard's portrait with a bubble that is
+  a placeholder ("RC ONELINER") until his lines are written. At a planet the player
+  is prompted to NAME it: type and Enter (or click); if the bar on top runs out, or on
+  CROSS with a controller, Robert names it, which is the level's own name. Names hold
+  for the page, across racks. Esc (or any other controller button) skips the rest;
+  between bodies any key or click skips, as before. The bodies sit at INTRO_CY of the
+  screen height while the inspector is up, and come back to centre for the handoff.
   The sim is frozen for the duration, so the rack the briefing shows is the rack
   you play.
 
@@ -393,13 +400,14 @@ const TAU = Math.PI * 2;
 // ============================== TUNABLES (test panel) ===========================
 const DEFAULTS = {
   introFlyover: true,     // the mission briefing flyover at the start of every rack
+  nameSeconds: 12,        // briefing: seconds at a planet before Robert names it for you
   introFlyS: 4.6,         // seconds per body, whatever the hop: the camera never stops
   introSlow: 0.45,        // slow-down past a body: speed there is (1 - this) of the mean
   introPitchDeg: 52,      // camera pitch below horizontal during the flyover
   wasdRelative: false,    // keyboard flight: false = W up, A left (screen); true = W along the aim, A/D strafe
-  padAimSens: 0.35,       // controller, L2 held: aim turn per stick turn, flat (1 = the stick's own angle)
+  padAimTurnDegS: 45,     // controller, L2 held: the nose turns toward the stick at most this fast, degrees per second (tank controls)
   padAimDynamic: false,   // controller, L2 held: the older gain that falls with the throw (1 at half, 0.2 at the rim)
-  padPowerRelative: false, // controller power trim: false = L stick up is more, down is less; true = along the aim (DRAW BACK: against it)
+  padPowerRelative: true, // controller power trim: false = L stick up is more, down is less; true = along the aim (DRAW BACK: against it)
   padScheme: "manual",    // the controller: "manual" MANUAL CLOCK, "motion" MOTION CLOCK. OPTIONS switches
   motionRefAUyr: 10,      // MOTION CLOCK: ship speed that runs the world at game speed
   aimMode: "reach",       // mouse and keyboard: "reach" POWER LINE, "charge" HOLD TO POWER UP, "draw" DRAW BACK. Tab cycles
@@ -593,9 +601,11 @@ function orbitState(r, a, over) {
   const v = Math.sqrt(G * STAR.mass / r) * (over || 1);
   return { x: STAR.x + r * Math.cos(a), y: STAR.y + r * Math.sin(a), vx: -v * Math.sin(a), vy: v * Math.cos(a) };
 }
+// The names the player gave in the briefing, per body id, kept across racks for the page.
+const playerNames = {};
 function derivePlanet(d) {
   const r = d.r * S.systemScale;
-  return { ...orbitState(r, d.a), id: d.id, name: d.name, sprite: d.sprite, mass: d.mass, drawR: d.drawR,
+  return { ...orbitState(r, d.a), id: d.id, name: playerNames[d.id] || d.name, sprite: d.sprite, mass: d.mass, drawR: d.drawR,
            color: d.color, fragile: !!d.fragile, orbitR: r, struck: false, alive: true, trail: [], spin: Math.random() * TAU };
 }
 // SYSTEM SIZE. One slider scales every authored radius: the orbits and the ship's ring
@@ -680,15 +690,19 @@ function introStops() {
   const framing = (o, R, px) => ({ o, R, px });
   const stops = [];
   stops.push({ ...framing(STAR, starR(), 130), key: "star", name: STAR.name, mass: STAR.mass, unit: "solar masses", speed: 0, sprite: "sun", tint: true });
-  for (const b of bodies) stops.push({ ...framing(b, ballR(b), 110), key: b.id, name: b.name, mass: b.mass / 3.003e-6, unit: "Earth masses", speed: Math.hypot(b.vx, b.vy), sprite: b.sprite });
+  for (const b of bodies) {
+    const d = PLANET_DEFS.find(q => q.id === b.id);
+    stops.push({ ...framing(b, ballR(b), 110), key: b.id, name: b.name, defName: d ? d.name : b.name, mass: b.mass / 3.003e-6, unit: "Earth masses", speed: Math.hypot(b.vx, b.vy), sprite: b.sprite, pause: true });
+  }
   for (const p of POCKETS) stops.push({ ...framing(p, S.pocketRadiusAU, 110), key: p.name, name: p.name, mass: S.pocketMass, unit: "solar masses", speed: 0, sprite: "blackhole", pocket: true });
   stops.push({ ...framing(ship, HULL_LEN * 2.5, 60), key: "ship", name: "THE ARK", mass: null, unit: "", speed: Math.hypot(ship.vx, ship.vy), sprite: null, ship: true });
   return stops;
 }
 function introFocal() { return Math.max(1, cv.clientHeight) * 1.1; }
 const INTRO_TITLE_S = 3.0, INTRO_OUTRO_S = 1.8;
+const INTRO_CY = 0.36;   // where the body sits on screen during the flyover (fraction of height): above the inspector
 function startIntro() {
-  intro = { t: 0, stops: introStops(), done: false };
+  intro = { t: 0, realT: 0, stops: introStops(), done: false, naming: null };
   const p = document.getElementById("panel");
   panelWasHidden = p.style.display === "none";
   p.style.display = "none"; document.getElementById("chamber").style.display = "none";
@@ -708,6 +722,7 @@ function skipIntro() {
   // once only: a held key, trigger or stick calls this every frame, and each call would
   // put the clock back to the start of the outro
   if (!intro || intro.done || intro.skipped) return;
+  intro.naming = null;   // an unnamed planet keeps the name Robert would have picked
   // not a cut: jump the clock to the outro, which blends to the game view
   intro.t = Math.max(intro.t, introTotal() - INTRO_OUTRO_S);   // never backwards, if the outro is already playing
   intro.skipped = true;
@@ -734,15 +749,23 @@ function introPose(t) {
   // stops: the speed profile is a blend of linear and an ease, introSlow of the way
   // to the ease, so at a body it still moves at (1 - introSlow) of the mean pace. A
   // full ease (introSlow 1) reached zero there and read as a pause.
-  let u, title = 0, pitchNow = pitch;
+  let u, title = 0, pitchNow = pitch, cy = 0.5;
   if (t < INTRO_TITLE_S) { u = 0; title = 1 - Math.max(0, (t - (INTRO_TITLE_S - 0.5)) / 0.5); }
   else if (t < total - INTRO_OUTRO_S) {
     const w = t - INTRO_TITLE_S, i = Math.min(N - 1, Math.floor(w / per)), f = Math.min(1, w / per - i);
-    const g = S.introSlow * easeInOutCubic(f) + (1 - S.introSlow) * f;   // fraction of the hop's LENGTH
+    // fraction of the hop's LENGTH, as a cubic Hermite with a speed at each end: a body the
+    // camera PAUSES at (a planet, to be named) is arrived at and left from rest; any other
+    // is passed at (1 - introSlow) of the mean pace. Both ends at that pace is the old
+    // blend of linear and ease exactly.
+    const pass = 1 - S.introSlow;
+    const s0 = i > 0 && stops[i - 1].pause ? 0 : pass, s1 = stops[i].pause ? 0 : pass;
+    const g = (3 * f * f - 2 * f * f * f) + s0 * (f * f * f - 2 * f * f + f) + s1 * (f * f * f - f * f);
     u = segArcU(pts, i, g);
+    cy = 0.5 + (INTRO_CY - 0.5) * easeInOutCubic(Math.min(1, w / per));   // the body rises to make room for the inspector
   } else {
     const f = easeInOutCubic(Math.min(1, (t - (total - INTRO_OUTRO_S)) / INTRO_OUTRO_S));
     u = N + f;
+    cy = INTRO_CY + (0.5 - INTRO_CY) * f;   // back to centre for the handoff
     pitchNow = pitch + (Math.PI / 2 - pitch) * f;
     const azEnd = -Math.PI / 2, az0 = ((az - azEnd) % TAU + TAU) % TAU;   // the short way round
     az = azEnd + (az0 > Math.PI ? az0 - TAU : az0) * (1 - f);
@@ -761,7 +784,7 @@ function introPose(t) {
   let cardIdx = -1, cardA = 0;
   const near = Math.round(u) - 1;
   if (near >= 0 && near < N) { const d = Math.abs(u - (near + 1)); cardA = Math.max(0, Math.min(1, (0.5 - d) / 0.08)); if (cardA > 0) cardIdx = near; }
-  return { x, y, range, pitch: pitchNow, az, cardIdx, cardA, title };
+  return { x, y, range, pitch: pitchNow, az, cardIdx, cardA, title, cy };
 }
 // The spline's own parameter crawls through the tight turn at a body (the tangent
 // there is short), which read as a stop however the clock ran. So within each hop the
@@ -801,7 +824,7 @@ function setPersp(pose) {
   const cross = (p, q) => [p[1] * q[2] - p[2] * q[1], p[2] * q[0] - p[0] * q[2], p[0] * q[1] - p[1] * q[0]];
   const norm = v => { const l = Math.hypot(v[0], v[1], v[2]); return [v[0] / l, v[1] / l, v[2] / l]; };
   const r = norm(cross(h, f)), u = cross(f, r);
-  persp = { eye, f, r, u, focal: introFocal() };
+  persp = { eye, f, r, u, focal: introFocal(), cy: pose.cy == null ? 0.5 : pose.cy };
 }
 function projPt(x, y, z) {
   const P = persp, dx = x - P.eye[0], dy = y - P.eye[1], dz = (z || 0) - P.eye[2];
@@ -809,15 +832,56 @@ function projPt(x, y, z) {
   if (depth < 0.02) return null;
   const k = P.focal / depth;
   return [cv.clientWidth / 2 + (dx * P.r[0] + dy * P.r[1] + dz * P.r[2]) * k,
-          cv.clientHeight / 2 - (dx * P.u[0] + dy * P.u[1] + dz * P.u[2]) * k, k];
+          cv.clientHeight * P.cy - (dx * P.u[0] + dy * P.u[1] + dz * P.u[2]) * k, k];
 }
 function scAt(x, y) { if (!persp) return cam.scale; const p = projPt(x, y, 0); return p ? p[2] : 0; }
 function stepIntro(realDt) {
-  intro.t += realDt * (intro.skipped ? 2 : 1);      // a skip plays the outro at double speed
+  intro.realT += realDt;
   for (const b of bodies) b.spin += realDt * TAU / 24;   // the sim is frozen, the worlds still turn
+  if (intro.naming) stepNaming(realDt);
+  else {
+    let t = intro.t + realDt * (intro.skipped ? 2 : 1);   // a skip plays the outro at double speed
+    // THE PAUSE AT A PLANET: the clock holds on the first planet not yet named, at the
+    // moment the camera arrives (the end of its hop), until it has a name
+    if (!intro.skipped) for (let i = 0; i < intro.stops.length; i++) {
+      const st = intro.stops[i];
+      if (!st.pause || st.resolved) continue;
+      const at = INTRO_TITLE_S + (i + 1) * S.introFlyS;
+      if (t >= at) { t = at; intro.naming = { idx: i, typed: "", timer: S.nameSeconds, done: null, doneT: 0 }; }
+      break;
+    }
+    intro.t = t;
+  }
   if (intro.t >= introTotal()) { endIntro(); return; }
   intro.pose = introPose(intro.t);
   setPersp(intro.pose);
+  const ci = intro.pose.cardIdx;
+  if (ci >= 0 && intro.stops[ci].typeT0 == null) intro.stops[ci].typeT0 = intro.realT;   // the typing starts as the card comes up
+}
+// NAMING. The inspector types itself out; then the player types a name (Enter keeps it),
+// or lets the bar run out and Robert names it, which is the level's own name for it.
+const TYPE_CPS = 42;   // inspector characters per second
+function stepNaming(realDt) {
+  const n = intro.naming, st = intro.stops[n.idx];
+  if (n.done) { n.doneT -= realDt; if (n.doneT <= 0) { st.resolved = true; intro.naming = null; } return; }
+  if (inspectorTyped(st) && !n.typed.length) { n.timer -= realDt; if (n.timer <= 0) resolveName(); }
+}
+function resolveName() {
+  const n = intro && intro.naming; if (!n || n.done) return;
+  const st = intro.stops[n.idx], typed = n.typed.trim();
+  st.name = typed || st.defName; st.o.name = st.name;
+  if (typed) playerNames[st.key] = typed; else delete playerNames[st.key];
+  n.done = typed ? "player" : "rc"; n.doneT = 1.4;
+  st.typeDone = true;
+}
+function introKey(e) {
+  const n = intro.naming;
+  if (!n) { skipIntro(); return; }             // flying between bodies: any key skips, as before
+  if (n.done) return;                          // the name is being shown: keys wait
+  if (e.code === "Escape") { skipIntro(); return; }
+  if (e.key === "Enter") { resolveName(); return; }
+  if (e.key === "Backspace") { n.typed = n.typed.slice(0, -1); return; }
+  if (e.key.length === 1 && n.typed.length < 16 && /[\p{L}\p{N} '.-]/u.test(e.key)) n.typed += e.key;
 }
 // A ring in the table plane: a circle in play, an ellipse (well, a polyline) in the flyover.
 function drawRing(wx, wy, rAU, stroke, width, dash) {
@@ -848,51 +912,131 @@ function drawBriefing(W, H) {
     cx.fillText("mission notes by Robert Cupboard", W / 2, H * 0.36 + 46);
   }
   cx.font = `11px "Share Tech Mono", monospace`; cx.fillStyle = "rgba(160,185,215,0.7)"; cx.textAlign = "right";
-  cx.fillText("any key to skip", W - 16, H - bar - 12);
+  cx.fillText(intro.naming ? (pad.active && pad.owns ? "any other button skips the briefing" : "esc skips the briefing") : "any key to skip", W - 16, H - bar / 2 + 4);   // in the letterbox, clear of the inspector
   cx.textAlign = "left";
-  if (pose.cardIdx >= 0) drawCard(intro.stops[pose.cardIdx], pose.cardA, W, H);
+  if (pose.cardIdx >= 0) drawInspector(intro.stops[pose.cardIdx], pose.cardA, W, H);
 }
-function drawCard(st, a, W, H) {
+// THE INSPECTOR: lower centre, typed out line by line. The designer's sketch: a bar on
+// top (the time left to name it), the body's picture and name, its type, mass, size and
+// composition, a list of anomalies, and under it Robert's line in a bubble beside his
+// portrait. The line is a placeholder until it is written.
+const RC_ONELINER = "RC ONELINER";
+const rcFace = new Image();
+rcFace.src = "data:image/jpeg;base64,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";   // Galaxy 64's baked portrait (src/baked/robert-face.png), static
+function massClass(st) {
+  if (st.ship) return "classified";
+  if (st.pocket) return "extreme";
+  if (st.unit.startsWith("solar")) return "stellar";
+  const m = st.mass;   // Earth masses
+  return m < 0.1 ? "very light" : m < 0.5 ? "light" : m < 2 ? "medium" : m < 10 ? "heavy" : "superheavy";
+}
+function sizeClass(st, B) {
+  if (st.ship) return "hull";
+  const d = B.diameterKm;
+  return d == null ? "unknown" : d < 1000 ? "tiny" : d < 5000 ? "dwarf" : d < 9000 ? "small" : d < 13000 ? "medium" : d < 30000 ? "large" : "giant";
+}
+function compositionClass(st, B) {
+  if (st.ship) return "classified";
+  if (st.pocket) return "singularity";
+  if (st.unit.startsWith("solar")) return "plasma";
+  const rho = densityGcc(st.mass * MEARTH_KG / MSUN_KG, B.diameterKm);
+  return rho < 1.8 ? "gaseous" : rho < 3.5 ? "icy" : rho < 6.5 ? "rocky" : "metallic";
+}
+function inspectorLines(st) {
   const B = BRIEF[st.key] || {};
-  const cw = 330, x0 = W - cw - 28 - (1 - a) * 30, y0 = Math.round(H * 0.2);
-  const rows = [
-    ["mass", st.mass == null ? "classified" : st.mass >= 100 ? st.mass.toFixed(0) + " " + st.unit : st.mass.toFixed(2) + " " + st.unit],
-    ["density", st.ship ? "classified" : st.pocket ? "off the scale" : densityGcc(st.mass * (st.unit.startsWith("Earth") ? MEARTH_KG / MSUN_KG : 1), B.diameterKm).toFixed(1) + " g/cm3"],
-    ["diameter", B.diameterKm == null ? "0.4 AU, hull" : B.diameterKm.toLocaleString("en-US") + " km"],
-    ["travel speed", st.speed ? (st.speed * KMS_PER_AUYR).toFixed(1) + " km/s  (" + st.speed.toFixed(2) + " AU/yr)" : st.pocket ? "fixed" : st.ship ? "at rest, zerograv freeflight" : "at rest, the centre"],
-    ["inhabited", B.inhabited ? "YES" : "no"],
-    ["surface temp", B.tempC == null ? "21 C, cabin" : B.tempC.toFixed(0) + " C"],
-  ];
-  cx.font = `11px "Share Tech Mono", monospace`;
-  const noteLines = wrapText(B.note || "", cw - 24);
-  const ch = 96 + rows.length * 17 + 30 + noteLines.length * 15 + 16;
+  const anomalies = [];
+  if (B.inhabited) anomalies.push("inhabited");
+  if (st.o && st.o.fragile) anomalies.push("fragile");
+  return [["type", B.cls || "unknown"], ["mass", massClass(st)], ["size", sizeClass(st, B)], ["composition", compositionClass(st, B)], ["anomalies", anomalies.length ? "" : "none"]]
+    .concat(anomalies.map(x => ["", x]));
+}
+function inspectorTyped(st) {
+  if (st.typeDone) return true;
+  if (st.typeT0 == null) return false;
+  const total = inspectorLines(st).reduce((n, [k, v]) => n + k.length + v.length + 2, 0);
+  return (intro.realT - st.typeT0) * TYPE_CPS >= total;
+}
+function drawInspector(st, a, W, H) {
+  const lines = inspectorLines(st);
+  const naming = intro.naming && intro.stops[intro.naming.idx] === st ? intro.naming : null;
+  const padUser = pad.active && pad.owns;
+  const bar = Math.round(H * 0.07);
+  const pw = Math.min(400, W - 40), lh = 19, head = 70;
+  const ph = head + lines.length * lh + 12, bubH = 58, face = 58;
+  const x0 = Math.round(W / 2 - pw / 2);
+  const bubY = H - bar - 14 - bubH, y0 = bubY - 12 - ph;
+  const mono = px => `${px}px "Share Tech Mono", monospace`;
   cx.globalAlpha = a;
-  cx.fillStyle = "rgba(8,12,22,0.88)"; cx.fillRect(x0, y0, cw, ch);
-  cx.strokeStyle = "#2a3a55"; cx.lineWidth = 1; cx.strokeRect(x0 + 0.5, y0 + 0.5, cw - 1, ch - 1);
-  // picture
-  const px = x0 + 46, py = y0 + 46, R = 30;
-  cx.save(); cx.beginPath(); cx.rect(x0 + 8, y0 + 8, 76, 76); cx.clip();
+  // the bar: the time left before Robert names it, draining from the left, hatched
+  if (st.pause && !st.resolved) {
+    const by = y0 - 16, bh = 8, frac = naming ? (naming.done ? 0 : Math.max(0, naming.timer / S.nameSeconds)) : 1;
+    cx.fillStyle = "rgba(8,12,22,0.88)"; cx.fillRect(x0, by, pw, bh);
+    const fw = pw * frac;
+    cx.save(); cx.beginPath(); cx.rect(x0 + pw - fw, by, fw, bh); cx.clip();
+    cx.fillStyle = naming && naming.typed.length ? "rgba(143,195,232,0.35)" : "rgba(232,180,99,0.35)"; cx.fillRect(x0, by, pw, bh);
+    cx.strokeStyle = naming && naming.typed.length ? "#8fc3e8" : "#e8b463"; cx.lineWidth = 1.5; cx.beginPath();
+    for (let xx = x0 - bh; xx < x0 + pw + bh; xx += 5) { cx.moveTo(xx, by + bh); cx.lineTo(xx + bh, by); }
+    cx.stroke(); cx.restore();
+    cx.strokeStyle = "#2a3a55"; cx.lineWidth = 1; cx.strokeRect(x0 + 0.5, by + 0.5, pw - 1, bh - 1);
+  }
+  // the panel
+  cx.fillStyle = "rgba(8,12,22,0.9)"; cx.fillRect(x0, y0, pw, ph);
+  cx.strokeStyle = "#2a3a55"; cx.lineWidth = 1; cx.strokeRect(x0 + 0.5, y0 + 0.5, pw - 1, ph - 1);
+  // the picture, in a circle
+  const px = x0 + 40, py = y0 + 38, R = 24;
+  cx.save(); cx.beginPath(); cx.arc(px, py, R + 2, 0, TAU); cx.clip();
   if (st.sprite) {
     const drawn = st.o.orbitR ? drawWorld(st.o, px, py, R, a) : st.tint ? drawStarCard(px, py, R * 0.8) : st.pocket ? drawHoleCard(px, py, R) : false;
     if (!drawn && !drawSprite(st.sprite, px, py, R, st.tint ? sunTinted : null, a)) circle(px, py, R, st.o.color);
-  }
-  else { cx.save(); cx.translate(px, py); cx.rotate(-0.6); cx.beginPath(); cx.moveTo(24, 0); cx.lineTo(-13, 12); cx.lineTo(-7, 0); cx.lineTo(-13, -12); cx.closePath(); cx.fillStyle = "#4fc3f7"; cx.fill(); cx.restore(); }
+  } else { cx.save(); cx.translate(px, py); cx.rotate(-0.6); cx.beginPath(); cx.moveTo(18, 0); cx.lineTo(-10, 9); cx.lineTo(-5, 0); cx.lineTo(-10, -9); cx.closePath(); cx.fillStyle = "#4fc3f7"; cx.fill(); cx.restore(); }
   cx.restore();
   cx.globalAlpha = a;
-  cx.textAlign = "left"; cx.fillStyle = "#e8f0fa"; cx.font = `18px "Share Tech Mono", monospace`;
-  cx.fillText(st.name.toUpperCase(), x0 + 96, y0 + 36);
-  cx.fillStyle = "#8fc3e8"; cx.font = `11px "Share Tech Mono", monospace`;
-  cx.fillText(B.cls || "", x0 + 96, y0 + 56);
-  let y = y0 + 100;
-  for (const [k, v] of rows) {
-    cx.fillStyle = "#6f86a8"; cx.fillText(k.toUpperCase(), x0 + 14, y);
-    cx.fillStyle = k === "inhabited" && B.inhabited ? "#8fe8b0" : "#cfe0ff"; cx.textAlign = "right"; cx.fillText(v, x0 + cw - 14, y); cx.textAlign = "left";
-    y += 17;
+  circle(px, py, R + 2, null, "#2a3a55", 1);
+  // the name: the prompt while naming, or the name
+  const nx = x0 + 80, blink = Math.floor(intro.realT * 2.5) % 2 === 0;
+  cx.textAlign = "left";
+  if (naming && !naming.done) {
+    cx.font = mono(22);
+    if (naming.typed.length) { cx.fillStyle = "#e8f0fa"; cx.fillText(naming.typed.toUpperCase(), nx, y0 + 40); }
+    else { cx.fillStyle = "rgba(159,180,204,0.45)"; cx.fillText("NAME", nx + 16, y0 + 40); }   // past the cursor
+    if (blink && !padUser) { const cw_ = naming.typed.length ? cx.measureText(naming.typed.toUpperCase()).width : 0; cx.fillStyle = "#8fe8b0"; cx.fillRect(nx + cw_ + 2, y0 + 22, 10, 22); }
+    cx.font = mono(10); cx.fillStyle = "#8fc3e8";
+    cx.fillText(padUser ? "NAME IT, OR ✕ LETS ROBERT PICK" : "NAME IT: TYPE, THEN ENTER", nx, y0 + 58);
+  } else {
+    cx.font = mono(22); cx.fillStyle = "#e8f0fa"; cx.fillText(st.name.toUpperCase(), nx, y0 + 40);
+    if (naming && naming.done) { cx.font = mono(10); cx.fillStyle = naming.done === "player" ? "#8fe8b0" : "#e8b463"; cx.fillText(naming.done === "player" ? "NAMED BY YOU" : "NAMED BY R. CUPBOARD", nx, y0 + 58); }
   }
-  y += 6; cx.strokeStyle = "#22304a"; cx.beginPath(); cx.moveTo(x0 + 12, y); cx.lineTo(x0 + cw - 12, y); cx.stroke(); y += 18;
-  cx.fillStyle = "#e8b463"; cx.fillText("MISSION NOTE  .  R. CUPBOARD", x0 + 14, y); y += 16;
-  cx.fillStyle = "#cfe0ff";
-  for (const l of noteLines) { cx.fillText(l, x0 + 14, y); y += 15; }
+  // the lines, typed out
+  let budget = st.typeDone ? 1e9 : st.typeT0 == null ? 0 : Math.floor((intro.realT - st.typeT0) * TYPE_CPS);
+  let y = y0 + head + 8, cursorAt = null;
+  cx.font = mono(12);
+  for (const [k, v] of lines) {
+    if (budget <= 0) break;
+    const kt = k ? k.toUpperCase() + ":" : "", vt = k ? v : ". " + v;
+    const kShown = kt.slice(0, budget); budget -= kt.length;
+    const vShown = budget > 0 ? vt.slice(0, budget) : ""; budget -= vt.length + 1;
+    const vx = k ? x0 + 150 : x0 + 30;
+    cx.fillStyle = "#6f86a8"; cx.fillText(kShown, x0 + 18, y);
+    cx.fillStyle = k === "" ? "#e8b463" : "#cfe0ff"; cx.fillText(vShown, vx, y);
+    if (budget <= 0) cursorAt = [vShown.length ? vx + cx.measureText(vShown).width + 2 : x0 + 18 + cx.measureText(kShown).width + 2, y];
+    y += lh;
+  }
+  if (cursorAt && blink) { cx.fillStyle = "#8fe8b0"; cx.fillRect(cursorAt[0], cursorAt[1] - 10, 7, 12); }
+  // Robert: the bubble and his portrait
+  const fx = x0 + pw - face / 2, fy = bubY + bubH / 2, bw = pw - face - 16;
+  cx.fillStyle = "rgba(8,12,22,0.9)"; cx.strokeStyle = "#2a3a55"; cx.lineWidth = 1;
+  cx.beginPath(); cx.roundRect(x0 + 0.5, bubY + 0.5, bw, bubH - 1, 8); cx.fill(); cx.stroke();
+  cx.beginPath(); cx.moveTo(x0 + bw, fy - 7); cx.lineTo(x0 + bw + 11, fy); cx.lineTo(x0 + bw, fy + 7); cx.closePath(); cx.fill();
+  cx.beginPath(); cx.moveTo(x0 + bw, fy - 7); cx.lineTo(x0 + bw + 11, fy); cx.lineTo(x0 + bw, fy + 7); cx.stroke();
+  cx.font = mono(12); cx.fillStyle = "rgba(207,224,255,0.7)"; cx.fillText("“" + RC_ONELINER + "”", x0 + 16, fy + 4);
+  cx.save(); cx.beginPath(); cx.arc(fx, fy, face / 2, 0, TAU); cx.clip();
+  cx.fillStyle = "#0b0f18"; cx.fillRect(fx - face / 2, fy - face / 2, face, face);
+  if (rcFace.complete && rcFace.naturalWidth) {   // cover, centred on the face
+    const iw = rcFace.naturalWidth, ih = rcFace.naturalHeight, sq = Math.min(iw, ih) * 0.86;
+    cx.drawImage(rcFace, iw * 0.5 - sq / 2, ih * 0.48 - sq / 2, sq, sq, fx - face / 2, fy - face / 2, face, face);
+  }
+  cx.restore();
+  circle(fx, fy, face / 2, null, "#8fc3e8", 1.5);
   cx.globalAlpha = 1;
 }
 
@@ -1273,8 +1417,9 @@ function simStep(h, offGravity) {
 //     and touching the stick again does not throw away a fine adjustment
 //   - after that, turning the stick turns the aim by the stick's turn times a gain that
 //     falls with the throw: 1 at half a push (big swings), PAD_AIM_FINE at the rim (fine work)
-//   - the gain by throw is the panel's Dynamic aim, off by default; otherwise the stick's
-//     turn is scaled by one flat Aim sensitivity (padAimSens)
+//   - the relative aim with the gain by throw is the panel's Dynamic aim, off by default.
+//     The default L2 is tank controls: the stick points, and the nose turns toward it at no
+//     more than Aim turn speed (padAimTurnDegS), pushed near the centre or at the rim
 //   - all of that only in AIM MODE (L2 held). In flight the stick points the nose where it
 //     points, smoothed and eased, and L2 then carries on from there
 //   - the nose eases onto that target (PAD_AIM_EASE), slower than the mouse's, so it glides
@@ -1294,14 +1439,18 @@ function padAim(realDt) {
     if (pad.aimAng == null) { pad.aimSx = pad.rx; pad.aimSy = pad.ry; }   // a fresh push starts from the stick, not from zero
     else { pad.aimSx += (pad.rx - pad.aimSx) * k; pad.aimSy += (pad.ry - pad.aimSy) * k; }
     const a = Math.atan2(pad.aimSy, pad.aimSx), m = Math.min(1, Math.hypot(pad.aimSx, pad.aimSy));
-    if (!pad.aiming) pad.aimTarget = a;   // in flight the stick simply points the nose; the fine aim is for L2
+    if (!pad.aiming || !S.padAimDynamic) pad.aimTarget = a;   // flight, and the default L2: the stick points, the turn rate is what differs
     else if (pad.aimAng == null) {
       if (pad.aimTarget == null || Math.abs(wrapAng(a - ship.nose)) > PAD_AIM_SNAP) pad.aimTarget = a;
-    } else pad.aimTarget += wrapAng(a - pad.aimAng) * (S.padAimDynamic ? padAimGain(m) : S.padAimSens);
+    } else pad.aimTarget += wrapAng(a - pad.aimAng) * padAimGain(m);
     pad.aimAng = a;
   }
   if (pad.aimTarget == null) return;
-  const d = wrapAng(pad.aimTarget - ship.nose), e = d * Math.min(1, realDt * PAD_AIM_EASE);
+  let d = wrapAng(pad.aimTarget - ship.nose), e = d * Math.min(1, realDt * PAD_AIM_EASE);
+  // AIM DOWN SIGHTS (L2, the default): tank controls. The nose turns toward the stick no
+  // faster than padAimTurnDegS, however far or hard the stick is pushed, a flick to the
+  // far side included; the ease still takes the last few degrees, so it settles, not snaps.
+  if (pad.aiming && !S.padAimDynamic) { const cap = S.padAimTurnDegS * Math.PI / 180 * realDt; if (Math.abs(e) > cap) e = Math.sign(e) * cap; }
   ship.nose += e;
   pad.aimTarget = ship.nose + (d - e);   // the target kept on the nose's winding
   pad.aimNose = ship.nose;
@@ -2963,7 +3112,12 @@ function pollPad(realDt) {
   if (firm || anyDown || pad.l2 > PAD_TRIGGER || pad.r2 > PAD_TRIGGER) { if (!pad.owns) mouseDrift = 0; pad.owns = true; }
   const finish = () => { pad.prev = pressed; pad.prevL2 = pad.l2; pad.prevR2 = pad.r2; pad.stickSkip = firm; };
   // the briefing: any button, a trigger, or a firm push of a stick skips it
-  if (intro) { if (anyDown || pad.l2 > PAD_TRIGGER || pad.r2 > PAD_TRIGGER || firm) skipIntro(); finish(); return; }   // skipIntro runs once
+  if (intro) {
+    if (intro.naming) {   // at a planet: CROSS lets Robert pick (a controller cannot type), any other button skips the lot
+      if (!intro.naming.done) { if (down(PADB.CROSS)) resolveName(); else if (pressed.some((b, i) => b && !pad.prev[i])) skipIntro(); }
+    } else if (anyDown || pad.l2 > PAD_TRIGGER || pad.r2 > PAD_TRIGGER || firm) skipIntro();   // skipIntro runs once
+    finish(); return;
+  }
 
   const manual = S.padScheme === "manual";
   const l2Down = pad.l2 > PAD_TRIGGER && pad.prevL2 <= PAD_TRIGGER, r2Down = pad.r2 > PAD_TRIGGER && pad.prevR2 <= PAD_TRIGGER;
@@ -3170,7 +3324,7 @@ function drawPadMenu(W, H) {
 const KEYMAP = { KeyW: "w", KeyA: "a", KeyS: "s", KeyD: "d", KeyQ: "q", KeyE: "e" };
 addEventListener("keydown", e => {
   if (e.target.tagName === "INPUT") return;
-  if (intro) { skipIntro(); e.preventDefault(); return; }
+  if (intro) { introKey(e); e.preventDefault(); return; }
   pad.owns = false;   // a key takes the game back from the controller
   if (KEYMAP[e.code]) { keys[KEYMAP[e.code]] = true; e.preventDefault(); }
   // Shift toggles the pause; E, the other way along the slider, also ends it
@@ -3195,7 +3349,7 @@ cv.addEventListener("mousemove", e => {
   mouse.sx = e.clientX; mouse.sy = e.clientY;
 });
 cv.addEventListener("mousedown", e => {
-  if (intro) { skipIntro(); return; }
+  if (intro) { if (intro.naming) resolveName(); else skipIntro(); return; }   // at a planet a click keeps the name typed, or lets Robert pick
   if (e.button === 0 && pad.active) {   // a click on a scheme tab in the controller menu
     const t = padMenuTabs.find(r => e.clientX >= r.x && e.clientX <= r.x + r.w && e.clientY >= r.y && e.clientY <= r.y + r.h);
     if (t) { switchPadScheme(t.scheme); return; }
@@ -3221,7 +3375,7 @@ cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { cam.zoom = Math.max(0.4, Math.min(6, cam.zoom * Math.exp(-e.deltaY * 0.0012))); e.preventDefault(); }, { passive: false });
 
 // ============================== TEST PANEL ======================================
-const STORE_KEY = "galaxytable.v36";   // bumped: saved settings would otherwise hide the new default
+const STORE_KEY = "galaxytable.v38";   // bumped: saved settings would otherwise hide the new default
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
   catch { return { ...DEFAULTS }; }
@@ -3238,8 +3392,8 @@ const PANEL = [
   ["l", "thrustAccel", "Engine power|how fast the ship speeds up", 300, 30000],
   ["r", "linearDamp", "Ship braking|how fast the ship stops on its own", 0, 2, 0.05],
   ["b", "wasdRelative", "Relative WASD|W flies where you aim"],
-  ["r", "padAimSens", "Aim sensitivity|controller: aim speed while holding L2", 0.1, 1, 0.05],
-  ["b", "padAimDynamic", "Dynamic aim|controller: finer aim at the stick's edge"],
+  ["r", "padAimTurnDegS", "Aim turn speed|controller: degrees per second while holding L2", 10, 180, 5],
+  ["b", "padAimDynamic", "Dynamic aim|controller: old L2 aim, finer at the stick's edge"],
   ["b", "padPowerRelative", "Relative power|controller: push toward the aim for power"],
   ["a", "ADVANCED"],   // folded by default; the camera is an in-game control (C), not a dial
   ["r", "gravPull", "Gravitizer pull|how strong", 0.005, 0.2, 0.005],
@@ -3350,6 +3504,8 @@ window.RIG = {
   introTo: (t) => { if (!intro) startIntro(); intro.t = t; intro.pose = introPose(t); setPersp(intro.pose); },
   introTick: (s) => { if (intro) stepIntro(s); },
   skipIntro: () => skipIntro(),
+  naming: () => intro && intro.naming ? { idx: intro.naming.idx, key: intro.stops[intro.naming.idx].key, typed: intro.naming.typed, timer: intro.naming.timer, done: intro.naming.done, typedOut: inspectorTyped(intro.stops[intro.naming.idx]) } : null,
+  names: () => bodies.map(b => b.name),
   pad: () => ({ active: pad.active, owns: pad.owns, teleporting: pad.teleporting, aiming: pad.aiming, power: pad.power }),
   project: (x, y) => worldToScreen(x, y),
   cam: () => ({ ...cam }),
