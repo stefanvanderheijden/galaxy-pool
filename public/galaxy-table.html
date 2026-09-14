@@ -1469,7 +1469,8 @@ function padAimGain(m) {
 function padAim(realDt) {
   // something else turned the nose (a reset, the mouse, a pull-back): the target follows it
   if (pad.aimTarget != null && pad.aimNose !== ship.nose) pad.aimTarget = ship.nose;
-  if (pad.rm <= 0) { pad.aimSx = pad.aimSy = 0; pad.aimAng = null; }
+  // let go of the stick and the turn stops where the nose is, with no drift on to the old target
+  if (pad.rm <= 0) { pad.aimSx = pad.aimSy = 0; pad.aimAng = null; if (pad.aimTarget != null) pad.aimTarget = ship.nose; }
   else {
     const k = 1 - Math.exp(-realDt / PAD_AIM_SMOOTH_S);
     if (pad.aimAng == null) { pad.aimSx = pad.rx; pad.aimSy = pad.ry; }   // a fresh push starts from the stick, not from zero
