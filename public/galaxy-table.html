@@ -877,7 +877,8 @@ function stepIntro(realDt) {
 // NAMING. The inspector types itself out; the player types a name and Enter (or a click)
 // keeps it. Enter on nothing, or CROSS on a controller, lets Robert name it: the level's
 // own name for it.
-const TYPE_CPS = 42;   // inspector characters per second
+const TYPE_CPS = 42;
+const NAME_MAX = 30;   // characters in a body's name   // inspector characters per second
 function stepNaming(realDt) {
   const n = intro.naming, st = intro.stops[n.idx];
   if (n.done) { n.doneT -= realDt; if (n.doneT <= 0) { st.resolved = true; intro.naming = null; } return; }
@@ -897,7 +898,7 @@ function introKey(e) {
   if (e.code === "Escape") { skipIntro(); return; }
   if (e.key === "Enter") { resolveName(); return; }
   if (e.key === "Backspace") { n.typed = n.typed.slice(0, -1); return; }
-  if (e.key.length === 1 && n.typed.length < 16 && /[\p{L}\p{N} '.-]/u.test(e.key)) n.typed += e.key;
+  if (e.key.length === 1 && n.typed.length < NAME_MAX && /[\p{L}\p{N} '.-]/u.test(e.key)) n.typed += e.key;
 }
 // A ring in the table plane: a circle in play, an ellipse (well, a polyline) in the flyover.
 function drawRing(wx, wy, rAU, stroke, width, dash) {
@@ -1013,16 +1014,18 @@ function drawInspector(st, a, W, H) {
   circle(px, py, R + 2, null, "#2a3a55", 1);
   // the name: the prompt while naming, or the name
   const nx = x0 + 80, blink = Math.floor(intro.realT * 2.5) % 2 === 0;
+  // a long name shrinks to fit the panel (down to 11 px) rather than running off it
+  const fitName = t => { const room = x0 + pw - 16 - nx - 14; let px_ = 22; cx.font = mono(px_); while (px_ > 11 && cx.measureText(t).width > room) { px_--; cx.font = mono(px_); } };
   cx.textAlign = "left";
   if (naming && !naming.done) {
-    cx.font = mono(22);
+    fitName(naming.typed.toUpperCase());
     if (naming.typed.length) { cx.fillStyle = "#e8f0fa"; cx.fillText(naming.typed.toUpperCase(), nx, y0 + 40); }
     else { cx.fillStyle = "rgba(159,180,204,0.45)"; cx.fillText("???", nx + 16, y0 + 40); }   // unnamed, past the cursor
     if (blink && !padUser) { const cw_ = naming.typed.length ? cx.measureText(naming.typed.toUpperCase()).width : 0; cx.fillStyle = "#8fe8b0"; cx.fillRect(nx + cw_ + 2, y0 + 22, 10, 22); }
     cx.font = mono(10); cx.fillStyle = "#8fc3e8";
     cx.fillText(padUser ? "NAME IT, OR ✕ LETS ROBERT PICK" : "TYPE A NAME, THEN ENTER", nx, y0 + 58);
   } else {
-    cx.font = mono(22); cx.fillStyle = "#e8f0fa"; cx.fillText((st.o && st.o.name || st.name).toUpperCase(), nx, y0 + 40);
+    const shown = (st.o && st.o.name || st.name).toUpperCase(); fitName(shown); cx.fillStyle = "#e8f0fa"; cx.fillText(shown, nx, y0 + 40);
     if (naming && naming.done) { cx.font = mono(10); cx.fillStyle = naming.done === "player" ? "#8fe8b0" : "#e8b463"; cx.fillText(naming.done === "player" ? "NAMED BY YOU" : "NAMED BY R. CUPBOARD", nx, y0 + 58); }
   }
   // the lines, typed out
