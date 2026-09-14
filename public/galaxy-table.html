@@ -59,9 +59,9 @@
   that lights up as you press. TWO SCHEMES, switched with OPTIONS or by clicking the tabs:
     MANUAL CLOCK
       L STICK   fly in screen directions (up is up), analog
-      R STICK   aim: a push well away from the nose points it there; after that the
-                stick turns the aim, 1:1 at half a push and 5x finer at the rim, smoothed
-                and eased; the nose holds where it was let go
+      R STICK   aim: in flight the nose points where the stick points (smoothed, eased).
+                With L2 held, the fine aim: the stick turns the aim, 1:1 at half a push
+                and 5x finer at the rim. The nose holds where it was let go
       L1 / R1   slower / faster time (L1 held to the end pauses, as Q does)
       SQUARE    pause on / off (as Shift)
       L2 hold   AIM MODE: time holds and the R stick still aims. The power follows the
@@ -1008,6 +1008,7 @@ function resolveContacts(list, freeBalls, events) {
   if (S.planetsCollide) for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
     const p = list[i], q = list[j];
     if (!p.alive || !q.alive || (!p.struck && !q.struck)) continue;
+    if (p.id === "star" || q.id === "star") continue;   // a world does not bounce off Solaris, it burns (the endings)
     if (collide(p, p.mass, ballR(p), q, q.mass, ballR(q))) {
       for (const w of [p, q]) if (!w.struck) { w.struck = true; events.push({ kind: "struck", b: w, x: w.x, y: w.y }); }
     }
@@ -1177,7 +1178,7 @@ function simStep(h, offGravity) {
     if (p) {
       b.alive = false; score.potted++; flash(b.x, b.y, 0.3, "#b48cff"); burst(b.x, b.y, 0.12, "#b48cff");
       note("POTTED: " + b.name + " into " + p.name, "#b48cff");
-    } else if (STAR.alive && dist(b.x, b.y, STAR.x, STAR.y) < starR() + ballR(b) * 0.5) {
+    } else if (STAR.alive && dist(b.x, b.y, STAR.x, STAR.y) < starR() + ballR(b)) {
       b.alive = false; score.burned++; score.fouls++; flash(b.x, b.y, 0.25, "#ff5030"); burst(b.x, b.y, 0.1, "#ff5030");
       note("BURNED: " + b.name + " (foul)", "#ff5030");
     }
@@ -1264,6 +1265,8 @@ function simStep(h, offGravity) {
 //     and touching the stick again does not throw away a fine adjustment
 //   - after that, turning the stick turns the aim by the stick's turn times a gain that
 //     falls with the throw: 1 at half a push (big swings), PAD_AIM_FINE at the rim (fine work)
+//   - all of that only in AIM MODE (L2 held). In flight the stick points the nose where it
+//     points, smoothed and eased, and L2 then carries on from there
 //   - the nose eases onto that target (PAD_AIM_EASE), slower than the mouse's, so it glides
 const PAD_AIM_SMOOTH_S = 0.06, PAD_AIM_SNAP = 25 * Math.PI / 180, PAD_AIM_FINE = 0.2, PAD_AIM_EASE = 12;
 const PAD_AIM_GAIN_FULL_AT = 0.55, PAD_AIM_GAIN_FINE_AT = 0.92;   // throw where the gain starts to fall, and where it bottoms out
@@ -1281,7 +1284,8 @@ function padAim(realDt) {
     if (pad.aimAng == null) { pad.aimSx = pad.rx; pad.aimSy = pad.ry; }   // a fresh push starts from the stick, not from zero
     else { pad.aimSx += (pad.rx - pad.aimSx) * k; pad.aimSy += (pad.ry - pad.aimSy) * k; }
     const a = Math.atan2(pad.aimSy, pad.aimSx), m = Math.min(1, Math.hypot(pad.aimSx, pad.aimSy));
-    if (pad.aimAng == null) {
+    if (!pad.aiming) pad.aimTarget = a;   // in flight the stick simply points the nose; the fine aim is for L2
+    else if (pad.aimAng == null) {
       if (pad.aimTarget == null || Math.abs(wrapAng(a - ship.nose)) > PAD_AIM_SNAP) pad.aimTarget = a;
     } else pad.aimTarget += wrapAng(a - pad.aimAng) * padAimGain(m);
     pad.aimAng = a;
@@ -1749,7 +1753,7 @@ function buildGhost() {
       if (!b.alive) continue;
       const pk = pocketAt(b.x, b.y, 0);
       if (pk) { b.alive = false; if (track.has(b.id)) addFate("pot", b.x, b.y, b.name); }
-      else if (gstar.alive && dist(b.x, b.y, gstar.x, gstar.y) < starR() + ballR(b) * 0.5) { b.alive = false; if (track.has(b.id)) addFate("star", b.x, b.y, b.name); }
+      else if (gstar.alive && dist(b.x, b.y, gstar.x, gstar.y) < starR() + ballR(b)) { b.alive = false; if (track.has(b.id)) addFate("star", b.x, b.y, b.name); }
     }
     if (gstar.alive && pocketAt(gstar.x, gstar.y, 0)) { gstar.alive = false; addFate("pot", gstar.x, gstar.y, "Solaris"); }
     for (const k of live) if (pocketAt(k.x, k.y, 0)) { k.dead = true; if (k === pending) addFate("pot", k.x, k.y, null, true); }
