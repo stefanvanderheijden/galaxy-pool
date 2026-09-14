@@ -1066,6 +1066,7 @@ function drawInspector(st, a, W, H) {
 let sliderT = 0.5, sliderShown = 0.5;       // 0..1 position, and its eased display twin
 let paused = false;
 let charging = false, charge = 0, reaching = false;   // reaching: LMB down in POWER LINE
+let mouseADS = false;   // HOLD TO POWER UP, mouse: RMB pressed mid-charge holds time until RMB is let go
 let qArmed = false;   // a fresh Q press may engage the pause at the slider's end, once
 let timePaused = false, lastPower = 0.5, freezeShown = 0, teleportCd = 0, ghostTick = 0;   // Shift's toggle, the aim line's idle power, the vignette
 let drag = null;                            // {ax, ay} screen anchor while a DRAG shot is held
@@ -1505,7 +1506,11 @@ function aimNose(realDt) {
     let d = want - ship.nose;
     while (d > Math.PI) d -= TAU;
     while (d < -Math.PI) d += TAU;
-    ship.nose += d * Math.min(1, realDt * S.aimEase);
+    let e = d * Math.min(1, realDt * S.aimEase);
+    // AIM DOWN SIGHTS on the mouse (RMB mid-charge): the controller's tank speed, the nose
+    // turning toward the cursor no faster than Aim turn speed
+    if (mouseADS) { const cap = S.padAimTurnDegS * Math.PI / 180 * realDt; if (Math.abs(e) > cap) e = Math.sign(e) * cap; }
+    ship.nose += e;
   }
 }
 function thrustVector() {
@@ -1670,8 +1675,13 @@ function cycleAimMode(forPad) {
   pad.wasAiming = false;   // a held L2 starts the new style fresh
   note("AIM" + (forPad ? " (CONTROLLER): " : ": ") + AIM_NAMES[S[k]], "#8fc3e8"); aimSwitchAt = performance.now();
 }
-const AIM_HELP = { reach: "the cursor's distance is the power", charge: "power up, the nose aims", draw: "pull back for power, swing to pivot" };
-function aiming() { return !!drag || charging || reaching || pad.aiming; }   // LMB is down on a shot, in any mode
+const AIM_HELP = { reach: "the cursor's distance is the power", charge: "power up while you fly, time runs", draw: "pull back for power, swing to pivot" };
+// aiming(): a shot that HOLDS TIME (a pull-back, the power line, the controller's L2, the
+// mouse's aim down sights). shotHeld(): any shot in the hand, including the hold-to-power-up
+// charges that fly on with time running (the mouse's LMB, the controller's hip fire), which
+// is what makes the forecast loud.
+function aiming() { return !!drag || reaching || pad.aiming || mouseADS; }
+function shotHeld() { return aiming() || charging || pad.hipCharging; }
 // POWER LINE: toward the cursor, exactly, and the cursor's distance from the ship is the
 // power: nothing inside REACH_DEAD_AU of the hull, full at reachMaxAU (times system size).
 // In table units rather than pixels, so the window size does not change the shot.
@@ -2071,7 +2081,8 @@ function frame(now) {
   curWarp = warp;
 
   aimNose(realDt);
-  if (charging) charge = Math.min(1, charge + realDt / S.chargeSeconds);   // real seconds: time is held
+  if (charging) charge = Math.min(1, charge + realDt / S.chargeSeconds);   // real seconds, whether time runs (hip) or holds (RMB)
+  if (mouseADS && !charging) mouseADS = false;
 
   const thrusting = !!thrustVector();
   if (stab && thrusting) overrideStabiliser("engine");
@@ -2115,7 +2126,7 @@ function frame(now) {
   // LMB up, the forecast is rebuilt every other frame (it is being looked at, not aimed,
   // and the build is the frame's biggest cost); under the hand, every frame
   ghostTick ^= 1;
-  if (S.projections) { if (aiming() || !ghost || ghostTick) buildGhost(); easeGhost(realDt); } else ghost = null;
+  if (S.projections) { if (shotHeld() || !ghost || ghostTick) buildGhost(); easeGhost(realDt); } else ghost = null;
 
   const tx = S.camFollow ? ship.x : ORIGIN.x, ty = S.camFollow ? ship.y : ORIGIN.y;
   cam.x += (tx - cam.x) * Math.min(1, realDt * 4);
@@ -2658,7 +2669,7 @@ function draw(realDt) {
   // lengths are this rig's own (a year, eased), not 010's short horizon. LMB up, the whole
   // forecast is drawn at FORECAST_IDLE of its strength: always there, loud under the hand.
   if (ghost) {
-    const m = aiming() ? 1 : FORECAST_IDLE;
+    const m = shotHeld() ? 1 : FORECAST_IDLE;
     for (const w of ghost.worlds) if (!w.direct) strokePtsFade(w.shown || w.pts, w.color, 0.28 * m, 1, [3, 7]);
     for (const pts of ghost.balls) strokePts(pts, "#ffffff", 0.22 * m, 1, [2, 7]);
     for (const w of ghost.worlds) if (w.direct) strokePtsFade(w.shown || w.pts, w.color, 0.85 * m, 3, [9, 5]);   // the struck world: the thick line
@@ -2668,7 +2679,7 @@ function draw(realDt) {
       // times, and all of it loud drew a web across the table. The length is all still here.
       const cut = ghost.bankAt != null ? ghost.bankAt + 1 : ghost.pending.length;
       const leg = ghost.pending.slice(0, cut), rest = ghost.pending.slice(Math.max(0, cut - 1));
-      if (aiming()) {                               // pooling: loud
+      if (shotHeld()) {                             // pooling: loud
         strokePts(leg, "#ffffff", 0.9, 1.2);        // the cue ball: the thin line
         if (rest.length > 1) strokePts(rest, "#ffffff", 0.3, 1, [4, 6]);
       } else {                                      // just looking: a faint thin dash
@@ -2766,7 +2777,7 @@ function draw(realDt) {
     }
     // charge bar and the cue
     const p = pendingShot();
-    if (p && (reaching || pad.aiming || pad.hipCharging)) {
+    if (p && (reaching || charging || pad.aiming || pad.hipCharging)) {
       // POWER LINE: a bar laid along the shot's own direction, as long as the power, in the
       // power's colour, with a faint tick where full power would reach. Not a ring: rings
       // round the ship read as orbits. A pulse of light runs out along it from the hull.
@@ -3002,7 +3013,9 @@ function drawHud(W, H) {
      + (balls.length > 1 || (balls.length === 1 && acb.mode !== "empty") ? "   " + balls.length + " BALL" + (balls.length > 1 ? "S" : "") + " OUT" : ""),
      acb.mode === "attached" ? "#e8f0fa" : acb.mode === "lost" ? "#ff5030" : "#8fe8b0"],
     stab ? ["STABILISER burning, " + stab.err.toFixed(2) + " AU/yr to go.  WASD or Shift to override", "#e8b463"] : null,
-    timePaused || aiming() ? ["TIME PAUSED" + (pad.aiming ? (S.padAimMode === "charge" ? ": hold R2 to power up, release to shoot" : !S.padPowerRelative ? ": left stick up for more power, down for less, R2 shoots" : S.padAimMode === "draw" ? ": pull the left stick back for more power, push it forward for less, R2 shoots" : ": left stick along the aim for more power, against it for less, R2 shoots") : drag ? ": pull back for power, swing round to pivot, release to shoot" : charging ? ": powering up, the nose aims, release to shoot" : reaching ? ": further from the ship is harder, release to shoot" : pad.active && pad.owns ? ".  Square resumes.  Hold L2 to aim" : ".  Shift or E resumes.  Hold LMB to aim"), "#8fc3e8"] : null,
+    charging && !mouseADS && !timePaused ? ["POWERING UP: release LMB to shoot.  RMB holds time (let go of RMB to cancel)", "#8fc3e8"] : null,
+    pad.hipCharging ? ["POWERING UP: release R2 to shoot.  L2 holds time (let go of L2 to cancel)", "#8fc3e8"] : null,
+    timePaused || aiming() ? ["TIME PAUSED" + (pad.aiming ? (S.padAimMode === "charge" ? ": hold R2 to power up, release to shoot" : !S.padPowerRelative ? ": left stick up for more power, down for less, R2 shoots" : S.padAimMode === "draw" ? ": pull the left stick back for more power, push it forward for less, R2 shoots" : ": left stick along the aim for more power, against it for less, R2 shoots") : drag ? ": pull back for power, swing round to pivot, release to shoot" : mouseADS ? ": aiming down sights, release LMB to shoot, release RMB to cancel" : reaching ? ": further from the ship is harder, release to shoot" : pad.active && pad.owns ? ".  Square resumes.  Hold L2 to aim" : ".  Shift or E resumes.  Hold LMB to aim"), "#8fc3e8"] : null,
   ].filter(Boolean);
   lines.forEach((l, i) => { cx.fillStyle = l[1]; cx.fillText(l[0], 14, 22 + i * 17); });
   notices.forEach((n, i) => { cx.fillStyle = colA(n.color, Math.min(1, (20 - n.t) / 4)); cx.fillText(n.text, 14, H - 20 - (notices.length - 1 - i) * 16); });
@@ -3012,7 +3025,7 @@ function drawHud(W, H) {
   if (pad.active) drawPadMenu(W, H);
   else {
   const CONTROLS = [["WASD", "fly"], ["MOUSE", "aim: the nose is the shot"], ["LMB hold", AIM_HELP[S.aimMode]], ["TAB", "next aim mode: " + AIM_NAMES[AIM_NEXT[S.aimMode]].toLowerCase()],
-                    ["LMB release", "shoot"], ["RMB", "teleport, short range, 2 s recharge"], ["SHIFT", "pause on / off"], ["Q / E", "slower / faster time (Q to the end pauses)"],
+                    ["LMB release", "shoot"], ["RMB", S.aimMode === "charge" ? "teleport; mid-charge: aim down sights" : "teleport, short range, 2 s recharge"], ["SHIFT", "pause on / off"], ["Q / E", "slower / faster time (Q to the end pauses)"],
                     ["SPACE", "catch a ball / load the next"], ["C", "camera"], ["R", "rack again"], ["H", "hide the settings"]];
   cx.font = `11px "Share Tech Mono", monospace`;
   const lh = 15, pw = 100 + Math.max(...CONTROLS.map(c => cx.measureText(c[1]).width)) + 14, ph = CONTROLS.length * lh + 12, px0 = W - pw - 14, py0 = H - ph - 14;
@@ -3402,7 +3415,7 @@ addEventListener("keydown", e => {
   if (e.code === "KeyR") resetWorld();
   if (e.code === "KeyP") paused = !paused;
   if (e.code === "KeyH") { const p = document.getElementById("panel"); p.style.display = p.style.display === "none" ? "" : "none"; }
-  if (e.code === "Escape") { charging = false; charge = 0; drag = null; reaching = false; }
+  if (e.code === "Escape") { charging = false; charge = 0; drag = null; reaching = false; mouseADS = false; }
   if (e.code === "Space") { spaceKey(); e.preventDefault(); }
 });
 addEventListener("keyup", e => { if (KEYMAP[e.code]) keys[KEYMAP[e.code]] = false; });
@@ -3420,21 +3433,32 @@ cv.addEventListener("mousedown", e => {
     const t = padMenuTabs.find(r => e.clientX >= r.x && e.clientX <= r.x + r.w && e.clientY >= r.y && e.clientY <= r.y + r.h);
     if (t) { switchPadScheme(t.scheme); return; }
   }
+  // RMB mid-charge (HOLD TO POWER UP): aim down sights, as L2 on the controller. Time holds,
+  // the charge carries on; letting go of RMB cancels the shot. Otherwise RMB teleports.
+  if (e.button === 2 && charging) { mouseADS = true; note("AIM: power held at " + Math.round(charge * 100) + "%", "#8fc3e8"); return; }
   if (e.button === 2) { teleportTo(e.clientX, e.clientY); return; }
   // A BARE NOSE (the ball is out, or was destroyed and the next is on its way) with a ball
   // in the chamber: LMB loads it now. This press only loads; the next one aims.
-  if (e.button === 0 && (acb.mode === "empty" || acb.mode === "lost") && chamber.length && !score.failed && !score.won) { newBallNow(true); return; }
+  if (e.button === 0 && (acb.mode === "empty" || acb.mode === "lost") && chamber.length && !score.failed && !score.won) {
+    newBallNow(true);
+    if (S.aimMode !== "charge") return;   // HOLD TO POWER UP loads and starts the charge in one press, as R2 does
+  }
   if (e.button !== 0 || acb.mode !== "attached") return;
   if (S.aimMode === "reach") { reaching = true; return; }             // POWER LINE
-  if (S.aimMode === "charge") { charging = true; charge = 0; return; }  // HOLD TO POWER UP
+  if (S.aimMode === "charge") { charging = true; charge = 0; return; }  // HOLD TO POWER UP: hip fire, time runs on
   // DRAW BACK: the press takes the nose's direction; from here the pull sets power and can pivot
   drag = { ax: e.clientX, ay: e.clientY, dir: [Math.cos(ship.nose), Math.sin(ship.nose)] };
 });
 addEventListener("mouseup", e => {
+  if (e.button === 2 && mouseADS) { mouseADS = false; charging = false; charge = 0; note("SHOT CANCELLED", "#8fc3e8"); return; }
   if (e.button !== 0) return;
   const p = pendingShot();
   if (drag) { if (p && p[2] > 0.02) { lastPower = p[2]; fireAcb(p[0], p[1], p[2]); } drag = null; }
-  else if (charging) { const pw = Math.max(0.08, charge); if (p) { lastPower = pw; fireAcb(p[0], p[1], pw); } charging = false; charge = 0; }
+  else if (charging) {
+    const pw = Math.max(0.08, charge);
+    if (p) { lastPower = pw; fireAcb(p[0], p[1], pw); if (!mouseADS) note("HIP FIRE at " + Math.round(pw * 100) + "%", "#8fc3e8"); }
+    charging = false; charge = 0; mouseADS = false;
+  }
   else if (reaching) { if (p && p[2] > 0.02) { lastPower = p[2]; fireAcb(p[0], p[1], p[2]); } reaching = false; }
 });
 cv.addEventListener("contextmenu", e => e.preventDefault());
@@ -3458,7 +3482,7 @@ const PANEL = [
   ["l", "thrustAccel", "Engine power|how fast the ship speeds up", 300, 30000],
   ["r", "linearDamp", "Ship braking|how fast the ship stops on its own", 0, 2, 0.05],
   ["b", "wasdRelative", "Relative WASD|W flies where you aim"],
-  ["r", "padAimTurnDegS", "Aim turn speed|controller: degrees per second while holding L2", 10, 180, 5],
+  ["r", "padAimTurnDegS", "Aim turn speed|degrees per second while aiming down sights", 10, 180, 5],
   ["b", "padAimDynamic", "Dynamic aim|controller: old L2 aim, finer at the stick's edge"],
   ["b", "padPowerRelative", "Relative power|controller: push toward the aim for power"],
   ["a", "ADVANCED"],   // folded by default; the camera is an in-game control (C), not a dial
