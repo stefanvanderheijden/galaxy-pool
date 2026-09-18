@@ -13,6 +13,13 @@
   which is to say it is closer to actual pool. Double-click to run, like every mockup
   in this folder. Self-contained: the level-01 sprites are baked in as data URIs.
 
+  THE LEVEL IS DATA (GAME_DESIGN §11). The table (star, planets, pockets, belt, where the
+  ship spawns, the loadout, every briefing card and Robert's notes) is the JSON block
+  <script id="level-01"> just above the code, in the table format, schemaVersion 2.
+  LEVEL_SCHEMA declares every kind, trait and field; loadLevel() rejects anything else
+  with a message on screen, and there is no hardcoded table behind it. Still panel
+  settings for now (§11.5 step 2): the belt's radius, the pockets' pull, reach and size.
+
   THE LOOP
     1. The ship orbits the star with the ACB attached. Q/E slide time.
     2. Aim and shoot the ACB (two aim modes, Tab swaps them in play).
@@ -381,6 +388,179 @@
 <canvas id="cv"></canvas>
 <div id="panel"></div>
 <div id="chamber"></div>
+<!-- THE LEVEL. GAME_DESIGN §11: the table is data, read by loadLevel() against LEVEL_SCHEMA
+     below, and nothing in the script restates it. Edit it here until the rig becomes a
+     project with levels/*.json (§11.5, step 4). -->
+<script type="application/json" id="level-01">
+{
+  "schemaVersion": 2,
+  "id": "level-01",
+  "name": "Solaris",
+  "ship": {
+    "spawn": {
+      "radius": 1.19,
+      "angle": 3.927
+    },
+    "traits": [
+      "inhabited"
+    ],
+    "brief": {
+      "class": "The ark",
+      "note": "That is us, flying free of gravity, so mind the worlds coming round: they do not steer. One cue ball on the nose, two in the chamber. Shoot, then go and fetch it. Good hunting, captain."
+    }
+  },
+  "loadout": {
+    "nose": "standard",
+    "chamber": [
+      "standard",
+      "standard"
+    ]
+  },
+  "bodies": [
+    {
+      "kind": "star",
+      "id": "star",
+      "name": "Solaris",
+      "sprite": "sun",
+      "mass": 0.45,
+      "drawR": 0.012,
+      "color": "#ff4b2b",
+      "brief": {
+        "class": "M-type main sequence",
+        "diameterKm": 625328,
+        "tempC": 3126.9,
+        "note": "Red dwarf, captain. Cold system: every world out here is frozen. It burns any cue ball you put into it but two: the Night ball, which strikes it and comes back, and a thermonuclear, which strikes it hardest and is spent there. A gravitizer will drag it about from a distance, so long as you keep the ball off it. You will need one: the table is not clear until Solaris is in a pocket, so chamber one of them and leave the star for last."
+      }
+    },
+    {
+      "kind": "planet",
+      "id": "smell",
+      "name": "Red",
+      "sprite": "red",
+      "mass": 0.0000041,
+      "drawR": 0.0068,
+      "color": "#d98c4a",
+      "atmosphere": "#c9a84e",
+      "orbit": {
+        "around": "star",
+        "radius": 0.55,
+        "angle": 2.35
+      },
+      "brief": {
+        "class": "Terrestrial, veiled",
+        "diameterKm": 14661,
+        "tempC": -9.2,
+        "note": "The heavy one. Sulphur haze over a thick envelope, and it takes a thermonuclear without cracking. It will not go far on a soft shot, so lean in."
+      }
+    },
+    {
+      "kind": "planet",
+      "id": "hearing",
+      "name": "Terra",
+      "sprite": "terra",
+      "mass": 0.00000155,
+      "drawR": 0.0052,
+      "color": "#7fa8a0",
+      "atmosphere": "#7fb0e6",
+      "orbit": {
+        "around": "star",
+        "radius": 0.92,
+        "angle": 0.62
+      },
+      "traits": [
+        "fragile",
+        "inhabited"
+      ],
+      "brief": {
+        "class": "Terrestrial",
+        "diameterKm": 10472,
+        "tempC": -155.2,
+        "note": "Somebody is home. Rock under ice, and it breaks if you put a thermonuclear on it, so don't. There is a pulse coming off it the survey cannot account for. Not our problem today."
+      }
+    },
+    {
+      "kind": "planet",
+      "id": "touch",
+      "name": "Vera",
+      "sprite": "vera",
+      "mass": 4.2e-7,
+      "drawR": 0.0038,
+      "color": "#cfd8e3",
+      "orbit": {
+        "around": "star",
+        "radius": 1.45,
+        "angle": 5.583
+      },
+      "traits": [
+        "fragile"
+      ],
+      "brief": {
+        "class": "Terrestrial, glaciated",
+        "diameterKm": 7181,
+        "tempC": -205.2,
+        "note": "Light, and already nearest a pocket. This is your opening shot, young cap'n. Those arcs on the surface? No tide in this system makes those. Pool it anyway."
+      }
+    },
+    {
+      "kind": "pocket",
+      "id": "Styx",
+      "name": "Styx",
+      "color": "#b48cff",
+      "position": {
+        "radius": 2.085857,
+        "angle": 0.6013
+      },
+      "traits": [
+        "eats-belt"
+      ],
+      "brief": {
+        "class": "Singularity",
+        "diameterKm": 30,
+        "tempC": -270,
+        "note": "The pocket. Pulls from every direction inside half an AU, and it takes the ship as happily as a planet. It sits close to the belt and it is eating it, so the cushions have a clock on them. And captain: the belt is rock. Fly through a gap or not at all."
+      }
+    },
+    {
+      "kind": "pocket",
+      "id": "Lethe",
+      "name": "Lethe",
+      "color": "#b48cff",
+      "position": {
+        "radius": 2.085857,
+        "angle": 2.695695
+      },
+      "brief": {
+        "class": "Singularity",
+        "diameterKm": 30,
+        "tempC": -270,
+        "note": "Pocket two. Same pull, quieter neighbourhood. A world that goes in does not come back, which is the point."
+      }
+    },
+    {
+      "kind": "pocket",
+      "id": "Acheron",
+      "name": "Acheron",
+      "color": "#b48cff",
+      "position": {
+        "radius": 2.085857,
+        "angle": 4.79009
+      },
+      "brief": {
+        "class": "Singularity",
+        "diameterKm": 30,
+        "tempC": -270,
+        "note": "Pocket three. Nothing passes inside its reach on its own, so anything that goes in, you put there."
+      }
+    },
+    {
+      "kind": "belt",
+      "id": "belt",
+      "sections": 48,
+      "halfWidth": 0.07
+    }
+  ]
+}
+</script>
 <script>
 "use strict";
 // ============================== SPRITES (baked) ================================
@@ -491,18 +671,6 @@ const DEFAULTS = {
 };
 let S = loadSettings();
 
-// ============================== WORLD ===========================================
-// level-01 (Solaris), authored as intent (radius + angle) and derived, the same
-// discipline as Sim.StableOrbit: never store raw state for an orbiting body. Angles
-// are radians in screen convention, +y DOWN, as in the JSON.
-const STAR = { id: "star", name: "Solaris", sprite: "sun", x: 0, y: 0, vx: 0, vy: 0, mass: 0.45, drawR: 0.012, color: "#ff4b2b",
-               fragile: false, alive: true, struck: false, trail: [], spin: 0 };
-const ORIGIN = { x: 0, y: 0 };   // the table's centre: where the star starts, and the belt's axis
-const PLANET_DEFS = [
-  { id: "smell",   name: "Red",   sprite: "red",       r: 0.55, a: 2.35,  mass: 4.1e-6,  drawR: 0.0068, color: "#d98c4a" },
-  { id: "hearing", name: "Terra", sprite: "terra",     r: 0.92, a: 0.62,  mass: 1.55e-6, drawR: 0.0052, color: "#7fa8a0", fragile: true },
-  { id: "touch",   name: "Vera",  sprite: "vera",      r: 1.45, a: 5.583, mass: 4.2e-7,  drawR: 0.0038, color: "#cfd8e3", fragile: true },
-];
 // The cue balls. See the header. Colours are the designer's: white, yellow, dark purple.
 const BALL_TYPES = {
   standard: { name: "Standard",      short: "STD",   color: "#ffffff", hi: "#ffffff", lo: "#8a97a8" },
@@ -511,38 +679,149 @@ const BALL_TYPES = {
   night:    { name: "Night",         short: "NIGHT", color: "#15151f", hi: "#6a6a90", lo: "#000000" },
 };
 const TYPE_ORDER = ["standard", "thermo", "grav", "night"];
+
+// ============================== THE LEVEL =======================================
+// GAME_DESIGN §11. The table is the JSON block at the top of the body, and this is the only
+// place its shape is declared: every kind, trait and field, with what it means. The loader
+// validates against it and rejects rather than repairs: an unknown key, kind or trait, a
+// missing field or the wrong schemaVersion is a loud error, never a default. There is no
+// hardcoded table to fall back to, on purpose (§11.2): a fallback is a second source of truth.
+// Orbits are intent (radius + angle, radians, +y DOWN) and derived, as Sim.StableOrbit does.
+const LEVEL_SCHEMA_VERSION = 2;
+const LEVEL_SCHEMA = {
+  // type: "number" | "int" | "string" | "color" | "ball" | "sprite" | "list" | "traits" | a shape below
+  level:   { schemaVersion: { type: "int" }, id: { type: "string" }, name: { type: "string" },   // name: the level's, and the system's
+             ship: { type: "ship" }, loadout: { type: "loadout" }, bodies: { type: "list", of: "body" } },
+  ship:    { spawn: { type: "polar" },                   // at rest, nose toward the table's centre
+             traits: { type: "traits", optional: true }, brief: { type: "brief" } },
+  loadout: { nose: { type: "ball" }, chamber: { type: "list", of: "ball", max: 2 } },   // the chamber menu has two slots
+  polar:   { radius: { type: "number", min: 0 }, angle: { type: "number" } },          // AU from the table's centre, radians
+  orbit:   { around: { type: "string" }, radius: { type: "number", min: 1e-3 }, angle: { type: "number" } },   // circular, for now
+  // the inspector card. diameterKm feeds size and composition (density from mass); note is Robert's, hand-written
+  brief:   { class: { type: "string" }, diameterKm: { type: "number", min: 0, optional: true },
+             tempC: { type: "number", optional: true }, note: { type: "string" } },
+  // THE KINDS. A new gameplay element is a new entry here (§11.3), never a special case in the loader
+  star:    { kind: {}, id: { type: "string" }, name: { type: "string" }, sprite: { type: "sprite" },
+             mass: { type: "number", min: 0 }, drawR: { type: "number", min: 0 }, color: { type: "color" }, brief: { type: "brief" } },
+  planet:  { kind: {}, id: { type: "string" }, name: { type: "string" }, sprite: { type: "sprite" },
+             mass: { type: "number", min: 0 }, drawR: { type: "number", min: 0 }, color: { type: "color" },
+             atmosphere: { type: "color", optional: true },     // the faux-sphere halo; without it, the body colour lifted
+             orbit: { type: "orbit" }, traits: { type: "traits", optional: true }, brief: { type: "brief" } },
+  pocket:  { kind: {}, id: { type: "string" }, name: { type: "string" }, color: { type: "color" },
+             position: { type: "polar" }, traits: { type: "traits", optional: true }, brief: { type: "brief" } },
+  // the belt's radius, and the pockets' pull, reach and capture, are still panel settings: §11.5 step 2 moves them here
+  belt:    { kind: {}, id: { type: "string" }, sections: { type: "int", min: 1 }, halfWidth: { type: "number", min: 0 } },
+};
+// THE TRAITS, and which kinds may carry each ("ship" is the ark)
+const LEVEL_TRAITS = {
+  fragile:     ["planet"],            // shatters when a thermonuclear hits it
+  inhabited:   ["planet", "ship"],    // an anomaly on the card
+  "eats-belt": ["pocket"],            // moves out to styxRadiusAU and swallows the belt (the styxEats setting)
+};
+function loadLevel(elId) {
+  const fail = (msg) => {
+    const box = document.createElement("pre");
+    box.style.cssText = "position:fixed;inset:24px;z-index:99;margin:0;padding:20px;background:#200;color:#ff8c70;font:14px/1.5 monospace;white-space:pre-wrap;border:2px solid #ff5030";
+    box.textContent = "LEVEL " + elId + " DID NOT LOAD\n\n" + msg + "\n\nThere is no fallback table, on purpose. Fix the level and reload.";
+    document.body.appendChild(box);
+    throw new Error("level " + elId + ": " + msg);
+  };
+  const el = document.getElementById(elId);
+  if (!el) fail("no <script type=\"application/json\" id=\"" + elId + "\"> in the page");
+  let raw;
+  try { raw = JSON.parse(el.textContent); } catch (e) { fail("not valid JSON: " + e.message); }
+  if (raw.schemaVersion !== LEVEL_SCHEMA_VERSION) fail("schemaVersion is " + JSON.stringify(raw.schemaVersion) + ", this table reads " + LEVEL_SCHEMA_VERSION + " and nothing else");
+  const isObj = (v) => v && typeof v === "object" && !Array.isArray(v);
+  const check = (v, f, at, owner) => {
+    const t = f.type;
+    if (t === "number" || t === "int") {
+      if (typeof v !== "number" || !isFinite(v)) fail(at + ": a number, not " + JSON.stringify(v));
+      if (t === "int" && !Number.isInteger(v)) fail(at + ": a whole number, not " + v);
+      if (f.min != null && v < f.min) fail(at + ": at least " + f.min + ", not " + v);
+    } else if (t === "string") { if (typeof v !== "string" || !v) fail(at + ": a non-empty string");
+    } else if (t === "color") { if (typeof v !== "string" || !/^#[0-9a-fA-F]{6}$/.test(v)) fail(at + ": a colour like #ff4b2b, not " + JSON.stringify(v));
+    } else if (t === "ball") { if (!BALL_TYPES[v]) fail(at + ": a ball type (" + Object.keys(BALL_TYPES).join(", ") + "), not " + JSON.stringify(v));
+    } else if (t === "sprite") { if (!SPRITES[v]) fail(at + ": a baked sprite (" + Object.keys(SPRITES).join(", ") + "), not " + JSON.stringify(v));
+    } else if (t === "list") {
+      if (!Array.isArray(v)) fail(at + ": a list");
+      if (f.max != null && v.length > f.max) fail(at + ": at most " + f.max + ", not " + v.length);
+      v.forEach((x, i) => check(x, { type: f.of }, at + "[" + i + "]"));
+    } else if (t === "traits") {
+      if (!Array.isArray(v)) fail(at + ": a list of traits");
+      for (const x of v) {
+        if (!LEVEL_TRAITS[x]) fail(at + ": unknown trait " + JSON.stringify(x) + " (known: " + Object.keys(LEVEL_TRAITS).join(", ") + ")");
+        if (!LEVEL_TRAITS[x].includes(owner)) fail(at + ": a " + owner + " cannot be " + JSON.stringify(x));
+      }
+      if (new Set(v).size !== v.length) fail(at + ": a trait is listed twice");
+    } else if (t === "body") {
+      if (!isObj(v)) fail(at + ": a body object");
+      if (!LEVEL_SCHEMA[v.kind] || ["level", "ship", "loadout", "polar", "orbit", "brief"].includes(v.kind))
+        fail(at + ": unknown kind " + JSON.stringify(v.kind) + " (known: star, planet, pocket, belt)");
+      shape(v, v.kind, at + " (" + v.kind + (v.id ? " " + v.id : "") + ")");
+    } else shape(v, t, at);
+  };
+  const shape = (o, name, at) => {
+    if (!isObj(o)) fail(at + ": an object");
+    const fields = LEVEL_SCHEMA[name];
+    for (const k of Object.keys(o)) if (!(k in fields)) fail(at + ": unknown key " + JSON.stringify(k) + " (a " + name + " has: " + Object.keys(fields).join(", ") + ")");
+    for (const [k, f] of Object.entries(fields)) {
+      if (k === "kind") continue;
+      if (o[k] === undefined) { if (!f.optional) fail(at + ": missing " + JSON.stringify(k)); continue; }
+      check(o[k], f, at + "." + k, name);
+    }
+  };
+  shape(raw, "level", elId);
+  // What the schema cannot say on its own: the table as a whole
+  const ids = new Set();
+  for (const b of raw.bodies) { if (ids.has(b.id) || b.id === "ship") fail("two bodies are called " + JSON.stringify(b.id)); ids.add(b.id); }
+  const of = (k) => raw.bodies.filter(b => b.kind === k);
+  if (of("star").length !== 1) fail("one star, for now: multi-star systems are §11.3, not built yet");
+  if (of("star")[0].id !== "star") fail("the star's id is \"star\" until multi-star lands; its name is free");
+  if (!of("planet").length) fail("no planets: nothing to pot");
+  if (!of("pocket").length) fail("no pockets: nowhere to pot it");
+  if (of("belt").length !== 1) fail("one belt, for now");
+  if (of("pocket").filter(p => (p.traits || []).includes("eats-belt")).length > 1) fail("one pocket at most eats the belt");
+  for (const p of of("planet")) if (p.orbit.around !== "star") fail(p.id + ".orbit.around: \"star\" (the only star), not " + JSON.stringify(p.orbit.around));
+  return raw;
+}
+const LEVEL = loadLevel("level-01");
+const LEVEL_OF = (k) => LEVEL.bodies.filter(b => b.kind === k);
+const hasTrait = (o, t) => (o.traits || []).includes(t);
+const STAR_DEF = LEVEL_OF("star")[0];
+const STAR = { id: STAR_DEF.id, name: STAR_DEF.name, sprite: STAR_DEF.sprite, x: 0, y: 0, vx: 0, vy: 0, mass: STAR_DEF.mass, drawR: STAR_DEF.drawR,
+               color: STAR_DEF.color, fragile: false, alive: true, struck: false, trail: [], spin: 0 };
+const ORIGIN = { x: 0, y: 0 };   // the table's centre: where the star starts, and the belt's axis
+const PLANET_DEFS = LEVEL_OF("planet").map(p => ({ id: p.id, name: p.name, sprite: p.sprite, r: p.orbit.radius, a: p.orbit.angle,
+  mass: p.mass, drawR: p.drawR, color: p.color, atmosphere: p.atmosphere || null, fragile: hasTrait(p, "fragile") }));
 // WHO CAN HIT SOLARIS. Every other cue ball burns in it. The Night ball strikes it and
 // comes back out; the thermonuclear strikes it too and is spent there, going off as it
 // does on any world, which makes it the hardest hit the star can be given.
 function strikesStar(type) { return type === "night" || type === "thermo"; }
-const SHIP_DEF = { r: 1.45, a: 3.927, overSpeed: 1.005 };
-// Zerograv freeflight: the ship spawns AT REST, and between Terra's ring (0.92) and Vera's
-// (1.45) rather than on Vera's, where a parked ship would be run down within the rack.
-const SHIP_SPAWN_R = 1.19;
+// Zerograv freeflight: the ship spawns AT REST. On level-01 that is between Terra's ring and
+// Vera's rather than on Vera's, where a parked ship would be run down within the rack.
 function shipSpawn() {
-  const r = SHIP_SPAWN_R * S.systemScale, a = SHIP_DEF.a;
+  const r = LEVEL.ship.spawn.radius * S.systemScale, a = LEVEL.ship.spawn.angle;
   return { x: ORIGIN.x + r * Math.cos(a), y: ORIGIN.y + r * Math.sin(a), vx: 0, vy: 0, nose: a + Math.PI };
 }
-// Three pockets at Styx's radius, Styx first, the others 120 degrees round. Underworld
-// rivers, because a pocket is where a world goes and does not come back from.
-const STYX_A = Math.atan2(1.18, 1.72), STYX_R = Math.hypot(1.72, 1.18);
-const POCKETS = [
-  { name: "Styx",    a: STYX_A },
-  { name: "Lethe",   a: STYX_A + TAU / 3 },
-  { name: "Acheron", a: STYX_A + 2 * TAU / 3 },
-].map(p => ({ id: p.name, name: p.name, a: p.a, x: STYX_R * Math.cos(p.a), y: STYX_R * Math.sin(p.a), color: "#b48cff" }));
-// Styx alone moves with the toggle; the other two stay. Called every frame and at reset.
+// The pockets. Level-01 names them for underworld rivers, because a pocket is where a world
+// goes and does not come back from. The one that eats the belt moves out to styxRadiusAU
+// while the styxEats setting is on; the rest stay where the level puts them.
+const POCKETS = LEVEL_OF("pocket").map(p => ({ id: p.id, name: p.name, a: p.position.angle, r: p.position.radius,
+                                               eatsBelt: hasTrait(p, "eats-belt"), x: 0, y: 0, color: p.color }));
+const EATER = POCKETS.find(p => p.eatsBelt) || null;
+// Called every frame and at reset.
 function layoutPockets() {
-  for (const p of POCKETS) { const r = STYX_R * S.systemScale; p.x = r * Math.cos(p.a); p.y = r * Math.sin(p.a); }
-  const r = S.styxEats ? S.styxRadiusAU : STYX_R * S.systemScale;
-  POCKETS[0].x = r * Math.cos(POCKETS[0].a); POCKETS[0].y = r * Math.sin(POCKETS[0].a);
+  for (const p of POCKETS) {
+    const r = p.eatsBelt && S.styxEats ? S.styxRadiusAU : p.r * S.systemScale;
+    p.x = r * Math.cos(p.a); p.y = r * Math.sin(p.a);
+  }
 }
 
 let bodies, ship, acb, balls, chamber, score, simYears, belt, beltEat;
 // THE BELT: 48 sections, each intact or gone, and per section a fixed scatter of rocks
 // in belt-frame polar coordinates. The belt's rotation is derived from the clock, never
 // stored: theta = omega * simYears, omega Keplerian at beltRadiusAU.
-const BELT_N = 48, BELT_HALF = 0.07;
+const BELT_N = LEVEL_OF("belt")[0].sections, BELT_HALF = LEVEL_OF("belt")[0].halfWidth;
 const BELT_ROCKS = [];
 for (let i = 0; i < BELT_N; i++) {
   const rocks = [];
@@ -585,7 +864,8 @@ function beltInside(x, y, r0, sections, t) {
 }
 // Styx pulls in whatever section of the belt is turning through its reach.
 function styxEatsBelt(h) {
-  const st = POCKETS[0], th = beltTheta(simYears), sec = TAU / BELT_N;
+  if (!EATER) return;
+  const st = EATER, th = beltTheta(simYears), sec = TAU / BELT_N;
   for (let i = 0; i < BELT_N; i++) {
     if (!belt[i]) continue;
     const a = th + (i + 0.5) * sec;
@@ -616,7 +896,7 @@ function nameFor(key, def) { return bodyNames[key] ? bodyNames[key].name : def; 
 function derivePlanet(d) {
   const r = d.r * S.systemScale;
   return { ...orbitState(r, d.a), id: d.id, name: nameFor(d.id, d.name), sprite: d.sprite, mass: d.mass, drawR: d.drawR,
-           color: d.color, fragile: !!d.fragile, integrity: 1, orbitR: r, struck: false, alive: true, trail: [], spin: Math.random() * TAU };
+           color: d.color, atmosphere: d.atmosphere, fragile: d.fragile, integrity: 1, orbitR: r, struck: false, alive: true, trail: [], spin: Math.random() * TAU };
 }
 // SYSTEM SIZE. One slider scales every authored radius: the orbits and the ship's ring
 // at reset, and the pockets, the belt, Styx's eating radius and the view live, all from
@@ -632,7 +912,7 @@ function contactList(list, star) { return star.alive ? list.concat([star]) : lis
 
 function resetWorld() {
   applySystemScale();
-  STAR.name = nameFor("star", "Solaris");
+  STAR.name = nameFor("star", STAR_DEF.name);
   for (const p of POCKETS) p.name = nameFor(p.id, p.id);
   // The star goes home FIRST: the worlds' orbits are derived around it, and after a rack
   // where Solaris was struck or potted they were derived around where it had got to, so R
@@ -645,9 +925,9 @@ function resetWorld() {
   // there), lost (a ball was destroyed and a new one is on its way). balls is every
   // free ball on the table, because Space can put a new one on the nose while the old
   // one is still flying, and the old one keeps flying.
-  acb = { mode: "attached", type: "standard", x: 0, y: 0, vx: 0, vy: 0, cap: null, lostT: 0 };
+  acb = { mode: "attached", type: LEVEL.loadout.nose, x: 0, y: 0, vx: 0, vy: 0, cap: null, lostT: 0 };
   balls = [];
-  chamber = ["standard", "standard"];        // the two behind the nose, next to load first
+  chamber = LEVEL.loadout.chamber.slice();   // behind the nose, next to load first
   belt = new Array(BELT_N).fill(1);
   beltEat = new Array(BELT_N).fill(0);       // 0..1 per section, how far Styx has pulled it in
   layoutPockets();
@@ -664,29 +944,13 @@ function resetWorld() {
 }
 
 // ============================== THE MISSION BRIEFING ============================
-// Facts are level-01.json's: mass in solar masses, info.diameterKm, info.tempC,
-// inhabited. Density is derived from mass and diameter (the game derives it the same
-// way, Thermal.DensityAt). Travel speed is the body's speed on its ring at the
-// moment of the briefing. Robert's notes are per body id, hand-written, in his
-// register: short, practical, "captain", and never a word about who set the table.
-const BRIEF = {
-  star:    { cls: "M-type main sequence", diameterKm: 625328, tempC: 3126.9, inhabited: false,
-             note: "Red dwarf, captain. Cold system: every world out here is frozen. It burns any cue ball you put into it but two: the Night ball, which strikes it and comes back, and a thermonuclear, which strikes it hardest and is spent there. A gravitizer will drag it about from a distance, so long as you keep the ball off it. You will need one: the table is not clear until Solaris is in a pocket, so chamber one of them and leave the star for last." },
-  smell:   { cls: "Terrestrial, veiled", diameterKm: 14661, tempC: -9.2, inhabited: false,
-             note: "The heavy one. Sulphur haze over a thick envelope, and it takes a thermonuclear without cracking. It will not go far on a soft shot, so lean in." },
-  hearing: { cls: "Terrestrial", diameterKm: 10472, tempC: -155.2, inhabited: true,
-             note: "Somebody is home. Rock under ice, and it breaks if you put a thermonuclear on it, so don't. There is a pulse coming off it the survey cannot account for. Not our problem today." },
-  touch:   { cls: "Terrestrial, glaciated", diameterKm: 7181, tempC: -205.2, inhabited: false,
-             note: "Light, and already nearest a pocket. This is your opening shot, young cap'n. Those arcs on the surface? No tide in this system makes those. Pool it anyway." },
-  Styx:    { cls: "Singularity", diameterKm: 30, tempC: -270, inhabited: false,
-             note: "The pocket. Pulls from every direction inside half an AU, and it takes the ship as happily as a planet. It sits close to the belt and it is eating it, so the cushions have a clock on them. And captain: the belt is rock. Fly through a gap or not at all." },
-  Lethe:   { cls: "Singularity", diameterKm: 30, tempC: -270, inhabited: false,
-             note: "Pocket two. Same pull, quieter neighbourhood. A world that goes in does not come back, which is the point." },
-  Acheron: { cls: "Singularity", diameterKm: 30, tempC: -270, inhabited: false,
-             note: "Pocket three. Nothing passes inside its reach on its own, so anything that goes in, you put there." },
-  ship:    { cls: "The ark", diameterKm: null, tempC: null, inhabited: true,
-             note: "That is us, flying free of gravity, so mind the worlds coming round: they do not steer. One cue ball on the nose, two in the chamber. Shoot, then go and fetch it. Good hunting, captain." },
-};
+// Facts are the level's: mass in solar masses, brief.diameterKm, brief.tempC, the
+// inhabited trait. Density is derived from mass and diameter (the game derives it the same
+// way, Thermal.DensityAt). Travel speed is the body's speed on its ring at the moment of
+// the briefing. Robert's notes are per body, hand-written in the level, in his register:
+// short, practical, "captain", and never a word about who set the table.
+const BRIEF = { ship: { cls: LEVEL.ship.brief.class, ...LEVEL.ship.brief, inhabited: hasTrait(LEVEL.ship, "inhabited") } };
+for (const b of LEVEL.bodies) if (b.brief) BRIEF[b.id] = { cls: b.brief.class, ...b.brief, inhabited: hasTrait(b, "inhabited") };
 const MSUN_KG = 1.989e30, MEARTH_KG = 5.972e24, KMS_PER_AUYR = 4.7404;
 function densityGcc(massMsun, diameterKm) {
   const r = diameterKm * 0.5 * 1e5;                  // cm
@@ -701,7 +965,7 @@ function introStops() {
   // range is derived per frame from R and px, so a resize mid-briefing reframes
   const framing = (o, R, px) => ({ o, R, px });
   const stops = [];
-  stops.push({ ...framing(STAR, starR(), 130), key: "star", name: STAR.name, defName: "Solaris", pause: !bodyNames.star, mass: STAR.mass, unit: "solar masses", speed: 0, sprite: "sun", tint: true });
+  stops.push({ ...framing(STAR, starR(), 130), key: "star", name: STAR.name, defName: STAR_DEF.name, pause: !bodyNames.star, mass: STAR.mass, unit: "solar masses", speed: 0, sprite: "sun", tint: true });
   for (const b of bodies) {
     const d = PLANET_DEFS.find(q => q.id === b.id);
     stops.push({ ...framing(b, ballR(b), 110), key: b.id, name: b.name, defName: d ? d.name : b.name, mass: b.mass / 3.003e-6, unit: "Earth masses", speed: Math.hypot(b.vx, b.vy), sprite: b.sprite, pause: !bodyNames[b.id] });
@@ -1388,7 +1652,7 @@ function simStep(h, offGravity) {
     burst(b.x, b.y, 0.2, b.color); burst(b.x, b.y, 0.12, "#ffffff"); flash(b.x, b.y, 0.3, b.color);
     note("BROKEN: " + b.name + " " + (b.breakCause || "shattered") + " (foul)", "#ff5030");
   }
-  if (S.beltOn && S.styxEats) styxEatsBelt(h);
+  if (S.beltOn && S.styxEats && EATER) styxEatsBelt(h);
   const gone = [];
   for (const k of balls) {
     if (k.dead) { gone.push({ k, why: k.burned ? "ACB BURNED in " + STAR.name : "THERMONUCLEAR SPENT" }); continue; }
@@ -1555,7 +1819,7 @@ function placeAcbOnNose() {
 // as teleportRange() allows (the width of Red's ring: 1.1 AU on the default table, and
 // it scales with system size), keeps its velocity, and needs teleportCooldownS to
 // recharge. It lands honestly: on a world, a pocket, the star or the rocks, it dies.
-function teleportRange() { return 2 * PLANET_DEFS[0].r * S.systemScale; }
+function teleportRange() { return 2 * Math.min(...PLANET_DEFS.map(d => d.r)) * S.systemScale; }   // the innermost ring's width
 function teleportTo(sx, sy) { const [wx, wy] = screenToWorld(sx, sy); teleportToWorld(wx, wy); }
 function teleportToWorld(wx, wy) {
   if (score.failed || aiming() || intro) return;
@@ -2205,7 +2469,6 @@ const SPHERE = { gl: null, canvas: null, prog: null, u: {}, bands: {}, tex: {}, 
 const SPHERE_SHADING = { wrap: 0.06, limb: 0.75, rim: 0.9, rimWidth: 0.28, spec: 0.22, ambient: 0.018 };
 const SPHERE_EXTENT = 1.12, SPHERE_HALO = 0.09;
 const BAND_W = 1024, BAND_H = 512;
-const WORLD_ATMO = { red: "#c9a84e", terra: "#7fb0e6" };   // level-01's atmosphereColor; Vera has none
 const SPHERE_VERT = `#version 300 es
 layout(location = 0) in vec2 aP; out vec2 vP; uniform float uExtent;
 void main() { vP = aP * uExtent; gl_Position = vec4(aP, 0.0, 1.0); }`;
@@ -2442,7 +2705,7 @@ function drawWorld(b, sx, sy, R, alpha) {
   let lx = STAR.x - b.x, ly = STAR.y - b.y; const ll = Math.hypot(lx, ly) || 1; lx /= ll; ly /= ll;
   const lz = S.sphereLightZ, ln = Math.hypot(1, lz);
   gl.uniform3f(u.uLight, lx / ln, -ly / ln, lz / ln);   // screen y down, shader y up
-  const atmo = colRGB(WORLD_ATMO[b.sprite] || mixHex(b.color, "#ffffff", 0.45));
+  const atmo = colRGB(b.atmosphere || mixHex(b.color, "#ffffff", 0.45));
   gl.uniform3f(u.uAtmo, Math.pow(atmo[0] / 255, 2.2), Math.pow(atmo[1] / 255, 2.2), Math.pow(atmo[2] / 255, 2.2));
   gl.uniform1f(u.uScroll, (b.spin / TAU) % 1);
   gl.uniform1f(u.uInhabited, b.sprite === "terra" ? 1 : 0);
@@ -2619,7 +2882,7 @@ function draw(realDt) {
     const th = beltTheta(simYears), sec = TAU / BELT_N;
     for (let i = 0; i < BELT_N; i++) {
       if (!belt[i]) continue;
-      const e = beltEat[i], st = POCKETS[0];
+      const e = beltEat[i], st = EATER;
       for (const rk of BELT_ROCKS[i]) {
         const a = th + (i + rk.da) * sec, r = S.beltRadiusAU + rk.dr * BELT_HALF;
         let wx = ORIGIN.x + r * Math.cos(a), wy = ORIGIN.y + r * Math.sin(a);
@@ -3546,6 +3809,7 @@ buildPanel();
 // The headless-test handle: top-level let/const never reach window, so a scripted
 // check reads and pokes the rig through this. Not for play.
 window.RIG = {
+  level: () => JSON.parse(JSON.stringify(LEVEL)),
   state: () => ({ simYears, sliderT, warp: warpNow(),
                   ship: { x: ship.x, y: ship.y, vx: ship.vx, vy: ship.vy, nose: ship.nose },
                   acb: { mode: acb.mode, type: acb.type, x: acb.x, y: acb.y, vx: acb.vx, vy: acb.vy },
