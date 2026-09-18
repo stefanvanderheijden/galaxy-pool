@@ -17,8 +17,9 @@
   ship spawns, the loadout, every briefing card and Robert's notes) is the JSON block
   <script id="level-01"> just above the code, in the table format, schemaVersion 2.
   LEVEL_SCHEMA declares every kind, trait and field; loadLevel() rejects anything else
-  with a message on screen, and there is no hardcoded table behind it. Still panel
-  settings for now (§11.5 step 2): the belt's radius, the pockets' pull, reach and size.
+  with a message on screen, and there is no hardcoded table behind it. The settings are
+  split the same way (§11.5 step 2): TABLE_RULES are the game's, the same on every table,
+  and PLAYER_DEFAULTS are the player's; the panel shows the two apart.
 
   THE LOOP
     1. The ship orbits the star with the ACB attached. Q/E slide time.
@@ -219,10 +220,10 @@
     screen flash        full-screen white quad, alpha decays exp(-12 t)
     camera shake        Cinemachine impulse, or the offset below: decays exp(-8 t)
 
-  THE ASTEROID BELT. A ring of rock on the rim, beltRadiusAU out, turning at the
+  THE ASTEROID BELT. A ring of rock on the rim, the level's belt.radius out, turning at the
   Keplerian rate for that radius so it rides like everything else. It is the cushion:
   a ball or a struck world that reaches an intact stretch bounces (radial velocity
-  reflected with beltRestitution, tangential kept) and THAT STRETCH IS DESTROYED, so
+  reflected with belt.restitution, tangential kept) and THAT STRETCH IS DESTROYED, so
   every one of the 48 sections is a one-time cushion. A destroyed stretch is a gap and
   the next thing through it just leaves. The forecast plays the bounce on a copy of the
   belt, so the aim line shows the rebound and the sim spends the section only when it
@@ -233,12 +234,12 @@
   it, and the ship respawns on its opening orbit like a ship into the star. A gap is
   safe, so the belt is a wall with the doors you and Styx have made in it.
 
-  STYX SUCKS ASTEROIDS (panel toggle, on). With it on, Styx sits further out, at
-  styxRadiusAU, so its influence reaches the belt, and any section that turns through
-  that reach is pulled in: its rocks drift toward the hole over styxEatYr and the
-  section is gone, no debris, no cushion. The belt turns once in 6.6 years, so that is
-  the clock on the cushions: use them before Styx has been round. Off, Styx sits with
-  the other two pockets and the belt lasts the rack.
+  STYX SUCKS ASTEROIDS (the level's "eats-belt" trait, on Styx). Styx sits further out,
+  at the trait's radius, so its influence reaches the belt, and any section that turns
+  through that reach is pulled in: its rocks drift toward the hole over the trait's years
+  and the section is gone, no debris, no cushion. The belt turns once in 6.6 years, so
+  that is the clock on the cushions: use them before Styx has been round. Take the trait
+  off and Styx sits with the other two pockets and the belt lasts the rack.
 
   SOLARIS IS POOLABLE, WITH THE NIGHT BALL OR A THERMONUCLEAR (and a gravitizer moves it
   from a distance, without touching): every other ball burns in it,
@@ -369,6 +370,11 @@
   #panel .val { width: 44px; text-align: right; color: #e2ecff; }
   #panel .adv { cursor: pointer; color: #8fa6c8; font-size: 11px; letter-spacing: 1px; margin: 2px 0 4px; user-select: none; }
   #panel hr { border: 0; border-top: 1px solid #22304a; margin: 6px 0; }
+  #panel .sec { display: flex; flex-direction: column; margin: 10px 0 4px; padding-top: 6px; border-top: 1px solid #2f4468; }
+  #panel .sec b { font-size: 11px; letter-spacing: 1px; color: #cfe0ff; }
+  #panel .sec i { font-size: 10px; color: #8fa6c8; line-height: 1.3; }
+  #panel .sec i#tunedNote { color: #e8b463; font-style: normal; margin-top: 2px; }
+  #panel button + button { margin-top: 4px; }
   #chamber { position: fixed; left: 14px; bottom: 112px; display: flex; gap: 8px; font: 11px/1.4 "Share Tech Mono", Menlo, monospace; user-select: none; }
   #chamber .slot { width: 96px; background: rgba(8,12,22,0.8); border: 1px solid #2a3a55; border-radius: 6px; padding: 6px 8px; color: #9fb4cc; }
   #chamber .slot .lbl { font-size: 9px; letter-spacing: 1px; color: #6f86a8; }
@@ -396,6 +402,7 @@
   "schemaVersion": 2,
   "id": "level-01",
   "name": "Solaris",
+  "viewRadius": 2.9,
   "ship": {
     "spawn": {
       "radius": 1.19,
@@ -437,7 +444,7 @@
       "id": "smell",
       "name": "Red",
       "sprite": "red",
-      "mass": 0.0000041,
+      "mass": 4.1e-06,
       "drawR": 0.0068,
       "color": "#d98c4a",
       "atmosphere": "#c9a84e",
@@ -458,7 +465,7 @@
       "id": "hearing",
       "name": "Terra",
       "sprite": "terra",
-      "mass": 0.00000155,
+      "mass": 1.55e-06,
       "drawR": 0.0052,
       "color": "#7fa8a0",
       "atmosphere": "#7fb0e6",
@@ -483,7 +490,7 @@
       "id": "touch",
       "name": "Vera",
       "sprite": "vera",
-      "mass": 4.2e-7,
+      "mass": 4.2e-07,
       "drawR": 0.0038,
       "color": "#cfd8e3",
       "orbit": {
@@ -510,8 +517,16 @@
         "radius": 2.085857,
         "angle": 0.6013
       },
+      "mass": 0.6,
+      "reach": 0.5,
+      "size": 0.12,
       "traits": [
-        "eats-belt"
+        {
+          "eats-belt": {
+            "radius": 2.3,
+            "years": 0.15
+          }
+        }
       ],
       "brief": {
         "class": "Singularity",
@@ -529,6 +544,9 @@
         "radius": 2.085857,
         "angle": 2.695695
       },
+      "mass": 0.6,
+      "reach": 0.5,
+      "size": 0.12,
       "brief": {
         "class": "Singularity",
         "diameterKm": 30,
@@ -545,6 +563,9 @@
         "radius": 2.085857,
         "angle": 4.79009
       },
+      "mass": 0.6,
+      "reach": 0.5,
+      "size": 0.12,
       "brief": {
         "class": "Singularity",
         "diameterKm": 30,
@@ -556,7 +577,9 @@
       "kind": "belt",
       "id": "belt",
       "sections": 48,
-      "halfWidth": 0.07
+      "halfWidth": 0.07,
+      "radius": 2.7,
+      "restitution": 0.85
     }
   ]
 }
@@ -585,30 +608,25 @@ function warpMid() { return S.gameSpeedK * 1000; }
 function warpMax() { return Math.max(warpMid() * 2, S.maxWarpM * 1e6); }
 const TAU = Math.PI * 2;
 
-// ============================== TUNABLES (test panel) ===========================
-const DEFAULTS = {
-  introFlyover: true,     // the mission briefing flyover at the start of every rack
+// ============================== SETTINGS ========================================
+// Three homes, GAME_DESIGN §11.2. What the TABLE is (the belt, the pockets' pull, the camera's
+// framing) is in the level. What is the same on every table for every player is TABLE_RULES:
+// the game's rules and its feel, tuned from the panel while this is a rig, and a file of its
+// own once the rig is a project (§11.5 step 4). What a player chooses is PLAYER_DEFAULTS.
+// Difficulty lives in the level, never in the controls (§5.6), so no rule is a player's choice.
+const TABLE_RULES = {
   integrityBreaks: true,  // a planet whose integrity reaches zero shatters (a foul)
   introFlyS: 4.6,         // seconds per body, whatever the hop: the camera never stops
   introSlow: 0.45,        // slow-down past a body: speed there is (1 - this) of the mean
   introPitchDeg: 52,      // camera pitch below horizontal during the flyover
-  wasdRelative: false,    // keyboard flight: false = W up, A left (screen); true = W along the aim, A/D strafe
-  padAimTurnDegS: 45,     // controller, L2 held: the nose turns toward the stick at most this fast, degrees per second (tank controls)
-  padAimDynamic: false,   // controller, L2 held: the older gain that falls with the throw (1 at half, 0.2 at the rim)
-  padPowerRelative: true, // controller power trim: false = L stick up is more, down is less; true = along the aim (DRAW BACK: against it)
-  padScheme: "manual",    // the controller: "manual" MANUAL CLOCK, "motion" MOTION CLOCK. OPTIONS switches
   motionRefAUyr: 10,      // MOTION CLOCK: ship speed that runs the world at game speed
-  aimMode: "reach",       // mouse and keyboard: "reach" POWER LINE, "charge" HOLD TO POWER UP, "draw" DRAW BACK. Tab cycles
-  padAimMode: "charge",   // the controller's own aim style, same names; CREATE cycles. HOLD TO POWER UP suits a trigger
   reachMaxAU: 1.6,        // POWER LINE: the cursor distance from the ship for a full-power shot (times system size)
   thrustAntigrav: true,   // the drive lets go of gravity while it burns (hyperwarp 2)
   driftMode: true,        // the time slider springs home to 1M when released
   projections: true,      // the aim line and every struck world's forecast
   acbFeelsWorlds: true,   // the ACB flies the game layer (boosted worlds) like the ship
   planetsCollide: true,   // struck worlds knock each other
-  camFollow: false,       // C toggles: whole table, or glide after the ship
-  fateLabels: false,
-  teleportCooldownS: 2,   // RMB teleport recharge, real seconds      // the forecast's outcome labels and the aim caption: off, it was clutter
+  teleportCooldownS: 2,   // RMB teleport recharge, real seconds
   systemScale: 1,         // the table's size: every authored radius times this (orbits, pockets, belt, view)
   maxWarpM: 5,            // the time slider's right end, in millions x
   fauxSpheres: true,      // worlds drawn as the Galaxy 64 planet card: a band turning under a shading pass
@@ -637,20 +655,12 @@ const DEFAULTS = {
   captureSpeed: 4.0,      // AU/yr of relative speed the ship must be under. 3 was too strict, 8 too loose
   captureDwellS: 0.25,    // real seconds inside and slow before the winch starts
   captureSeconds: 1.25,   // real seconds of eased winch back onto the nose (001)
-  pocketRadiusAU: 0.12,   // the pocket: capture radius of each black hole
-  pocketInfluenceAU: 0.5, // level-01's influenceRadius
-  pocketMass: 0.6,        // level-01's Styx
   planetBoost: 10000,     // the game layer's boost, unchanged: wells you can grab
   respawnSeconds: 3,      // after a ball is destroyed, the next chambered one loads after this
-  viewRadiusAU: 2.9,      // whole-table camera: half the short side, in AU
   gameSpeedK: 200,        // the clock's resting speed, in thousands of times real time
   thermoEnergy: 3,        // thermonuclear impact energy, x a normal shot
   gravPull: 0.03,         // gravitizer mass, solar masses
   gravReachAU: 0.6,       // gravitizer reach
-  forceArrows: false,      // the free-body diagram on the cue ball while aiming
-  arrowNumbers: false,    // label the arrows with values, not just their source
-  arrowPxPerAUyr: 12,     // one pixel scale for every arrow, so they compare
-  gravityHorizonYr: 0.1,  // gravity is drawn as the velocity it adds over this
   animeMode: true,        // 'Anime style pool ball trail'. See the header
   animeSpeedAUyr: 1600,   // flash speed: about 1 AU per 0.1 s real at 200K
   animeRangeAU: 6.0,      // a full-power miss burns out after this much flight (with flashTerminus)
@@ -659,16 +669,28 @@ const DEFAULTS = {
   animeHitstopMs: 200,    // the impact frame, real milliseconds, bodies touching
   animeTrailS: 1.5,       // the trail's linger, real seconds
   animeImpactEnergy: 1.0, // impact energy as a multiple of a normal shot at this power
-  beltOn: true,
-  beltKillsShip: true,    // an intact belt section wrecks the ship; a gap is safe           // the asteroid belt on the rim
-  beltRadiusAU: 2.7,      // outside the pockets' influence (2.09 + 0.5)
-  beltRestitution: 0.85,  // radial bounce
-  styxEats: true,         // 'Styx sucks asteroids': Styx moves out and eats the belt
-  styxRadiusAU: 2.3,      // Styx's radius with styxEats on; its 0.5 AU reach then covers the belt
-  styxEatYr: 0.15,        // sim years for a section inside the reach to be swallowed
+  beltKillsShip: true,    // an intact belt section wrecks the ship; a gap is safe
   autoStabilise: false,    // burn back to a circular orbit after every shot
   stabiliseDoneAUyr: 0.05,// close enough: remaining velocity error that ends the burn
 };
+const PLAYER_DEFAULTS = {
+  introFlyover: true,     // the mission briefing flyover at the start of every rack
+  wasdRelative: false,    // keyboard flight: false = W up, A left (screen); true = W along the aim, A/D strafe
+  padAimTurnDegS: 45,     // controller, L2 held: the nose turns toward the stick at most this fast, degrees per second (tank controls)
+  padAimDynamic: false,   // controller, L2 held: the older gain that falls with the throw (1 at half, 0.2 at the rim)
+  padPowerRelative: true, // controller power trim: false = L stick up is more, down is less; true = along the aim (DRAW BACK: against it)
+  padScheme: "manual",    // the controller: "manual" MANUAL CLOCK, "motion" MOTION CLOCK. OPTIONS switches
+  aimMode: "reach",       // mouse and keyboard: "reach" POWER LINE, "charge" HOLD TO POWER UP, "draw" DRAW BACK. Tab cycles
+  padAimMode: "charge",   // the controller's own aim style, same names; CREATE cycles. HOLD TO POWER UP suits a trigger
+  camFollow: false,       // C toggles: whole table, or glide after the ship
+  fateLabels: false,     // the forecast's outcome labels and the aim caption: off, it was clutter
+  forceArrows: false,      // the free-body diagram on the cue ball while aiming
+  arrowNumbers: false,    // label the arrows with values, not just their source
+  arrowPxPerAUyr: 12,     // one pixel scale for every arrow, so they compare
+  gravityHorizonYr: 0.1,  // gravity is drawn as the velocity it adds over this
+};
+const DEFAULTS = { ...TABLE_RULES, ...PLAYER_DEFAULTS };
+const PLAYER_KEY = "galaxytable.player.v1", RULES_KEY = "galaxytable.rules.v1";   // localStorage, see saveSettings
 let S = loadSettings();
 
 // The cue balls. See the header. Colours are the designer's: white, yellow, dark purple.
@@ -691,6 +713,7 @@ const LEVEL_SCHEMA_VERSION = 2;
 const LEVEL_SCHEMA = {
   // type: "number" | "int" | "string" | "color" | "ball" | "sprite" | "list" | "traits" | a shape below
   level:   { schemaVersion: { type: "int" }, id: { type: "string" }, name: { type: "string" },   // name: the level's, and the system's
+             viewRadius: { type: "number", min: 0.1 },         // AU: the whole-table camera, half the screen's short side
              ship: { type: "ship" }, loadout: { type: "loadout" }, bodies: { type: "list", of: "body" } },
   ship:    { spawn: { type: "polar" },                   // at rest, nose toward the table's centre
              traits: { type: "traits", optional: true }, brief: { type: "brief" } },
@@ -707,17 +730,26 @@ const LEVEL_SCHEMA = {
              mass: { type: "number", min: 0 }, drawR: { type: "number", min: 0 }, color: { type: "color" },
              atmosphere: { type: "color", optional: true },     // the faux-sphere halo; without it, the body colour lifted
              orbit: { type: "orbit" }, traits: { type: "traits", optional: true }, brief: { type: "brief" } },
-  pocket:  { kind: {}, id: { type: "string" }, name: { type: "string" }, color: { type: "color" },
-             position: { type: "polar" }, traits: { type: "traits", optional: true }, brief: { type: "brief" } },
-  // the belt's radius, and the pockets' pull, reach and capture, are still panel settings: §11.5 step 2 moves them here
-  belt:    { kind: {}, id: { type: "string" }, sections: { type: "int", min: 1 }, halfWidth: { type: "number", min: 0 } },
+  pocket:  { kind: {}, id: { type: "string" }, name: { type: "string" }, color: { type: "color" }, position: { type: "polar" },
+             mass: { type: "number", min: 0 },                 // solar masses, pulling only inside reach
+             reach: { type: "number", min: 0 },                // AU: the pull's radius, and the dashed ring
+             size: { type: "number", min: 0 },                 // AU: what touches this is potted
+             traits: { type: "traits", optional: true }, brief: { type: "brief" } },
+  belt:    { kind: {}, id: { type: "string" }, radius: { type: "number", min: 0 },   // AU from the table's centre
+             sections: { type: "int", min: 1 }, halfWidth: { type: "number", min: 0 },
+             restitution: { type: "number", min: 0 } },       // radial bounce off an intact section: 1 is elastic
 };
-// THE TRAITS, and which kinds may carry each ("ship" is the ark)
+// THE TRAITS: which kinds may carry each ("ship" is the ark), and its fields. A trait with no
+// fields is written as its name, "fragile"; one with fields as { "eats-belt": { ... } }.
 const LEVEL_TRAITS = {
-  fragile:     ["planet"],            // shatters when a thermonuclear hits it
-  inhabited:   ["planet", "ship"],    // an anomaly on the card
-  "eats-belt": ["pocket"],            // moves out to styxRadiusAU and swallows the belt (the styxEats setting)
+  fragile:     { on: ["planet"] },                // shatters when a thermonuclear hits it
+  inhabited:   { on: ["planet", "ship"] },        // an anomaly on the card
+  "eats-belt": { on: ["pocket"], fields: {        // sits out by the belt and swallows the sections that turn through its reach
+    radius: { type: "number", min: 0 },           // AU from the centre, replacing its position's radius
+    years: { type: "number", min: 1e-6 } } },     // sim years for a section inside the reach to go
 };
+const traitOf = (o, t) => { for (const x of o.traits || []) { if (x === t) return {}; if (typeof x === "object" && x[t]) return x[t]; } return null; };
+const hasTrait = (o, t) => !!traitOf(o, t);
 function loadLevel(elId) {
   const fail = (msg) => {
     const box = document.createElement("pre");
@@ -748,11 +780,20 @@ function loadLevel(elId) {
       v.forEach((x, i) => check(x, { type: f.of }, at + "[" + i + "]"));
     } else if (t === "traits") {
       if (!Array.isArray(v)) fail(at + ": a list of traits");
+      const seen = new Set();
       for (const x of v) {
-        if (!LEVEL_TRAITS[x]) fail(at + ": unknown trait " + JSON.stringify(x) + " (known: " + Object.keys(LEVEL_TRAITS).join(", ") + ")");
-        if (!LEVEL_TRAITS[x].includes(owner)) fail(at + ": a " + owner + " cannot be " + JSON.stringify(x));
+        const name = typeof x === "string" ? x : isObj(x) && Object.keys(x).length === 1 ? Object.keys(x)[0] : null;
+        if (name == null) fail(at + ": a trait is a name, or { name: { fields } }, not " + JSON.stringify(x));
+        const T = LEVEL_TRAITS[name];
+        if (!T) fail(at + ": unknown trait " + JSON.stringify(name) + " (known: " + Object.keys(LEVEL_TRAITS).join(", ") + ")");
+        if (!T.on.includes(owner)) fail(at + ": a " + owner + " cannot be " + JSON.stringify(name));
+        if (seen.has(name)) fail(at + ": " + JSON.stringify(name) + " is listed twice");
+        seen.add(name);
+        if (T.fields) {
+          if (typeof x === "string") fail(at + ": " + JSON.stringify(name) + " needs its fields: { \"" + name + "\": { " + Object.keys(T.fields).join(", ") + " } }");
+          shapeOf(x[name], T.fields, name, at + "." + name);
+        } else if (typeof x !== "string") fail(at + ": " + JSON.stringify(name) + " has no fields, write it as \"" + name + "\"");
       }
-      if (new Set(v).size !== v.length) fail(at + ": a trait is listed twice");
     } else if (t === "body") {
       if (!isObj(v)) fail(at + ": a body object");
       if (!LEVEL_SCHEMA[v.kind] || ["level", "ship", "loadout", "polar", "orbit", "brief"].includes(v.kind))
@@ -760,10 +801,10 @@ function loadLevel(elId) {
       shape(v, v.kind, at + " (" + v.kind + (v.id ? " " + v.id : "") + ")");
     } else shape(v, t, at);
   };
-  const shape = (o, name, at) => {
+  const shape = (o, name, at) => shapeOf(o, LEVEL_SCHEMA[name], name, at);
+  const shapeOf = (o, fields, name, at) => {
     if (!isObj(o)) fail(at + ": an object");
-    const fields = LEVEL_SCHEMA[name];
-    for (const k of Object.keys(o)) if (!(k in fields)) fail(at + ": unknown key " + JSON.stringify(k) + " (a " + name + " has: " + Object.keys(fields).join(", ") + ")");
+    for (const k of Object.keys(o)) if (!(k in fields)) fail(at + ": unknown key " + JSON.stringify(k) + " (" + name + " takes: " + Object.keys(fields).join(", ") + ")");
     for (const [k, f] of Object.entries(fields)) {
       if (k === "kind") continue;
       if (o[k] === undefined) { if (!f.optional) fail(at + ": missing " + JSON.stringify(k)); continue; }
@@ -780,13 +821,12 @@ function loadLevel(elId) {
   if (!of("planet").length) fail("no planets: nothing to pot");
   if (!of("pocket").length) fail("no pockets: nowhere to pot it");
   if (of("belt").length !== 1) fail("one belt, for now");
-  if (of("pocket").filter(p => (p.traits || []).includes("eats-belt")).length > 1) fail("one pocket at most eats the belt");
+  if (of("pocket").filter(p => hasTrait(p, "eats-belt")).length > 1) fail("one pocket at most eats the belt");
   for (const p of of("planet")) if (p.orbit.around !== "star") fail(p.id + ".orbit.around: \"star\" (the only star), not " + JSON.stringify(p.orbit.around));
   return raw;
 }
 const LEVEL = loadLevel("level-01");
 const LEVEL_OF = (k) => LEVEL.bodies.filter(b => b.kind === k);
-const hasTrait = (o, t) => (o.traits || []).includes(t);
 const STAR_DEF = LEVEL_OF("star")[0];
 const STAR = { id: STAR_DEF.id, name: STAR_DEF.name, sprite: STAR_DEF.sprite, x: 0, y: 0, vx: 0, vy: 0, mass: STAR_DEF.mass, drawR: STAR_DEF.drawR,
                color: STAR_DEF.color, fragile: false, alive: true, struck: false, trail: [], spin: 0 };
@@ -804,15 +844,19 @@ function shipSpawn() {
   return { x: ORIGIN.x + r * Math.cos(a), y: ORIGIN.y + r * Math.sin(a), vx: 0, vy: 0, nose: a + Math.PI };
 }
 // The pockets. Level-01 names them for underworld rivers, because a pocket is where a world
-// goes and does not come back from. The one that eats the belt moves out to styxRadiusAU
-// while the styxEats setting is on; the rest stay where the level puts them.
-const POCKETS = LEVEL_OF("pocket").map(p => ({ id: p.id, name: p.name, a: p.position.angle, r: p.position.radius,
-                                               eatsBelt: hasTrait(p, "eats-belt"), x: 0, y: 0, color: p.color }));
+// goes and does not come back from. The one that eats the belt sits at its trait's radius,
+// out by the rocks; the rest stay where the level puts them. Radii scale with system size,
+// reach and size do not.
+const POCKETS = LEVEL_OF("pocket").map(p => {
+  const eat = traitOf(p, "eats-belt");
+  return { id: p.id, name: p.name, a: p.position.angle, r: p.position.radius, mass: p.mass, reach: p.reach, size: p.size,
+           eatsBelt: !!eat, eatR: eat ? eat.radius : 0, eatYears: eat ? eat.years : 0, x: 0, y: 0, color: p.color };
+});
 const EATER = POCKETS.find(p => p.eatsBelt) || null;
 // Called every frame and at reset.
 function layoutPockets() {
   for (const p of POCKETS) {
-    const r = p.eatsBelt && S.styxEats ? S.styxRadiusAU : p.r * S.systemScale;
+    const r = (p.eatsBelt ? p.eatR : p.r) * S.systemScale;
     p.x = r * Math.cos(p.a); p.y = r * Math.sin(p.a);
   }
 }
@@ -820,15 +864,18 @@ function layoutPockets() {
 let bodies, ship, acb, balls, chamber, score, simYears, belt, beltEat;
 // THE BELT: 48 sections, each intact or gone, and per section a fixed scatter of rocks
 // in belt-frame polar coordinates. The belt's rotation is derived from the clock, never
-// stored: theta = omega * simYears, omega Keplerian at beltRadiusAU.
-const BELT_N = LEVEL_OF("belt")[0].sections, BELT_HALF = LEVEL_OF("belt")[0].halfWidth;
+// stored: theta = omega * simYears, omega Keplerian at the belt's radius.
+const BELT_DEF = LEVEL_OF("belt")[0] || null;   // one, for now; the code reads "if (BELT)" so a beltless table is a loader change
+const BELT = BELT_DEF && { r: BELT_DEF.radius, restitution: BELT_DEF.restitution };   // r is scaled by system size at reset
+const BELT_N = BELT_DEF ? BELT_DEF.sections : 0, BELT_HALF = BELT_DEF ? BELT_DEF.halfWidth : 0;
+let viewR = LEVEL.viewRadius;                      // the whole-table camera, scaled by system size at reset
 const BELT_ROCKS = [];
 for (let i = 0; i < BELT_N; i++) {
   const rocks = [];
   for (let j = 0; j < 9; j++) rocks.push({ da: (j + Math.random()) / 9, dr: (Math.random() - 0.5) * 2, size: 0.6 + Math.random() * 1.4, tint: Math.random() });
   BELT_ROCKS.push(rocks);
 }
-function beltOmega() { return Math.sqrt(G * STAR.mass / Math.pow(S.beltRadiusAU, 3)); }
+function beltOmega() { return Math.sqrt(G * STAR.mass / Math.pow(BELT.r, 3)); }
 function beltTheta(t) { return beltOmega() * t; }
 function beltSection(x, y, t) {
   const a = Math.atan2(y - ORIGIN.y, x - ORIGIN.x) - beltTheta(t);
@@ -838,17 +885,17 @@ function beltSection(x, y, t) {
 // either side into an intact section reflects it and, when `spend` is set, destroys the
 // section. Returns the section hit or -1. Shared with the forecast (spend = false on a copy).
 function beltContact(o, r0, sections, t, spend) {
-  if (!S.beltOn) return -1;
+  if (!BELT) return -1;
   const dx = o.x - ORIGIN.x, dy = o.y - ORIGIN.y, r = Math.hypot(dx, dy);
   if (r < 1e-9) return -1;
-  const inner = S.beltRadiusAU - BELT_HALF - r0, outer = S.beltRadiusAU + BELT_HALF + r0;
+  const inner = BELT.r - BELT_HALF - r0, outer = BELT.r + BELT_HALF + r0;
   if (r < inner || r > outer) return -1;
   const nx = dx / r, ny = dy / r, vr = o.vx * nx + o.vy * ny;
-  const fromInside = r < S.beltRadiusAU;
+  const fromInside = r < BELT.r;
   if ((fromInside && vr <= 0) || (!fromInside && vr >= 0)) return -1;   // already leaving the band
   const i = beltSection(o.x, o.y, t);
   if (!sections[i]) return -1;
-  o.vx -= (1 + S.beltRestitution) * vr * nx; o.vy -= (1 + S.beltRestitution) * vr * ny;
+  o.vx -= (1 + BELT.restitution) * vr * nx; o.vy -= (1 + BELT.restitution) * vr * ny;
   const back = fromInside ? inner - 0.001 : outer + 0.001;
   o.x = ORIGIN.x + nx * back; o.y = ORIGIN.y + ny * back;
   if (spend) sections[i] = 0;
@@ -856,9 +903,9 @@ function beltContact(o, r0, sections, t, spend) {
 }
 // Is a disc of r0 at x,y inside an intact section of the band? The index, or -1.
 function beltInside(x, y, r0, sections, t) {
-  if (!S.beltOn) return -1;
+  if (!BELT) return -1;
   const r = Math.hypot(x - ORIGIN.x, y - ORIGIN.y);
-  if (r < S.beltRadiusAU - BELT_HALF - r0 || r > S.beltRadiusAU + BELT_HALF + r0) return -1;
+  if (r < BELT.r - BELT_HALF - r0 || r > BELT.r + BELT_HALF + r0) return -1;
   const i = beltSection(x, y, t);
   return sections[i] ? i : -1;
 }
@@ -869,9 +916,9 @@ function styxEatsBelt(h) {
   for (let i = 0; i < BELT_N; i++) {
     if (!belt[i]) continue;
     const a = th + (i + 0.5) * sec;
-    const x = ORIGIN.x + S.beltRadiusAU * Math.cos(a), y = ORIGIN.y + S.beltRadiusAU * Math.sin(a);
-    if (dist(x, y, st.x, st.y) > S.pocketInfluenceAU) continue;
-    beltEat[i] += h / S.styxEatYr;
+    const x = ORIGIN.x + BELT.r * Math.cos(a), y = ORIGIN.y + BELT.r * Math.sin(a);
+    if (dist(x, y, st.x, st.y) > st.reach) continue;
+    beltEat[i] += h / st.eatYears;
     if (beltEat[i] >= 1) {
       belt[i] = 0; flash(st.x, st.y, 0.15, "#b48cff");
       const gone = BELT_N - belt.reduce((a, b) => a + b, 0);
@@ -903,7 +950,8 @@ function derivePlanet(d) {
 // their defaults, so the table keeps its proportions and only its size changes.
 function applySystemScale() {
   const k = S.systemScale;
-  S.beltRadiusAU = DEFAULTS.beltRadiusAU * k; S.styxRadiusAU = DEFAULTS.styxRadiusAU * k; S.viewRadiusAU = DEFAULTS.viewRadiusAU * k;
+  if (BELT) BELT.r = BELT_DEF.radius * k;
+  viewR = LEVEL.viewRadius * k;
 }
 function ballR(b) { return b === STAR || b.id === "star" ? Math.max(b.drawR * S.ballScale, 0.1) : Math.max(b.drawR * S.ballScale, S.minBallAU); }
 function ballsLeft() { return (acb.mode === "attached" || acb.mode === "capturing" ? 1 : 0) + chamber.length + balls.length; }
@@ -970,7 +1018,7 @@ function introStops() {
     const d = PLANET_DEFS.find(q => q.id === b.id);
     stops.push({ ...framing(b, ballR(b), 110), key: b.id, name: b.name, defName: d ? d.name : b.name, mass: b.mass / 3.003e-6, unit: "Earth masses", speed: Math.hypot(b.vx, b.vy), sprite: b.sprite, pause: !bodyNames[b.id] });
   }
-  for (const p of POCKETS) stops.push({ ...framing(p, S.pocketRadiusAU, 110), key: p.id, name: p.name, defName: p.id, pause: !bodyNames[p.id], mass: S.pocketMass, unit: "solar masses", speed: 0, sprite: "blackhole", pocket: true });
+  for (const p of POCKETS) stops.push({ ...framing(p, p.size, 110), key: p.id, name: p.name, defName: p.id, pause: !bodyNames[p.id], mass: p.mass, unit: "solar masses", speed: 0, sprite: "blackhole", pocket: true });
   stops.push({ ...framing(ship, HULL_LEN * 2.5, 60), key: "ship", name: "THE ARK", mass: null, unit: "", speed: Math.hypot(ship.vx, ship.vy), sprite: null, ship: true });
   return stops;
 }
@@ -995,7 +1043,7 @@ function endIntro() {
   cv.classList.remove("briefing");
   // the handoff: the top-down camera at the fit the outro ended on
   cam.x = ORIGIN.x; cam.y = ORIGIN.y; cam.zoom = 1;
-  if (cv.clientWidth > 0) cam.scale = Math.min(cv.clientWidth, cv.clientHeight) / 2 / S.viewRadiusAU;
+  if (cv.clientWidth > 0) cam.scale = Math.min(cv.clientWidth, cv.clientHeight) / 2 / viewR;
 }
 function skipIntro() {
   // once only: a held key, trigger or stick calls this every frame, and each call would
@@ -1007,7 +1055,7 @@ function skipIntro() {
   intro.skipped = true;
 }
 function introTotal() { return INTRO_TITLE_S + intro.stops.length * S.introFlyS + INTRO_OUTRO_S; }
-function wideRange() { return introFocal() / (Math.max(1, Math.min(cv.clientWidth, cv.clientHeight)) / 2 / S.viewRadiusAU); }
+function wideRange() { return introFocal() / (Math.max(1, Math.min(cv.clientWidth, cv.clientHeight)) / 2 / viewR); }
 // The camera pose at time t. One continuous path: a Catmull-Rom spline through the
 // wide opening view, every stop in order, and the top-down finish, so the camera
 // never stops and never corners. The same time per body, slowing past each one
@@ -1365,7 +1413,7 @@ function pull(sx, sy, gm, b, h) {
   b.vx += dx * k; b.vy += dy * k;
 }
 function pullPockets(b, h) {
-  for (const p of POCKETS) if (dist(b.x, b.y, p.x, p.y) < S.pocketInfluenceAU) pull(p.x, p.y, G * S.pocketMass, b, h);
+  for (const p of POCKETS) if (dist(b.x, b.y, p.x, p.y) < p.reach) pull(p.x, p.y, G * p.mass, b, h);
 }
 // The REAL layer: a world feels the star, and the pockets once struck. Never another
 // world's gravity (they collide instead), so an authored ring stays a ring.
@@ -1395,7 +1443,7 @@ function gravityAt(x, y, feelWorlds) {
   };
   if (STAR.alive) add(STAR.name, STAR.x, STAR.y, G * STAR.mass);
   if (feelWorlds) for (const b of bodies) if (b.alive) add(b.name, b.x, b.y, G * b.mass * S.planetBoost);
-  for (const p of POCKETS) if (dist(x, y, p.x, p.y) < S.pocketInfluenceAU) add(p.name, p.x, p.y, G * S.pocketMass);
+  for (const p of POCKETS) if (dist(x, y, p.x, p.y) < p.reach) add(p.name, p.x, p.y, G * p.mass);
   let ax = 0, ay = 0, top = parts[0];
   for (const q of parts) { ax += q.ax; ay += q.ay; if (q.mag > top.mag) top = q; }
   return { ax, ay, top: top.name };
@@ -1475,10 +1523,10 @@ function sweepBall(k, list, others, h) {
     if (t >= 0 && t < bestT) { bestT = t; best = b; }
   }
   // the belt: the segment against the band's near face, whichever side we start on
-  if (S.beltOn) {
+  if (BELT) {
     const r0 = Math.hypot(k.x - ORIGIN.x, k.y - ORIGIN.y);
-    const inside = r0 < S.beltRadiusAU;
-    const Rf = inside ? S.beltRadiusAU - BELT_HALF - S.acbRadiusAU : S.beltRadiusAU + BELT_HALF + S.acbRadiusAU;
+    const inside = r0 < BELT.r;
+    const Rf = inside ? BELT.r - BELT_HALF - S.acbRadiusAU : BELT.r + BELT_HALF + S.acbRadiusAU;
     const fx0 = k.x - ORIGIN.x, fy0 = k.y - ORIGIN.y;
     const A = dx * dx + dy * dy, B = 2 * (fx0 * dx + fy0 * dy), C = fx0 * fx0 + fy0 * fy0 - Rf * Rf;
     const disc = B * B - 4 * A * C;
@@ -1521,10 +1569,10 @@ function flashBounce(k, hit, sections, spend) {
 // lost at 1600 AU/yr), which drops it to coasting so it can be fetched.
 const OFF_TABLE_AU = 0.6;
 function flashRange(power) { return S.flashTerminus ? S.animeRangeAU * Math.max(0.1, power) : 1e6; }
-function offTable(k) { return Math.hypot(k.x - ORIGIN.x, k.y - ORIGIN.y) > S.beltRadiusAU + OFF_TABLE_AU; }
+function offTable(k) { return Math.hypot(k.x - ORIGIN.x, k.y - ORIGIN.y) > BELT.r + OFF_TABLE_AU; }
 // Distance along the ball's heading to the off-table circle (the far crossing).
 function exitDistance(k) {
-  const sp = Math.hypot(k.vx, k.vy) || 1, ux = k.vx / sp, uy = k.vy / sp, R = S.beltRadiusAU + OFF_TABLE_AU;
+  const sp = Math.hypot(k.vx, k.vy) || 1, ux = k.vx / sp, uy = k.vy / sp, R = BELT.r + OFF_TABLE_AU;
   const fx0 = k.x - ORIGIN.x, fy0 = k.y - ORIGIN.y, B = fx0 * ux + fy0 * uy, C = fx0 * fx0 + fy0 * fy0 - R * R;
   const disc = B * B - C; if (disc < 0) return 0;
   return Math.max(0, -B + Math.sqrt(disc));
@@ -1577,7 +1625,7 @@ function gravitizeAll(freeBalls, list, others, shipObj, h) {
     if (shipObj) gravitize(k, shipObj, h);
   }
 }
-function pocketAt(x, y, r) { for (const p of POCKETS) if (dist(x, y, p.x, p.y) < S.pocketRadiusAU + r) return p; return null; }
+function pocketAt(x, y, r) { for (const p of POCKETS) if (dist(x, y, p.x, p.y) < p.size + r) return p; return null; }
 
 function simStep(h, offGravity) {
   let shipCause = null;   // why the ship dies this step, if it does
@@ -1652,7 +1700,7 @@ function simStep(h, offGravity) {
     burst(b.x, b.y, 0.2, b.color); burst(b.x, b.y, 0.12, "#ffffff"); flash(b.x, b.y, 0.3, b.color);
     note("BROKEN: " + b.name + " " + (b.breakCause || "shattered") + " (foul)", "#ff5030");
   }
-  if (S.beltOn && S.styxEats && EATER) styxEatsBelt(h);
+  if (BELT && EATER) styxEatsBelt(h);
   const gone = [];
   for (const k of balls) {
     if (k.dead) { gone.push({ k, why: k.burned ? "ACB BURNED in " + STAR.name : "THERMONUCLEAR SPENT" }); continue; }
@@ -2394,7 +2442,7 @@ function frame(now) {
   const tx = S.camFollow ? ship.x : ORIGIN.x, ty = S.camFollow ? ship.y : ORIGIN.y;
   cam.x += (tx - cam.x) * Math.min(1, realDt * 4);
   cam.y += (ty - cam.y) * Math.min(1, realDt * 4);
-  const fit = Math.min(cv.clientWidth, cv.clientHeight) / 2 / S.viewRadiusAU;
+  const fit = Math.min(cv.clientWidth, cv.clientHeight) / 2 / viewR;
   cam.scale += (fit * cam.zoom - cam.scale) * Math.min(1, realDt * 6);
 
   for (const f of flashes) f.t += realDt;
@@ -2878,13 +2926,13 @@ function draw(realDt) {
   const sc = cam.scale;
 
   // the belt: rocks per intact section, turned by the clock
-  if (S.beltOn) {
+  if (BELT) {
     const th = beltTheta(simYears), sec = TAU / BELT_N;
     for (let i = 0; i < BELT_N; i++) {
       if (!belt[i]) continue;
       const e = beltEat[i], st = EATER;
       for (const rk of BELT_ROCKS[i]) {
-        const a = th + (i + rk.da) * sec, r = S.beltRadiusAU + rk.dr * BELT_HALF;
+        const a = th + (i + rk.da) * sec, r = BELT.r + rk.dr * BELT_HALF;
         let wx = ORIGIN.x + r * Math.cos(a), wy = ORIGIN.y + r * Math.sin(a);
         if (e > 0) { const k = e * e * (0.7 + 0.3 * rk.tint); wx += (st.x - wx) * k; wy += (st.y - wy) * k; }   // the pull, visible
         const q = worldToScreen(wx, wy); if (!q) continue;
@@ -2897,9 +2945,9 @@ function draw(realDt) {
   for (const b of bodies) if (b.alive && !b.struck) drawRing(ORIGIN.x, ORIGIN.y, b.orbitR, "rgba(120,150,200,0.16)", 1);
   // pockets: influence ring, dark well, sprite
   for (const p of POCKETS) {
-    drawRing(p.x, p.y, S.pocketInfluenceAU, "rgba(180,140,255,0.18)", 1, [3, 6]);
+    drawRing(p.x, p.y, p.reach, "rgba(180,140,255,0.18)", 1, [3, 6]);
     const q = worldToScreen(p.x, p.y); if (!q) continue;
-    const [sx, sy] = q, R = S.pocketRadiusAU * (persp ? q[2] : sc);
+    const [sx, sy] = q, R = p.size * (persp ? q[2] : sc);
     if (!drawHoleCard(sx, sy, R)) {
       const g = cx.createRadialGradient(sx, sy, R * 0.6, sx, sy, R * 2.4);
       g.addColorStop(0, "rgba(120,80,200,0.35)"); g.addColorStop(1, "rgba(120,80,200,0)");
@@ -3724,33 +3772,54 @@ cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { cam.zoom = Math.max(0.4, Math.min(6, cam.zoom * Math.exp(-e.deltaY * 0.0012))); e.preventDefault(); }, { passive: false });
 
 // ============================== TEST PANEL ======================================
-const STORE_KEY = "galaxytable.v39";   // bumped: saved settings would otherwise hide the new default
+// Kept apart: a player's choices persist as they are; the rules persist only as the tuning that
+// differs from TABLE_RULES, so the panel shows how far this browser is from the game's own.
+// Keys no longer in either object (a setting that moved into the level) are dropped on load.
 function loadSettings() {
-  try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY) || "{}") }; }
-  catch { return { ...DEFAULTS }; }
+  const read = (key, into) => {
+    try { const o = JSON.parse(localStorage.getItem(key) || "{}"); for (const k in o) if (k in into) into[k] = o[k]; } catch {}
+    return into;
+  };
+  // once: a player's choices carry over from the single store before the split. Its rules do
+  // not, they were the defaults of the day and would all read as tuning.
+  try { if (!localStorage.getItem(PLAYER_KEY) && localStorage.getItem("galaxytable.v39")) localStorage.setItem(PLAYER_KEY, localStorage.getItem("galaxytable.v39")); } catch {}
+  return { ...read(RULES_KEY, { ...TABLE_RULES }), ...read(PLAYER_KEY, { ...PLAYER_DEFAULTS }) };
 }
-function saveSettings() { try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); } catch {} }
+function tunedRules() { return Object.keys(TABLE_RULES).filter(k => S[k] !== TABLE_RULES[k]); }
+function saveSettings() {
+  try {
+    const pl = {}, ru = {};
+    for (const k in PLAYER_DEFAULTS) pl[k] = S[k];
+    for (const k of tunedRules()) ru[k] = S[k];
+    localStorage.setItem(PLAYER_KEY, JSON.stringify(pl)); localStorage.setItem(RULES_KEY, JSON.stringify(ru));
+  } catch {}
+  const t = document.getElementById("tunedNote");
+  if (t) t.textContent = tunedNote();
+}
+function tunedNote() { const n = tunedRules().length; return n ? n + (n === 1 ? " rule differs" : " rules differ") + " from the game's" : "as the game has them"; }
 
 // THE PANEL, cut to the dials a designer reaches for. Everything else is still a
 // DEFAULTS entry and still tunable from the console (RIG.set), it is just not on screen.
 const PANEL = [
   ["h", "GALAXY TABLE SETTINGS"],
   // labels are "Heading|description": a heading of two words at most, the rest under it
-  ["r", "ballScale", "Planet size|bigger planets", 2, 20, 0.5],
-  ["r", "systemScale", "System size|more space between planets", 1, 2.5, 0.05],
-  ["l", "thrustAccel", "Engine power|how fast the ship speeds up", 300, 30000],
-  ["r", "linearDamp", "Ship braking|how fast the ship stops on its own", 0, 2, 0.05],
+  ["s", "YOUR SETTINGS", "yours: how you like to play"],
   ["b", "wasdRelative", "Relative WASD|W flies where you aim"],
   ["r", "padAimTurnDegS", "Aim turn speed|degrees per second while aiming down sights", 10, 180, 5],
   ["b", "padAimDynamic", "Dynamic aim|controller: old L2 aim, finer at the stick's edge"],
   ["b", "padPowerRelative", "Relative power|controller: push toward the aim for power"],
+  ["b", "fateLabels", "Labels|text on the table"],
+  ["s", "TABLE RULES", "the same on every table, for everyone. Tuning, while this is a rig", "tunedNote"],
+  ["r", "ballScale", "Planet size|bigger planets", 2, 20, 0.5],
+  ["r", "systemScale", "System size|more space between planets", 1, 2.5, 0.05],
+  ["l", "thrustAccel", "Engine power|how fast the ship speeds up", 300, 30000],
+  ["r", "linearDamp", "Ship braking|how fast the ship stops on its own", 0, 2, 0.05],
   ["a", "ADVANCED"],   // folded by default; the camera is an in-game control (C), not a dial
   ["r", "gravPull", "Gravitizer pull|how strong", 0.005, 0.2, 0.005],
   ["r", "gravReachAU", "Gravitizer reach|how far", 0.1, 2, 0.05],
   ["l", "maxWarpM", "Time speed|fastest the clock goes", 1, 50],
   ["b", "flashTerminus", "Flash terminus|the flash stops after a set distance"],
   ["b", "integrityBreaks", "Integrity breaks|a planet at zero integrity shatters"],
-  ["b", "fateLabels", "Labels|text on the table"],
   ["r", "introFlyS", "Briefing pace|seconds per planet", 1, 10, 0.1],
   ["r", "introSlow", "Briefing slowdown|slow down at each planet", 0, 1, 0.05],
 ];
@@ -3763,6 +3832,7 @@ function buildPanel() {
   for (const row of PANEL) {
     if (row[0] === "h") { html += `<h1>${row[1]} <span id="collapse">[-]</span></h1><div id="panelBody">`; continue; }
     if (row[0] === "-") { html += "<hr>"; continue; }
+    if (row[0] === "s") { html += `<div class="sec"><b>${row[1]}</b><i>${row[2]}</i>${row[3] ? `<i id="${row[3]}">${tunedNote()}</i>` : ""}</div>`; continue; }
     if (row[0] === "a") { advOpen = true; html += `<hr><div id="advToggle" class="adv">${advShown ? "[-]" : "[+]"} ${row[1]}</div><div id="advBody" style="display:${advShown ? "" : "none"}">`; continue; }
     const [kind, key, text, min, max, step] = row;
     const [head, desc] = text.split("|");
@@ -3778,7 +3848,7 @@ function buildPanel() {
       html += `<div class="row"><label><span>${label}</span><input type="range" data-k="${key}" min="${min}" max="${max}" step="${step}" value="${S[key]}"><span class="val" id="v_${key}">${S[key]}</span></label></div>`;
   }
   if (advOpen) html += `</div>`;
-  html += `<hr><button id="resetBtn">reset to defaults</button></div>`;
+  html += `<hr><button id="resetBtn">reset to defaults</button><button id="rulesBtn">table rules back to the game's</button></div>`;
   el.innerHTML = html;
   el.querySelectorAll("input").forEach(inp => {
     inp.addEventListener("input", () => {
@@ -3796,7 +3866,13 @@ function buildPanel() {
     });
   });
   document.getElementById("resetBtn").addEventListener("click", () => {
-    localStorage.removeItem(STORE_KEY); S = { ...DEFAULTS }; buildPanel();
+    const scaled = S.systemScale !== DEFAULTS.systemScale;
+    try { localStorage.removeItem(PLAYER_KEY); localStorage.removeItem(RULES_KEY); } catch {}
+    S = { ...DEFAULTS }; buildPanel(); if (scaled) { resetWorld(); endIntro(); }
+  });
+  document.getElementById("rulesBtn").addEventListener("click", () => {
+    const scaled = S.systemScale !== TABLE_RULES.systemScale;
+    Object.assign(S, TABLE_RULES); saveSettings(); buildPanel(); if (scaled) { resetWorld(); endIntro(); }
   });
   document.getElementById("advToggle").addEventListener("click", () => { advShown = !advShown; buildPanel(); });
   document.getElementById("collapse").addEventListener("click", () => {
