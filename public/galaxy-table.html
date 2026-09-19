@@ -389,6 +389,8 @@ const TABLE_RULES = {
   // an intact belt section wrecks the ship; a gap is safe
   escapeBelts: 3,
   // a world further out than this many belt radii has ESCAPED: gone, and a foul
+  forwardYears: 10,
+  // the editor's forward check runs the untouched table this long (GAME_DESIGN §11.4)
   autoStabilise: false,
   // burn back to a circular orbit after every shot
   stabiliseDoneAUyr: 0.05
@@ -701,6 +703,15 @@ const VEL_T = 0.3;
 const TRACK_YEARS = 8;
 const RESUME_KEY = "galaxytable.editing";
 const r4 = (v) => Math.round(v * 1e4) / 1e4, r5 = (v) => Math.round(v * 1e5) / 1e5;
+const FWD_TEXT = {
+  potted: (e) => e.name + " goes into " + e.pocket + " on its own",
+  burned: (e) => e.name + " falls into the star",
+  escaped: (e) => e.name + " escapes the table",
+  left: (e) => e.name + " leaves the system (a rogue passing through)",
+  overlap: (e) => e.name + " and " + e.otherName + " pass through each other (untouched bodies do not collide)",
+  "over-ship": (e) => e.name + " runs over the ship's start"
+};
+const FWD_COLOR = { potted: "#e8b463", burned: "#ff5030", escaped: "#ff5030", left: "#8fc3e8", overlap: "#e8b463", "over-ship": "#ff8c70" };
 const TRAIT_DEFAULTS = { "eats-belt": { radius: 2.3, years: 0.15 } };
 function el(tag, attrs, ...kids) {
   const e = document.createElement(tag);
@@ -741,7 +752,8 @@ function polar(r, a) {
 }
 function createEditor(api) {
   let draft = null, saved = "", history = [], future = [], sel = null, drag2 = null;
-  let err = null, status = "", open = false, canSave = false, tracks = {};
+  let err = null, status = "", open = false, canSave = false, tracks = {}, fwd = null, fwdTimer = 0;
+  let solutions = [], solved = null, loadedFor = null;
   const bar = el("div", { id: "edbar" }), panel = el("div", { id: "edpanel" });
   const enterBtn = el("button", { id: "edenter", title: "Edit this table (L)", onclick: () => enter() }, "EDIT TABLE");
   document.body.append(bar, panel, enterBtn);
@@ -760,10 +772,23 @@ function createEditor(api) {
   const dirty = () => JSON.stringify(canon(draft, "level")) !== saved;
   const bodyOf = (id) => id === "ship" ? draft.ship : draft.bodies.find((b) => b.id === id);
   const k = () => api.scale();
+  async function loadSolutions(id) {
+    if (loadedFor === id) return;
+    loadedFor = id;
+    solutions = [];
+    solved = null;
+    try {
+      const r = await fetch("/api/solutions?level=" + encodeURIComponent(id));
+      if (r.ok) solutions = (await r.json()).map((x) => ({ name: x.name, sol: x.solution, saved: true }));
+    } catch {
+    }
+    if (open) renderBar();
+  }
   function enter() {
     if (open) return;
     draft = clone(api.level());
     saved = JSON.stringify(canon(draft, "level"));
+    loadSolutions(draft.id);
     history = [];
     future = [];
     sel = null;
@@ -775,6 +800,7 @@ function createEditor(api) {
     api.enter(clone(draft));
     refreshTracks();
     render();
+    fwdTimer = setTimeout(runForward, 0);
   }
   function play() {
     if (err) {
@@ -788,6 +814,52 @@ function createEditor(api) {
     enterBtn.style.display = "";
     api.leave(clone(canon(draft, "level")));
   }
+  function record() {
+    if (err) {
+      status = "fix the level first: it does not load";
+      renderBar();
+      return;
+    }
+    open = false;
+    drag2 = null;
+    bar.style.display = panel.style.display = "none";
+    enterBtn.style.display = "";
+    enterBtn.textContent = "● RECORDING (L stops)";
+    enterBtn.classList.add("rec");
+    api.record(clone(canon(draft, "level")), (sol, why) => {
+      enterBtn.textContent = "EDIT TABLE";
+      enterBtn.classList.remove("rec");
+      if (why === "cleared") {
+        let n = 1;
+        while (solutions.some((x) => x.name === "s" + n)) n++;
+        solutions.push({ name: "s" + n, sol, saved: false });
+        status = "recorded s" + n + ": cleared at " + sol.result.years.toFixed(3) + " yr in " + sol.result.shots + " shots" + (canSave ? " (Save keeps it)" : "");
+        solved = null;
+      } else status = "recording stopped before the table was cleared: nothing kept" + (why === "tuned" ? " (the panel was changed mid-run)" : "");
+    });
+  }
+  function solveCheck() {
+    if (err) {
+      status = "fix the level first: it does not load";
+      renderBar();
+      return;
+    }
+    const L = canon(draft, "level");
+    solved = solutions.map((x) => ({ name: x.name, saved: x.saved, r: api.replay(x.sol) }));
+    api.apply(clone(L));
+    refreshTracks();
+    renderBar();
+  }
+  function solveLines() {
+    if (err) return [];
+    if (!solutions.length) return [el("div", { class: "solve none" }, "solve check: no recorded solution. ● Record one: clear the table")];
+    if (!solved) return [el("div", { class: "solve" }, "solve check: " + solutions.length + " solution" + (solutions.length > 1 ? "s" : "") + ", not run since the last change")];
+    return solved.map(({ name, saved: saved2, r }) => el(
+      "div",
+      { class: "solve " + (r.won ? "ok" : "bad") },
+      "solve " + name + (saved2 ? "" : " (unsaved)") + ": " + (r.won ? "clears at " + r.years.toFixed(3) + " yr, " + r.shots + " shots, " + r.fouls + " fouls" + (r.asRecorded ? ", as recorded" : ", not as recorded") : "does NOT clear: " + (r.left.join(", ") || "nothing") + " still on the table") + (r.sameLevel ? "" : "  (recorded on another version of this level)")
+    ));
+  }
   function toggle() {
     if (open) play();
     else if (draft && api.level().id === draft.id) reenter();
@@ -800,6 +872,7 @@ function createEditor(api) {
     api.enter(clone(draft));
     refreshTracks();
     render();
+    fwdTimer = setTimeout(runForward, 0);
   }
   function apply() {
     draft = canon(draft, "level");
@@ -808,7 +881,16 @@ function createEditor(api) {
       api.apply(clone(draft));
       refreshTracks();
     }
+    fwd = null;
+    clearTimeout(fwdTimer);
+    solved = null;
+    if (!err && !drag2) fwdTimer = setTimeout(runForward, 150);
     renderBar();
+  }
+  function runForward() {
+    if (!open || err) return;
+    fwd = api.forward();
+    renderForward();
   }
   function snapshot() {
     history.push(JSON.stringify(draft));
@@ -857,6 +939,16 @@ function createEditor(api) {
       }
       saved = JSON.stringify(canon(draft, "level"));
       status = "saved levels/" + draft.id + ".json";
+      for (const x of solutions.filter((x2) => !x2.saved)) {
+        const rs = await fetch("/api/solutions/" + draft.id + "." + x.name + ".json", { method: "PUT", body: JSON.stringify(x.sol) + "\n" });
+        if (rs.ok) {
+          x.saved = true;
+          status += ", solutions/" + draft.id + "." + x.name + ".json";
+        } else {
+          const j2 = await rs.json().catch(() => ({}));
+          status += "; solution " + x.name + " NOT saved: " + (j2.error || rs.status);
+        }
+      }
       try {
         sessionStorage.setItem(RESUME_KEY, JSON.stringify({ id: draft.id, sel }));
       } catch {
@@ -1052,7 +1144,10 @@ function createEditor(api) {
     } else if (type === "up" && drag2) {
       const moved = drag2.moved;
       drag2 = null;
-      if (moved) renderPanel();
+      if (moved) {
+        renderPanel();
+        if (!err) fwdTimer = setTimeout(runForward, 0);
+      }
     }
   }
   function key(e) {
@@ -1112,6 +1207,22 @@ function createEditor(api) {
       cx2.stroke();
       cx2.setLineDash([]);
       cx2.globalAlpha = 1;
+    }
+    if (fwd) for (const ev of fwd.events) {
+      const q = api.worldToScreen(ev.x, ev.y);
+      if (!q) continue;
+      cx2.strokeStyle = FWD_COLOR[ev.kind];
+      cx2.lineWidth = 2;
+      cx2.beginPath();
+      cx2.moveTo(q[0] - 6, q[1] - 6);
+      cx2.lineTo(q[0] + 6, q[1] + 6);
+      cx2.moveTo(q[0] + 6, q[1] - 6);
+      cx2.lineTo(q[0] - 6, q[1] + 6);
+      cx2.stroke();
+      cx2.fillStyle = FWD_COLOR[ev.kind];
+      cx2.font = `10px "Share Tech Mono", monospace`;
+      cx2.textAlign = "left";
+      cx2.fillText(ev.t.toFixed(2) + " yr", q[0] + 9, q[1] + 4);
     }
     const hs = handles();
     for (const h of hs) {
@@ -1183,9 +1294,13 @@ function createEditor(api) {
         btn("Delete", removeSel, { disabled: !sel }),
         canSave ? btn("Save", save, { class: "go" }) : null,
         btn("Copy JSON", copyJson),
+        btn("● Record", record, { class: "rec" }),
+        btn("Solve check", solveCheck, { disabled: !solutions.length }),
         btn("▶ Play", play, { class: "play" })
       ),
-      ...err ? [el("div", { class: "err" }, "DOES NOT LOAD: " + err)] : status ? [el("div", { class: "note" }, status)] : []
+      ...err ? [el("div", { class: "err" }, "DOES NOT LOAD: " + err)] : status ? [el("div", { class: "note" }, status)] : [],
+      ...forwardLines(),
+      ...solveLines()
     );
   }
   function field(obj, key2, spec, owner) {
@@ -1312,6 +1427,19 @@ function createEditor(api) {
   function render() {
     renderPanel();
   }
+  function forwardLines() {
+    if (err) return [];
+    if (!fwd) return [el("div", { class: "fwd" }, "forward check: running")];
+    if (!fwd.events.length) return [el("div", { class: "fwd ok" }, "forward check: " + fwd.years + " yr untouched, nothing happens on its own")];
+    return [
+      el("div", { class: "fwd" }, "forward check, " + fwd.years + " yr untouched:"),
+      ...fwd.events.slice(0, 8).map((ev) => el("div", { class: "fwd " + ev.kind }, "t " + ev.t.toFixed(2) + " yr  " + FWD_TEXT[ev.kind](ev))),
+      fwd.events.length > 8 ? el("div", { class: "fwd" }, "and " + (fwd.events.length - 8) + " more") : null
+    ].filter(Boolean);
+  }
+  function renderForward() {
+    renderBar();
+  }
   try {
     const r = JSON.parse(sessionStorage.getItem(RESUME_KEY) || "null");
     if (r && r.id === api.levelId()) {
@@ -1338,6 +1466,11 @@ function createEditor(api) {
     draw: draw2,
     undo,
     redo,
+    forward: () => fwd,
+    record,
+    solveCheck,
+    solutions: () => solutions,
+    solved: () => solved,
     // for tests: the draft, and a way to drag a handle by its body and role
     draft: () => draft,
     error: () => err,
@@ -1634,7 +1767,7 @@ function contactList(list, star) {
   return star.alive ? list.concat([star]) : list;
 }
 function resetWorld() {
-  if (!seedPinned) rackSeed = Math.random() * 2 ** 31 | 0;
+  if (!seedPinned && !rec && !replaying) rackSeed = Math.random() * 2 ** 31 | 0;
   applySystemScale();
   STAR.name = nameFor("star", STAR_DEF.name);
   for (const p of POCKETS) p.name = nameFor(p.id, LEVEL_OF("pocket").find((q) => q.id === p.id).name);
@@ -1668,7 +1801,7 @@ function resetWorld() {
   timePaused = false;
   teleportCd = 0;
   note("zerograv freeflight: ENGAGED", "#8fc3e8");
-  if (S.introFlyover && !editing) startIntro();
+  if (S.introFlyover && !editing && !rec && !replaying) startIntro();
   else endIntro();
 }
 function deriveBrief() {
@@ -1695,7 +1828,7 @@ function introStops() {
   return stops;
 }
 function introFocal() {
-  return Math.max(1, cv.clientHeight) * 1.1;
+  return Math.max(1, viewH()) * 1.1;
 }
 const INTRO_TITLE_S = 3, INTRO_OUTRO_S = 1.8;
 const INTRO_CY = 0.36;
@@ -1727,7 +1860,7 @@ function endIntro() {
   cam.x = ORIGIN.x;
   cam.y = ORIGIN.y;
   cam.zoom = 1;
-  if (cv.clientWidth > 0) cam.scale = Math.min(cv.clientWidth, cv.clientHeight) / 2 / viewR;
+  if (viewW() > 0) cam.scale = Math.min(viewW(), viewH()) / 2 / viewR;
 }
 function skipIntro() {
   if (!intro || intro.done || intro.skipped) return;
@@ -1739,7 +1872,7 @@ function introTotal() {
   return INTRO_TITLE_S + intro.stops.length * S.introFlyS + INTRO_OUTRO_S;
 }
 function wideRange() {
-  return introFocal() / (Math.max(1, Math.min(cv.clientWidth, cv.clientHeight)) / 2 / viewR);
+  return introFocal() / (Math.max(1, Math.min(viewW(), viewH())) / 2 / viewR);
 }
 function introPose(t) {
   const stops = intro.stops, N = stops.length, per = S.introFlyS;
@@ -1833,8 +1966,8 @@ function projPt(x, y, z) {
   if (depth < 0.02) return null;
   const k = P.focal / depth;
   return [
-    cv.clientWidth / 2 + (dx * P.r[0] + dy * P.r[1] + dz * P.r[2]) * k,
-    cv.clientHeight * P.cy - (dx * P.u[0] + dy * P.u[1] + dz * P.u[2]) * k,
+    viewW() / 2 + (dx * P.r[0] + dy * P.r[1] + dz * P.r[2]) * k,
+    viewH() * P.cy - (dx * P.u[0] + dy * P.u[1] + dz * P.u[2]) * k,
     k
   ];
 }
@@ -2445,6 +2578,56 @@ function gravitizeAll(freeBalls, list, others, shipObj, h) {
     if (shipObj) gravitize(k, shipObj, h);
   }
 }
+function fateOf(b, star) {
+  const r0 = Math.hypot(b.x - ORIGIN.x, b.y - ORIGIN.y), rx = b.x - star.x, ry = b.y - star.y;
+  if (b.rogue) {
+    if (BELT && r0 > BELT.r + OFF_TABLE_AU && rx * b.vx + ry * b.vy > 0 && (b.vx * b.vx + b.vy * b.vy) / 2 > G * star.mass / Math.hypot(rx, ry)) return { kind: "left" };
+  } else if (BELT && r0 > S.escapeBelts * BELT.r) return { kind: "escaped" };
+  const p = pocketAt(b.x, b.y, 0);
+  if (p) return { kind: "potted", pocket: p };
+  if (star.alive && dist(b.x, b.y, star.x, star.y) < starR() + ballR(b)) return { kind: "burned" };
+  return null;
+}
+function forwardCheck(years) {
+  const h = MAX_SUBSTEP_YR, n = Math.round(years / h), star = { ...STAR, x: ORIGIN.x, y: ORIGIN.y, vx: 0, vy: 0, alive: true, struck: false, trail: [] };
+  const list = PLANET_DEFS.map(derivePlanet).concat(ROGUE_DEFS.map(deriveRogue));
+  const spawn = shipSpawn(), events = [], touching = /* @__PURE__ */ new Set(), overShip = /* @__PURE__ */ new Set();
+  for (let i = 1; i <= n; i++) {
+    stepWorlds(list, h, star);
+    for (const b of list) if (b.alive) {
+      b.x += b.vx * h;
+      b.y += b.vy * h;
+    }
+    const t = i * h;
+    for (const b of list) {
+      if (!b.alive) continue;
+      const f = fateOf(b, star);
+      if (f) {
+        b.alive = false;
+        events.push({ t, kind: f.kind, id: b.id, name: b.name, pocket: f.pocket && f.pocket.name, x: b.x, y: b.y });
+        continue;
+      }
+      if (t < 1 && !overShip.has(b.id) && dist(b.x, b.y, spawn.x, spawn.y) < ballR(b) + HULL_LEN * 2) {
+        overShip.add(b.id);
+        events.push({ t, kind: "over-ship", id: b.id, name: b.name, x: b.x, y: b.y });
+      }
+    }
+    for (let a = 0; a < list.length; a++) for (let c = a + 1; c < list.length; c++) {
+      const p = list[a], q = list[c], key = p.id + "|" + q.id;
+      if (!p.alive || !q.alive) {
+        touching.delete(key);
+        continue;
+      }
+      if (dist(p.x, p.y, q.x, q.y) < ballR(p) + ballR(q)) {
+        if (!touching.has(key)) {
+          touching.add(key);
+          events.push({ t, kind: "overlap", id: p.id, other: q.id, name: p.name, otherName: q.name, x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 });
+        }
+      } else touching.delete(key);
+    }
+  }
+  return { years, events };
+}
 function pocketAt(x, y, r) {
   for (const p of POCKETS) if (dist(x, y, p.x, p.y) < p.size + r) return p;
   return null;
@@ -2562,31 +2745,24 @@ function simStep(h, offGravity) {
   }
   for (const b of bodies) {
     if (!b.alive) continue;
-    const rx = b.x - STAR.x, ry = b.y - STAR.y;
-    if (b.rogue && Math.hypot(b.x - ORIGIN.x, b.y - ORIGIN.y) > BELT.r + OFF_TABLE_AU && rx * b.vx + ry * b.vy > 0 && (b.vx * b.vx + b.vy * b.vy) / 2 > G * STAR.mass / Math.hypot(rx, ry)) {
-      b.alive = false;
+    const f = fateOf(b, STAR);
+    if (!f) continue;
+    b.alive = false;
+    if (f.kind === "left") {
       b.left = true;
       note(b.name + " HAS LEFT THE SYSTEM", b.color);
-      continue;
-    }
-    if (!b.rogue && BELT && Math.hypot(b.x - ORIGIN.x, b.y - ORIGIN.y) > S.escapeBelts * BELT.r) {
-      b.alive = false;
+    } else if (f.kind === "escaped") {
       b.escaped = true;
       score.escaped++;
       score.fouls++;
       note("ESCAPED: " + b.name + " left the table (foul)", "#ff5030");
-      continue;
-    }
-    const p = pocketAt(b.x, b.y, 0);
-    if (p) {
-      b.alive = false;
+    } else if (f.kind === "potted") {
       if (b.rogue) score.bonus++;
       else score.potted++;
       flash(b.x, b.y, 0.3, "#b48cff");
       burst(b.x, b.y, 0.12, "#b48cff");
-      note("POTTED: " + b.name + " into " + p.name + (b.rogue ? " (BONUS: the rogue)" : ""), "#b48cff");
-    } else if (STAR.alive && dist(b.x, b.y, STAR.x, STAR.y) < starR() + ballR(b)) {
-      b.alive = false;
+      note("POTTED: " + b.name + " into " + f.pocket.name + (b.rogue ? " (BONUS: the rogue)" : ""), "#b48cff");
+    } else {
       score.burned++;
       score.fouls++;
       flash(b.x, b.y, 0.25, "#ff5030");
@@ -2694,6 +2870,7 @@ function simStep(h, offGravity) {
     score.won = true;
     score.wonAt = simYears;
     note("TABLE CLEARED", "#ffe08a");
+    if (rec) rec.stopAfterTick = true;
   }
   return false;
 }
@@ -3425,20 +3602,32 @@ function frame(now) {
   if (!manualFrame) requestAnimationFrame(frame);
   const realDt = Math.min(0.05, (now - last) / 1e3);
   last = now;
+  tick(realDt);
+}
+let headless = false;
+const show = (realDt) => {
+  if (!headless) draw();
+};
+function tick(realDt) {
+  if (rec) recTick(realDt);
+  tickBody(realDt);
+  if (rec && rec.stopAfterTick) recStop("cleared");
+}
+function tickBody(realDt) {
   stepFx(realDt);
   layoutPockets();
   if (editing) {
     cam.x += (ORIGIN.x - cam.x) * Math.min(1, realDt * 4);
     cam.y += (ORIGIN.y - cam.y) * Math.min(1, realDt * 4);
-    cam.scale += (Math.min(cv.clientWidth, cv.clientHeight) / 2 / viewR * cam.zoom - cam.scale) * Math.min(1, realDt * 6);
-    draw();
+    cam.scale += (Math.min(viewW(), viewH()) / 2 / viewR * cam.zoom - cam.scale) * Math.min(1, realDt * 6);
+    show();
     return;
   }
   pollPad(realDt);
   if (intro) {
     stepIntro(realDt);
     if (intro) {
-      draw();
+      show();
       return;
     }
   }
@@ -3446,12 +3635,12 @@ function frame(now) {
     hitstop.t -= realDt;
     if (hitstop.t <= 0) endImpactFrame();
     else {
-      draw();
+      show();
       return;
     }
   }
   if (paused) {
-    draw();
+    show();
     return;
   }
   const slowKey = keys.q || pad.l1, fastKey = keys.e || pad.r1;
@@ -3521,20 +3710,20 @@ function frame(now) {
   for (const b of bodies) if (b.alive && (b.struck || b.rogue)) pushTrail(b.trail, b.x, b.y, 300);
   if (STAR.alive && STAR.struck) pushTrail(STAR.trail, STAR.x, STAR.y, 300);
   ghostTick ^= 1;
-  if (S.projections) {
+  if (S.projections && !headless) {
     if (shotHeld() || !ghost || ghostTick) buildGhost();
     easeGhost(realDt);
   } else ghost = null;
   const tx = S.camFollow ? ship.x : ORIGIN.x, ty = S.camFollow ? ship.y : ORIGIN.y;
   cam.x += (tx - cam.x) * Math.min(1, realDt * 4);
   cam.y += (ty - cam.y) * Math.min(1, realDt * 4);
-  const fit = Math.min(cv.clientWidth, cv.clientHeight) / 2 / viewR;
+  const fit = Math.min(viewW(), viewH()) / 2 / viewR;
   cam.scale += (fit * cam.zoom - cam.scale) * Math.min(1, realDt * 6);
   for (const f of flashes) f.t += realDt;
   flashes = flashes.filter((f) => f.t < 0.8);
   for (const n of notices) n.t += realDt;
   notices = notices.filter((n) => n.t < 20);
-  draw();
+  show();
 }
 function pushTrail(trail, x, y, cap) {
   const l = trail[trail.length - 1];
@@ -3545,6 +3734,13 @@ function pushTrail(trail, x, y, cap) {
 const cv = document.getElementById("cv");
 const cx = cv.getContext("2d");
 let DPR = 1;
+let replayView = null;
+function viewW() {
+  return replayView ? replayView.W : cv.clientWidth;
+}
+function viewH() {
+  return replayView ? replayView.H : cv.clientHeight;
+}
 function resize() {
   DPR = window.devicePixelRatio || 1;
   cv.width = Math.floor(innerWidth * DPR);
@@ -3552,14 +3748,17 @@ function resize() {
   cv.style.width = innerWidth + "px";
   cv.style.height = innerHeight + "px";
 }
-addEventListener("resize", resize);
+addEventListener("resize", () => {
+  resize();
+  if (rec) recEvent({ k: "view", W: viewW(), H: viewH() });
+});
 resize();
 function worldToScreen(x, y) {
   if (persp) return projPt(x, y);
-  return [(x - cam.x) * cam.scale + cv.clientWidth / 2 + fx.shakeX, (y - cam.y) * cam.scale + cv.clientHeight / 2 + fx.shakeY];
+  return [(x - cam.x) * cam.scale + viewW() / 2 + fx.shakeX, (y - cam.y) * cam.scale + viewH() / 2 + fx.shakeY];
 }
 function screenToWorld(sx, sy) {
-  return [(sx - cv.clientWidth / 2) / cam.scale + cam.x, (sy - cv.clientHeight / 2) / cam.scale + cam.y];
+  return [(sx - viewW() / 2) / cam.scale + cam.x, (sy - viewH() / 2) / cam.scale + cam.y];
 }
 const stars = [];
 for (let i = 0; i < 500; i++) stars.push({ x: Math.random(), y: Math.random(), a: 0.15 + Math.random() * 0.6, r: Math.random() < 0.1 ? 1.4 : 0.8 });
@@ -4140,7 +4339,7 @@ function circle(sx, sy, r, fill, stroke, width) {
   }
 }
 function draw(realDt) {
-  const W = cv.clientWidth, H = cv.clientHeight;
+  const W = viewW(), H = viewH();
   cx.setTransform(DPR, 0, 0, DPR, 0, 0);
   cx.fillStyle = "#05070d";
   cx.fillRect(0, 0, W, H);
@@ -4769,6 +4968,7 @@ function renderChamber() {
   el2.querySelectorAll(".slot .type").forEach((t, i) => t.addEventListener("click", () => cycleSlot(slots[i])));
 }
 function cycleSlot(sl) {
+  if (rec) recEvent({ k: "slot", idx: sl.idx, type: sl.type });
   if (!sl.type) return;
   const next = TYPE_ORDER[(TYPE_ORDER.indexOf(sl.type) + 1) % TYPE_ORDER.length];
   if (sl.idx < 0) {
@@ -4819,7 +5019,7 @@ function stickVec(ax, ay, dead) {
   return [ax / m * t, ay / m * t, t];
 }
 function rumble(strength, ms) {
-  if (!pad.active) return;
+  if (!pad.active || replaying) return;
   const gp = navigator.getGamepads ? navigator.getGamepads()[pad.index] : null;
   if (!gp || !gp.vibrationActuator) return;
   try {
@@ -4858,7 +5058,8 @@ function padCycleType(dir) {
   note(SLOT_NAMES[pad.sel] + ": " + BALL_TYPES[next].name, "#cfe0ff");
 }
 function pollPad(realDt) {
-  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  const pads = replaying ? replayPads() : navigator.getGamepads ? navigator.getGamepads() : [];
+  if (rec) recPads(pads);
   let gp = null;
   for (const g of pads) if (g && g.connected) {
     gp = g;
@@ -5180,8 +5381,160 @@ function drawPadMenu(W, H) {
   cx.fillStyle = pad.standard ? M : "#e8b463";
   cx.fillText(pad.standard ? "OPTIONS SWITCHES THE SCHEME" : "NON-STANDARD MAPPING: BUTTONS MAY BE MISREAD", x0 + 14, y0 + ph - 11);
 }
+let rec = null, replaying = null;
+const REC_FIELDS = ["code", "key", "repeat", "shiftKey", "ctrlKey", "metaKey", "altKey", "button", "clientX", "clientY", "deltaY"];
+function inputState() {
+  return JSON.parse(JSON.stringify({ keys, mouse, cam, pad, lastPower, qArmed, paused, mouseDrift, mouseADS }));
+}
+function setInputState(st) {
+  for (const k in keys) delete keys[k];
+  Object.assign(keys, st.keys);
+  Object.assign(mouse, st.mouse);
+  Object.assign(cam, st.cam);
+  for (const k of Object.keys(pad)) if (!(k in st.pad)) delete pad[k];
+  Object.assign(pad, st.pad);
+  lastPower = st.lastPower;
+  qArmed = st.qArmed;
+  paused = st.paused;
+  mouseDrift = st.mouseDrift;
+  mouseADS = st.mouseADS;
+}
+function recStart(onDone) {
+  rec = {
+    onDone,
+    frames: [],
+    events: [],
+    pads: [],
+    lastPad: "",
+    stopAfterTick: false,
+    start: { level: JSON.parse(JSON.stringify(LEVEL)), seed: rackSeed, S: { ...S }, view: { W: viewW(), H: viewH() }, input: inputState() }
+  };
+}
+function recEvent(ev) {
+  ev.f = rec.frames.length;
+  rec.events.push(ev);
+}
+function recInput(kind, e) {
+  if (!rec) return;
+  const ev = { k: kind, tag: e.target && e.target.tagName || "" };
+  for (const f of REC_FIELDS) if (e[f] !== void 0) ev[f] = e[f];
+  recEvent(ev);
+}
+function recTick(realDt) {
+  rec.frames.push(realDt);
+}
+function recPads(pads) {
+  let gp = null;
+  for (const g of pads) if (g && g.connected) {
+    gp = g;
+    break;
+  }
+  const snap = gp ? { id: gp.id, index: gp.index, mapping: gp.mapping, buttons: gp.buttons.map((b) => [!!(b && b.pressed), b ? b.value : 0]), axes: [...gp.axes] } : null;
+  const key = JSON.stringify(snap);
+  if (key !== rec.lastPad) {
+    rec.pads.push([rec.frames.length - 1, snap]);
+    rec.lastPad = key;
+  }
+}
+function recStop(why) {
+  const r = rec;
+  rec = null;
+  if (!r) return;
+  const sol = {
+    solutionVersion: 1,
+    level: r.start.level.id,
+    levelHash: levelHash(r.start.level),
+    recorded: (/* @__PURE__ */ new Date()).toISOString(),
+    seed: r.start.seed,
+    settings: r.start.S,
+    view: r.start.view,
+    start: r.start.input,
+    frames: r.frames,
+    events: r.events,
+    pads: r.pads,
+    result: runResult()
+  };
+  note(why === "cleared" ? "RECORDED: the table cleared, " + sol.frames.length + " frames" : "RECORDING STOPPED", "#e8b463");
+  if (r.onDone) r.onDone(sol, why);
+}
+function runResult() {
+  return {
+    won: score.won,
+    years: score.won ? score.wonAt : simYears,
+    shots: score.shots,
+    fouls: score.fouls,
+    potted: score.potted,
+    bonus: score.bonus,
+    left: bodies.filter((b) => b.alive && !b.rogue).map((b) => b.name).concat(STAR.alive ? [STAR.name] : [])
+  };
+}
+function levelHash(L) {
+  let h = 2166136261;
+  const t = JSON.stringify(L);
+  for (let i = 0; i < t.length; i++) {
+    h ^= t.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(16);
+}
+function replayPads() {
+  const snap = replaying.pad;
+  if (!snap) return [];
+  return [{
+    connected: true,
+    id: snap.id,
+    index: snap.index,
+    mapping: snap.mapping,
+    axes: snap.axes,
+    vibrationActuator: null,
+    buttons: snap.buttons.map(([pressed, value]) => ({ pressed, value }))
+  }];
+}
+function replaySolution(sol) {
+  const keep = { S: { ...S }, input: inputState(), editing, seed: rackSeed, pinned: seedPinned };
+  const fake = (ev) => ({ ...ev, target: { tagName: ev.tag }, preventDefault() {
+  }, stopPropagation() {
+  } });
+  const handlers = { keydown: onKeyDown, keyup: onKeyUp, blur: onBlur, mousemove: onMouseMove, mousedown: onMouseDown, mouseup: onMouseUp, wheel: onWheel };
+  let out;
+  try {
+    replaying = { pad: null };
+    headless = true;
+    replayView = sol.view;
+    editing = false;
+    Object.assign(S, sol.settings);
+    rackSeed = sol.seed;
+    seedPinned = true;
+    applyLevel(LEVEL);
+    setInputState(sol.start);
+    let ei = 0, pi = 0;
+    for (let f = 0; f < sol.frames.length; f++) {
+      while (ei < sol.events.length && sol.events[ei].f === f) {
+        const ev = sol.events[ei++];
+        if (ev.k === "slot") cycleSlot({ idx: ev.idx, type: ev.type });
+        else if (ev.k === "view") replayView = { W: ev.W, H: ev.H };
+        else handlers[ev.k](fake(ev));
+      }
+      while (pi < sol.pads.length && sol.pads[pi][0] <= f) replaying.pad = sol.pads[pi++][1];
+      tick(sol.frames[f]);
+    }
+    const r = runResult();
+    const same = r.won === sol.result.won && r.years === sol.result.years && r.shots === sol.result.shots && r.fouls === sol.result.fouls;
+    out = { ...r, asRecorded: same, sameLevel: levelHash(LEVEL) === sol.levelHash, frames: sol.frames.length };
+  } finally {
+    replaying = null;
+    headless = false;
+    replayView = null;
+    editing = keep.editing;
+    Object.assign(S, keep.S);
+    rackSeed = keep.seed;
+    seedPinned = keep.pinned;
+    setInputState(keep.input);
+  }
+  return out;
+}
 const KEYMAP = { KeyW: "w", KeyA: "a", KeyS: "s", KeyD: "d", KeyQ: "q", KeyE: "e" };
-addEventListener("keydown", (e) => {
+function onKeyDown(e) {
   if (["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName)) return;
   if (editing) {
     editor.key(e);
@@ -5193,7 +5546,7 @@ addEventListener("keydown", (e) => {
     return;
   }
   if (e.code === "KeyL" && !e.repeat) {
-    editor.toggle();
+    if (!replaying) editor.toggle();
     return;
   }
   pad.owns = false;
@@ -5236,15 +5589,15 @@ addEventListener("keydown", (e) => {
     spaceKey();
     e.preventDefault();
   }
-});
-addEventListener("keyup", (e) => {
+}
+function onKeyUp(e) {
   if (KEYMAP[e.code]) keys[KEYMAP[e.code]] = false;
-});
-addEventListener("blur", () => {
+}
+function onBlur() {
   for (const k in keys) keys[k] = false;
-});
+}
 let mouseDrift = 0;
-cv.addEventListener("mousemove", (e) => {
+function onMouseMove(e) {
   if (editing) {
     editor.mouse("move", e);
     return;
@@ -5255,8 +5608,8 @@ cv.addEventListener("mousemove", (e) => {
   }
   mouse.sx = e.clientX;
   mouse.sy = e.clientY;
-});
-cv.addEventListener("mousedown", (e) => {
+}
+function onMouseDown(e) {
   if (editing) {
     editor.mouse("down", e);
     return;
@@ -5297,8 +5650,8 @@ cv.addEventListener("mousedown", (e) => {
     return;
   }
   drag = { ax: e.clientX, ay: e.clientY, dir: [Math.cos(ship.nose), Math.sin(ship.nose)] };
-});
-addEventListener("mouseup", (e) => {
+}
+function onMouseUp(e) {
   if (editing) {
     editor.mouse("up", e);
     return;
@@ -5335,11 +5688,39 @@ addEventListener("mouseup", (e) => {
     }
     reaching = false;
   }
-});
+}
 cv.addEventListener("contextmenu", (e) => e.preventDefault());
-cv.addEventListener("wheel", (e) => {
+function onWheel(e) {
   cam.zoom = Math.max(0.4, Math.min(6, cam.zoom * Math.exp(-e.deltaY * 12e-4)));
   e.preventDefault();
+}
+addEventListener("keydown", (e) => {
+  recInput("keydown", e);
+  onKeyDown(e);
+});
+addEventListener("keyup", (e) => {
+  recInput("keyup", e);
+  onKeyUp(e);
+});
+addEventListener("blur", (e) => {
+  recInput("blur", e);
+  onBlur();
+});
+cv.addEventListener("mousemove", (e) => {
+  recInput("mousemove", e);
+  onMouseMove(e);
+});
+cv.addEventListener("mousedown", (e) => {
+  recInput("mousedown", e);
+  onMouseDown(e);
+});
+addEventListener("mouseup", (e) => {
+  recInput("mouseup", e);
+  onMouseUp(e);
+});
+cv.addEventListener("wheel", (e) => {
+  recInput("wheel", e);
+  onWheel(e);
 }, { passive: false });
 function loadSettings() {
   const read = (key, into) => {
@@ -5440,6 +5821,7 @@ function buildPanel() {
   el2.innerHTML = html;
   el2.querySelectorAll("input").forEach((inp) => {
     inp.addEventListener("input", () => {
+      if (rec) recStop("tuned");
       const k = inp.dataset.k;
       let shown = inp.value;
       if (inp.dataset.log) {
@@ -5457,6 +5839,7 @@ function buildPanel() {
     });
   });
   document.getElementById("resetBtn").addEventListener("click", () => {
+    if (rec) recStop("tuned");
     const scaled = S.systemScale !== DEFAULTS.systemScale;
     try {
       localStorage.removeItem(PLAYER_KEY);
@@ -5471,6 +5854,7 @@ function buildPanel() {
     }
   });
   document.getElementById("rulesBtn").addEventListener("click", () => {
+    if (rec) recStop("tuned");
     const scaled = S.systemScale !== TABLE_RULES.systemScale;
     Object.assign(S, TABLE_RULES);
     saveSettings();
@@ -5494,6 +5878,37 @@ window.RIG = {
   level: () => JSON.parse(JSON.stringify(LEVEL)),
   levels: () => LEVEL_IDS.slice(),
   editor: () => editor,
+  forward: (years) => forwardCheck(years || S.forwardYears),
+  recording: () => rec ? { frames: rec.frames.length, events: rec.events.length } : null,
+  // tests: record any run by hand (the editor keeps only runs that clear), and the full end state to compare
+  recordStart: () => {
+    let got = null;
+    rec = { frames: [] };
+    RIG.seed(rackSeed);
+    resetWorld();
+    seedPinned = false;
+    recStart((sol) => {
+      got = sol;
+    });
+    return () => {
+      recStop("stopped");
+      return got;
+    };
+  },
+  fullState: () => JSON.parse(JSON.stringify({
+    simYears,
+    ship,
+    acb,
+    balls: balls.map((k) => ({ ...k, flash: null, trail: null })),
+    chamber,
+    score,
+    bodies: bodies.map((b) => ({ ...b, trail: null })),
+    star: { ...STAR, trail: null },
+    belt,
+    sliderT,
+    cam
+  })),
+  replay: (sol) => replaySolution(sol),
   editing: () => editing,
   endIntro: () => endIntro(),
   briefing: () => introStops().map((st) => ({ key: st.key, mass: st.mass, R: st.R, lines: inspectorLines(st) })),
@@ -5649,6 +6064,7 @@ editor = createEditor({
   },
   // a briefing under way is dropped, not finished: Robert does not name what the player has not
   enter: (L) => {
+    if (rec) recStop("stopped");
     if (intro) {
       intro = null;
       persp = null;
@@ -5667,10 +6083,22 @@ editor = createEditor({
     applyLevel(L);
     playUI(true);
   },
+  // PLAY, recording: the rack with no briefing, and every input from here on kept (THE SOLVE CHECK)
+  record: (L, onDone) => {
+    editing = false;
+    rec = { frames: [] };
+    applyLevel(L);
+    playUI(true);
+    recStart(onDone);
+    note("RECORDING: clear the table; L stops", "#ff8c70");
+  },
+  recording: () => !!rec,
+  replay: (sol) => replaySolution(sol),
   scale: () => S.systemScale,
   cx,
   worldToScreen,
   screenToWorld,
+  forward: () => forwardCheck(S.forwardYears),
   // a rogue's path from the rack as the game made it, flown on the game's own stepWorlds
   rogueTrack: (id, years) => {
     const b = bodies.find((q) => q.id === id);
@@ -5752,7 +6180,17 @@ requestAnimationFrame(frame);</script>
 #edpanel .pair { display: flex; gap: 4px; align-items: center; }
 #edpanel fieldset { border: 1px solid #22304a; border-radius: 4px; margin: 6px 0; padding: 4px 8px; }
 #edpanel legend { color: #8fc3e8; padding: 0 4px; }
-@media (max-width: 700px) { #edpanel { top: auto; bottom: 8px; left: 8px; right: 8px; width: auto; height: 40vh; } }</style>
+@media (max-width: 700px) { #edpanel { top: auto; bottom: 8px; left: 8px; right: 8px; width: auto; height: 40vh; } }
+#edbar .fwd { color: #9fb4cc; margin-top: 2px; }
+#edbar .fwd.ok { color: #8fe8b0; margin-top: 5px; }
+#edbar .fwd.potted, #edbar .fwd.overlap { color: #e8b463; }
+#edbar .fwd.burned, #edbar .fwd.escaped, #edbar .fwd.over-ship { color: #ff8c70; }
+#edbar .fwd.left { color: #8fc3e8; }
+#edbar button.rec, #edenter.rec { border-color: #a04040; color: #ff8c70; }
+#edbar .solve { color: #9fb4cc; margin-top: 2px; }
+#edbar .solve.none { color: #e8b463; }
+#edbar .solve.ok { color: #8fe8b0; }
+#edbar .solve.bad { color: #ff8c70; }</style>
 </head>
 <body>
 <canvas id="cv"></canvas>
