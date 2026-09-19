@@ -20,6 +20,10 @@
   with a message on screen, and there is no hardcoded table behind it. The settings are
   split the same way (§11.5 step 2): TABLE_RULES are the game's, the same on every table,
   and PLAYER_DEFAULTS are the player's; the panel shows the two apart.
+  An orbit is a circle (radius) or an ellipse (semiMajor, eccentricity, periapsisAngle),
+  either one retrograde, derived in closed form by keplerState. A "rogue" arrives from
+  outside on authored state, rolls its chance each rack, draws where it has been, may be
+  bound (and come round again) or unbound (and leave), and is a bonus: never needed to clear.
 
   THE LOOP
     1. The ship orbits the star with the ACB attached. Q/E slide time.
@@ -711,7 +715,7 @@ const TYPE_ORDER = ["standard", "thermo", "grav", "night"];
 // Orbits are intent (radius + angle, radians, +y DOWN) and derived, as Sim.StableOrbit does.
 const LEVEL_SCHEMA_VERSION = 2;
 const LEVEL_SCHEMA = {
-  // type: "number" | "int" | "string" | "color" | "ball" | "sprite" | "list" | "traits" | a shape below
+  // type: "number" | "int" | "bool" | "string" | "color" | "ball" | "sprite" | "list" | "traits" | a shape below
   level:   { schemaVersion: { type: "int" }, id: { type: "string" }, name: { type: "string" },   // name: the level's, and the system's
              viewRadius: { type: "number", min: 0.1 },         // AU: the whole-table camera, half the screen's short side
              ship: { type: "ship" }, loadout: { type: "loadout" }, bodies: { type: "list", of: "body" } },
@@ -719,7 +723,20 @@ const LEVEL_SCHEMA = {
              traits: { type: "traits", optional: true }, brief: { type: "brief" } },
   loadout: { nose: { type: "ball" }, chamber: { type: "list", of: "ball", max: 2 } },   // the chamber menu has two slots
   polar:   { radius: { type: "number", min: 0 }, angle: { type: "number" } },          // AU from the table's centre, radians
-  orbit:   { around: { type: "string" }, radius: { type: "number", min: 1e-3 }, angle: { type: "number" } },   // circular, for now
+  // AN ORBIT, one of two shapes, both derived in closed form (keplerState). Circular: radius.
+  // Elliptical: semiMajor, eccentricity and periapsisAngle (where the closest approach is).
+  // angle is where the body starts, seen from what it orbits, in both. retrograde runs it clockwise.
+  orbit:   { around: { type: "string" }, angle: { type: "number" },
+             radius: { type: "number", min: 1e-3, optional: true },
+             semiMajor: { type: "number", min: 1e-3, optional: true }, eccentricity: { type: "number", min: 0, optional: true },
+             periapsisAngle: { type: "number", optional: true }, retrograde: { type: "bool", optional: true } },
+  // A ROGUE'S ARRIVAL is raw state, on purpose: a rogue has no orbit to derive, so where it
+  // starts and how fast it is going IS the intent. The loader checks the physics instead
+  // (checkRogue). There is no arrival time: it is on the table from the first frame, outside
+  // the orbits and inbound, and "arriving" is something it does by flying.
+  arrival: { x: { type: "number" }, y: { type: "number" },       // AU from the table's centre, +y DOWN
+             vx: { type: "number" }, vy: { type: "number" } },  // AU/yr
+
   // the inspector card. diameterKm feeds size and composition (density from mass); note is Robert's, hand-written
   brief:   { class: { type: "string" }, diameterKm: { type: "number", min: 0, optional: true },
              tempC: { type: "number", optional: true }, note: { type: "string" } },
@@ -730,6 +747,11 @@ const LEVEL_SCHEMA = {
              mass: { type: "number", min: 0 }, drawR: { type: "number", min: 0 }, color: { type: "color" },
              atmosphere: { type: "color", optional: true },     // the faux-sphere halo; without it, the body colour lifted
              orbit: { type: "orbit" }, traits: { type: "traits", optional: true }, brief: { type: "brief" } },
+  rogue:   { kind: {}, id: { type: "string" }, name: { type: "string" }, sprite: { type: "sprite" },
+             mass: { type: "number", min: 0 }, drawR: { type: "number", min: 0 }, color: { type: "color" },
+             atmosphere: { type: "color", optional: true }, arrival: { type: "arrival" },
+             chance: { type: "number", min: 0 },               // 0..1: is it on this table at all (rogueArrives)
+             traits: { type: "traits", optional: true }, brief: { type: "brief" } },
   pocket:  { kind: {}, id: { type: "string" }, name: { type: "string" }, color: { type: "color" }, position: { type: "polar" },
              mass: { type: "number", min: 0 },                 // solar masses, pulling only inside reach
              reach: { type: "number", min: 0 },                // AU: the pull's radius, and the dashed ring
@@ -739,17 +761,47 @@ const LEVEL_SCHEMA = {
              sections: { type: "int", min: 1 }, halfWidth: { type: "number", min: 0 },
              restitution: { type: "number", min: 0 } },       // radial bounce off an intact section: 1 is elastic
 };
+const LEVEL_KINDS = ["star", "planet", "rogue", "pocket", "belt"];
 // THE TRAITS: which kinds may carry each ("ship" is the ark), and its fields. A trait with no
 // fields is written as its name, "fragile"; one with fields as { "eats-belt": { ... } }.
 const LEVEL_TRAITS = {
-  fragile:     { on: ["planet"] },                // shatters when a thermonuclear hits it
-  inhabited:   { on: ["planet", "ship"] },        // an anomaly on the card
+  fragile:     { on: ["planet", "rogue"] },       // shatters when a thermonuclear hits it
+  inhabited:   { on: ["planet", "rogue", "ship"] },   // an anomaly on the card
   "eats-belt": { on: ["pocket"], fields: {        // sits out by the belt and swallows the sections that turn through its reach
     radius: { type: "number", min: 0 },           // AU from the centre, replacing its position's radius
     years: { type: "number", min: 1e-6 } } },     // sim years for a section inside the reach to go
 };
 const traitOf = (o, t) => { for (const x of o.traits || []) { if (x === t) return {}; if (typeof x === "object" && x[t]) return x[t]; } return null; };
 const hasTrait = (o, t) => !!traitOf(o, t);
+// The outermost reach of the level's orbits: a planet's apoapsis, AU, unscaled.
+function outermostAU(raw) {
+  let m = 0;
+  for (const b of raw.bodies) if (b.kind === "planet") m = Math.max(m, b.orbit.radius !== undefined ? b.orbit.radius : b.orbit.semiMajor * (1 + b.orbit.eccentricity));
+  return m;
+}
+// A ROGUE MUST COME TO THE TABLE. Unity's LevelLoader checks, carried over: it starts outside
+// every orbit, inbound, and passes inside the outermost orbit without touching the star. It
+// may be BOUND, which Unity only warns about, and so do we: an unbound body crosses the table
+// at no less than the escape speed there, about 4 AU/yr on level-01, and level-01's rogue was
+// slowed until it was bound because at that speed it could not be caught (the note on its
+// arrival in Assets/Levels/level-01.json has the numbers). The star's size here is the
+// game's rule (TABLE_RULES), never this browser's tuning, so a level does not load on one
+// machine and fail on another.
+function checkRogue(r, raw, star, fail) {
+  const a = r.arrival, gm = G * star.mass, at = r.id + ".arrival";
+  const rr = Math.hypot(a.x, a.y), v2 = a.vx * a.vx + a.vy * a.vy;
+  if (rr < 1e-9) fail(at + ": it starts on the star");
+  const energy = v2 / 2 - gm / rr;
+  if (energy <= 0) console.warn("level: " + at + " is bound to the star (specific energy " + energy.toFixed(3) + "), so it comes back; allowed, as in Unity");
+  const out = outermostAU(raw);
+  if (rr <= out) fail(at + ": starts " + rr.toFixed(3) + " AU out, inside the outermost orbit (" + out.toFixed(3) + " AU): a rogue arrives from outside");
+  if (a.x * a.vx + a.y * a.vy >= 0) fail(at + ": moving away from the star: a rogue arrives inbound");
+  const h = a.x * a.vy - a.y * a.vx, e = Math.sqrt(1 + 2 * energy * h * h / (gm * gm)), q = h * h / (gm * (1 + e));
+  if (q >= out) fail(at + ": passes " + q.toFixed(3) + " AU from the star, outside every orbit (" + out.toFixed(3) + " AU): it misses the table");
+  const burn = Math.max(star.drawR * TABLE_RULES.ballScale, 0.1) + Math.max(r.drawR * TABLE_RULES.ballScale, TABLE_RULES.minBallAU);
+  if (q <= burn) fail(at + ": passes " + q.toFixed(3) + " AU from the star, inside its burn (" + burn.toFixed(3) + " AU): it would fly into the star");
+  if (r.chance > 1) fail(r.id + ".chance: 0 to 1, not " + r.chance);
+}
 function loadLevel(elId) {
   const fail = (msg) => {
     const box = document.createElement("pre");
@@ -770,6 +822,7 @@ function loadLevel(elId) {
       if (typeof v !== "number" || !isFinite(v)) fail(at + ": a number, not " + JSON.stringify(v));
       if (t === "int" && !Number.isInteger(v)) fail(at + ": a whole number, not " + v);
       if (f.min != null && v < f.min) fail(at + ": at least " + f.min + ", not " + v);
+    } else if (t === "bool") { if (typeof v !== "boolean") fail(at + ": true or false, not " + JSON.stringify(v));
     } else if (t === "string") { if (typeof v !== "string" || !v) fail(at + ": a non-empty string");
     } else if (t === "color") { if (typeof v !== "string" || !/^#[0-9a-fA-F]{6}$/.test(v)) fail(at + ": a colour like #ff4b2b, not " + JSON.stringify(v));
     } else if (t === "ball") { if (!BALL_TYPES[v]) fail(at + ": a ball type (" + Object.keys(BALL_TYPES).join(", ") + "), not " + JSON.stringify(v));
@@ -796,8 +849,7 @@ function loadLevel(elId) {
       }
     } else if (t === "body") {
       if (!isObj(v)) fail(at + ": a body object");
-      if (!LEVEL_SCHEMA[v.kind] || ["level", "ship", "loadout", "polar", "orbit", "brief"].includes(v.kind))
-        fail(at + ": unknown kind " + JSON.stringify(v.kind) + " (known: star, planet, pocket, belt)");
+      if (!LEVEL_KINDS.includes(v.kind)) fail(at + ": unknown kind " + JSON.stringify(v.kind) + " (known: " + LEVEL_KINDS.join(", ") + ")");
       shape(v, v.kind, at + " (" + v.kind + (v.id ? " " + v.id : "") + ")");
     } else shape(v, t, at);
   };
@@ -822,7 +874,16 @@ function loadLevel(elId) {
   if (!of("pocket").length) fail("no pockets: nowhere to pot it");
   if (of("belt").length !== 1) fail("one belt, for now");
   if (of("pocket").filter(p => hasTrait(p, "eats-belt")).length > 1) fail("one pocket at most eats the belt");
-  for (const p of of("planet")) if (p.orbit.around !== "star") fail(p.id + ".orbit.around: \"star\" (the only star), not " + JSON.stringify(p.orbit.around));
+  const star = of("star")[0];
+  for (const p of of("planet")) {
+    const o = p.orbit, at = p.id + ".orbit";
+    if (o.around !== "star") fail(at + ".around: \"star\" (the only star), not " + JSON.stringify(o.around));
+    const ell = ["semiMajor", "eccentricity", "periapsisAngle"].filter(k => o[k] !== undefined);
+    if (o.radius !== undefined && ell.length) fail(at + ": circular (radius) or elliptical (semiMajor, eccentricity, periapsisAngle), not both");
+    if (o.radius === undefined && ell.length !== 3) fail(at + ": needs radius, or all of semiMajor, eccentricity and periapsisAngle");
+    if (o.eccentricity !== undefined && o.eccentricity >= 1) fail(at + ".eccentricity: below 1 (1 or more never comes back: that is a rogue), not " + o.eccentricity);
+  }
+  for (const r of of("rogue")) checkRogue(r, raw, star, fail);
   return raw;
 }
 const LEVEL = loadLevel("level-01");
@@ -831,7 +892,14 @@ const STAR_DEF = LEVEL_OF("star")[0];
 const STAR = { id: STAR_DEF.id, name: STAR_DEF.name, sprite: STAR_DEF.sprite, x: 0, y: 0, vx: 0, vy: 0, mass: STAR_DEF.mass, drawR: STAR_DEF.drawR,
                color: STAR_DEF.color, fragile: false, alive: true, struck: false, trail: [], spin: 0 };
 const ORIGIN = { x: 0, y: 0 };   // the table's centre: where the star starts, and the belt's axis
-const PLANET_DEFS = LEVEL_OF("planet").map(p => ({ id: p.id, name: p.name, sprite: p.sprite, r: p.orbit.radius, a: p.orbit.angle,
+// r is the orbit's size (the radius, or the semi-major axis); e 0 is a circle
+const PLANET_DEFS = LEVEL_OF("planet").map(p => {
+  const o = p.orbit, circ = o.radius !== undefined;
+  return { id: p.id, name: p.name, sprite: p.sprite, r: circ ? o.radius : o.semiMajor, a: o.angle,
+    e: circ ? 0 : o.eccentricity, w: circ ? 0 : o.periapsisAngle, retro: !!o.retrograde,
+    mass: p.mass, drawR: p.drawR, color: p.color, atmosphere: p.atmosphere || null, fragile: hasTrait(p, "fragile") };
+});
+const ROGUE_DEFS = LEVEL_OF("rogue").map(p => ({ id: p.id, name: p.name, sprite: p.sprite, arrival: p.arrival, chance: p.chance,
   mass: p.mass, drawR: p.drawR, color: p.color, atmosphere: p.atmosphere || null, fragile: hasTrait(p, "fragile") }));
 // WHO CAN HIT SOLARIS. Every other cue ball burns in it. The Night ball strikes it and
 // comes back out; the thermonuclear strikes it too and is spent there, going off as it
@@ -932,17 +1000,39 @@ function beltBreak(i, x, y) {
   note("BELT BREACHED: section " + i + " destroyed", "#c8b090");
 }
 
-function orbitState(r, a, over) {
-  const v = Math.sqrt(G * STAR.mass / r) * (over || 1);
-  return { x: STAR.x + r * Math.cos(a), y: STAR.y + r * Math.sin(a), vx: -v * Math.sin(a), vy: v * Math.cos(a) };
-}
 // NAMES. Every celestial body is "???" until the briefing names it, by the player or by
 // Robert (the level's own name). Per body key, kept across racks for the page.
 const bodyNames = {};   // key -> { name, by: "player" | "rc" }
 function nameFor(key, def) { return bodyNames[key] ? bodyNames[key].name : def; }
+// KEPLER, CLOSED FORM, the elliptical Sim.StableOrbit. At true anomaly nu = angle - periapsis
+// the radius is p / (1 + e cos nu) with p = a (1 - e^2), and the velocity is sqrt(GM/p) times
+// (e sin nu) outward plus (1 + e cos nu) along the orbit. e = 0 is the circular orbit.
+// Retrograde is the same ellipse flown backwards: the velocity negated.
+function keplerState(a, e, w, ang, retro) {
+  const p = a * (1 - e * e), nu = ang - w, r = p / (1 + e * Math.cos(nu)), k = Math.sqrt(G * STAR.mass / p) * (retro ? -1 : 1);
+  const vr = k * e * Math.sin(nu), vt = k * (1 + e * Math.cos(nu)), c = Math.cos(ang), sn = Math.sin(ang);
+  return { x: STAR.x + r * c, y: STAR.y + r * sn, vx: vr * c - vt * sn, vy: vr * sn + vt * c };
+}
+// A ROGUE'S CHANCE is rolled from the level, the body and the rack's seed, so a seed
+// reproduces a table exactly; 0 and 1 are exact. R racks again with a fresh seed.
+let rackSeed = 0, seedPinned = false;   // RIG.seed pins it, for tests
+function rogueArrives(d) {
+  let h = 2166136261 ^ rackSeed;
+  for (const ch of LEVEL.id + "/" + d.id) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
+  h ^= h >>> 15; h = Math.imul(h, 2246822519); h ^= h >>> 13;
+  return (h >>> 0) / 4294967296 < d.chance;
+}
+// System size scales a rogue the way Kepler scales an orbit: positions by k, speeds by
+// 1/sqrt(k), so it flies the same shape across the bigger table.
+function deriveRogue(d) {
+  const k = S.systemScale, v = 1 / Math.sqrt(k);
+  return { x: STAR.x + d.arrival.x * k, y: STAR.y + d.arrival.y * k, vx: d.arrival.vx * v, vy: d.arrival.vy * v, rogue: true,
+           id: d.id, name: nameFor(d.id, d.name), sprite: d.sprite, mass: d.mass, drawR: d.drawR, color: d.color, atmosphere: d.atmosphere,
+           fragile: d.fragile, integrity: 1, orbitR: 0, struck: false, alive: true, trail: [], spin: Math.random() * TAU };
+}
 function derivePlanet(d) {
   const r = d.r * S.systemScale;
-  return { ...orbitState(r, d.a), id: d.id, name: nameFor(d.id, d.name), sprite: d.sprite, mass: d.mass, drawR: d.drawR,
+  return { ...keplerState(r, d.e, d.w, d.a, d.retro), orbit: { a: r, e: d.e, w: d.w }, id: d.id, name: nameFor(d.id, d.name), sprite: d.sprite, mass: d.mass, drawR: d.drawR,
            color: d.color, atmosphere: d.atmosphere, fragile: d.fragile, integrity: 1, orbitR: r, struck: false, alive: true, trail: [], spin: Math.random() * TAU };
 }
 // SYSTEM SIZE. One slider scales every authored radius: the orbits and the ship's ring
@@ -959,6 +1049,7 @@ function starR() { return ballR(STAR); }
 function contactList(list, star) { return star.alive ? list.concat([star]) : list; }
 
 function resetWorld() {
+  if (!seedPinned) rackSeed = (Math.random() * 2 ** 31) | 0;   // each rack rolls its rogues afresh
   applySystemScale();
   STAR.name = nameFor("star", STAR_DEF.name);
   for (const p of POCKETS) p.name = nameFor(p.id, p.id);
@@ -966,7 +1057,7 @@ function resetWorld() {
   // where Solaris was struck or potted they were derived around where it had got to, so R
   // racked the worlds out past the belt and they flew off the table.
   Object.assign(STAR, { x: 0, y: 0, vx: 0, vy: 0, alive: true, struck: false, trail: [], broken: false, brokenNoted: false });
-  bodies = PLANET_DEFS.map(derivePlanet);
+  bodies = PLANET_DEFS.map(derivePlanet).concat(ROGUE_DEFS.filter(rogueArrives).map(deriveRogue));
   ship = { ...shipSpawn(), trail: [] };
   // THE NOSE and THE BALLS are separate things. acb is the nose seat: attached (a ball
   // sits on it), capturing (one is winching in), empty (the ball was shot and is out
@@ -980,7 +1071,7 @@ function resetWorld() {
   beltEat = new Array(BELT_N).fill(0);       // 0..1 per section, how far Styx has pulled it in
   layoutPockets();
   placeAcbOnNose();
-  score = { shots: 0, fouls: 0, potted: 0, burned: 0, deaths: 0, lost: 0, won: false, wonAt: 0, failed: false, starPotted: false, worldsCleared: false };
+  score = { shots: 0, fouls: 0, potted: 0, bonus: 0, burned: 0, deaths: 0, lost: 0, won: false, wonAt: 0, failed: false, starPotted: false, worldsCleared: false };
   simYears = 0;
   sliderT = 0.5; sliderShown = 0.5;   // open at the centre: 1M, the table's pace
   charging = false; charge = 0; drag = null; reaching = false; stab = null; hitstop = null;
@@ -1015,7 +1106,7 @@ function introStops() {
   const stops = [];
   stops.push({ ...framing(STAR, starR(), 130), key: "star", name: STAR.name, defName: STAR_DEF.name, pause: !bodyNames.star, mass: STAR.mass, unit: "solar masses", speed: 0, sprite: "sun", tint: true });
   for (const b of bodies) {
-    const d = PLANET_DEFS.find(q => q.id === b.id);
+    const d = PLANET_DEFS.find(q => q.id === b.id) || ROGUE_DEFS.find(q => q.id === b.id);
     stops.push({ ...framing(b, ballR(b), 110), key: b.id, name: b.name, defName: d ? d.name : b.name, mass: b.mass / 3.003e-6, unit: "Earth masses", speed: Math.hypot(b.vx, b.vy), sprite: b.sprite, pause: !bodyNames[b.id] });
   }
   for (const p of POCKETS) stops.push({ ...framing(p, p.size, 110), key: p.id, name: p.name, defName: p.id, pause: !bodyNames[p.id], mass: p.mass, unit: "solar masses", speed: 0, sprite: "blackhole", pocket: true });
@@ -1212,6 +1303,17 @@ function introKey(e) {
   if (e.key.length === 1 && n.typed.length < NAME_MAX && /[\p{L}\p{N} '.-]/u.test(e.key)) n.typed += e.key;
 }
 // A ring in the table plane: a circle in play, an ellipse (well, a polyline) in the flyover.
+// An authored orbit around the table's centre, where the star starts: a ring, or the
+// ellipse with its focus on the centre.
+function drawOrbit(o, stroke, width) {
+  if (o.e === 0) return drawRing(ORIGIN.x, ORIGIN.y, o.a, stroke, width);
+  const p = o.a * (1 - o.e * o.e), pts = [];
+  for (let i = 0; i <= 128; i++) { const t = i / 128 * TAU, r = p / (1 + o.e * Math.cos(t - o.w)); pts.push({ x: ORIGIN.x + r * Math.cos(t), y: ORIGIN.y + r * Math.sin(t) }); }
+  cx.strokeStyle = stroke; cx.lineWidth = width; cx.setLineDash([]); cx.beginPath();
+  let pen = false;
+  for (const q0 of pts) { const q = worldToScreen(q0.x, q0.y); if (!q) { pen = false; continue; } if (pen) cx.lineTo(q[0], q[1]); else cx.moveTo(q[0], q[1]); pen = true; }
+  cx.stroke();
+}
 function drawRing(wx, wy, rAU, stroke, width, dash) {
   if (!persp) { const [sx, sy] = worldToScreen(wx, wy); if (dash) cx.setLineDash(dash); circle(sx, sy, rAU * cam.scale, null, stroke, width); cx.setLineDash([]); return; }
   const pts = []; for (let i = 0; i <= 96; i++) { const a = i / 96 * TAU; pts.push({ x: wx + rAU * Math.cos(a), y: wy + rAU * Math.sin(a) }); }
@@ -1275,6 +1377,7 @@ function inspectorLines(st) {
   const anomalies = [];
   if (B.inhabited) anomalies.push("inhabited");
   if (st.o && st.o.fragile) anomalies.push("fragile");
+  if (st.o && st.o.rogue) anomalies.push("rogue: passing through");
   return [["type", B.cls || "unknown"], ["mass", massClass(st)], ["size", sizeClass(st, B)], ["composition", compositionClass(st, B)], ["anomalies", anomalies.length ? "" : "none"]]
     .concat(anomalies.map(x => ["", x]));
 }
@@ -1317,7 +1420,7 @@ function drawInspector(st, a, W, H) {
   const px = x0 + 40, py = y0 + 38, R = 24;
   cx.save(); cx.beginPath(); cx.arc(px, py, R + 2, 0, TAU); cx.clip();
   if (st.sprite) {
-    const drawn = st.o.orbitR ? drawWorld(st.o, px, py, R, a) : st.tint ? drawStarCard(px, py, R * 0.8) : st.pocket ? drawHoleCard(px, py, R) : false;
+    const drawn = st.o.orbitR || st.o.rogue ? drawWorld(st.o, px, py, R, a) : st.tint ? drawStarCard(px, py, R * 0.8) : st.pocket ? drawHoleCard(px, py, R) : false;
     if (!drawn && !drawSprite(st.sprite, px, py, R, st.tint ? sunTinted : null, a)) circle(px, py, R, st.o.color);
   } else { cx.save(); cx.translate(px, py); cx.rotate(-0.6); cx.beginPath(); cx.moveTo(18, 0); cx.lineTo(-10, 9); cx.lineTo(-5, 0); cx.lineTo(-10, -9); cx.closePath(); cx.fillStyle = "#4fc3f7"; cx.fill(); cx.restore(); }
   cx.restore();
@@ -1674,13 +1777,20 @@ function simStep(h, offGravity) {
     if (e.ball && e.ball.type === "thermo") thermoGoesOff(e.ball, e.b);
   }
 
-  // Endings. A world into a pocket is the point; into the star is the foul.
+  // Endings. A world into a pocket is the point; into the star is the foul. An unbound rogue
+  // flying back off the table is gone, and no foul: it was only passing. A bound one is left
+  // to come round again.
   for (const b of bodies) {
     if (!b.alive) continue;
+    const rx = b.x - STAR.x, ry = b.y - STAR.y;
+    if (b.rogue && Math.hypot(b.x - ORIGIN.x, b.y - ORIGIN.y) > BELT.r + OFF_TABLE_AU && rx * b.vx + ry * b.vy > 0
+        && (b.vx * b.vx + b.vy * b.vy) / 2 > G * STAR.mass / Math.hypot(rx, ry)) {
+      b.alive = false; b.left = true; note(b.name + " HAS LEFT THE SYSTEM", b.color); continue;
+    }
     const p = pocketAt(b.x, b.y, 0);
     if (p) {
-      b.alive = false; score.potted++; flash(b.x, b.y, 0.3, "#b48cff"); burst(b.x, b.y, 0.12, "#b48cff");
-      note("POTTED: " + b.name + " into " + p.name, "#b48cff");
+      b.alive = false; if (b.rogue) score.bonus++; else score.potted++; flash(b.x, b.y, 0.3, "#b48cff"); burst(b.x, b.y, 0.12, "#b48cff");
+      note("POTTED: " + b.name + " into " + p.name + (b.rogue ? " (BONUS: the rogue)" : ""), "#b48cff");
     } else if (STAR.alive && dist(b.x, b.y, STAR.x, STAR.y) < starR() + ballR(b)) {
       b.alive = false; score.burned++; score.fouls++; flash(b.x, b.y, 0.25, "#ff5030"); burst(b.x, b.y, 0.1, "#ff5030");
       note("BURNED: " + b.name + " (foul)", "#ff5030");
@@ -1745,8 +1855,9 @@ function simStep(h, offGravity) {
     charging = false; charge = 0; drag = null; reaching = false; stab = null;
   }
   // THE TABLE IS CLEAR WHEN THE WORLDS ARE GONE AND SOLARIS IS IN A POCKET. The star is
-  // the last ball on the table, and only the Night ball can move it.
-  const worldsGone = bodies.every(b => !b.alive);
+  // the last ball on the table, and only the Night ball can move it. A rogue is a bonus and
+  // never counts toward the clear, as in Unity (Body.isRogue): whether it turned up is a roll.
+  const worldsGone = bodies.every(b => !b.alive || b.rogue);
   if (worldsGone && !score.worldsCleared) {
     score.worldsCleared = true;
     if (!score.starPotted) note("WORLDS CLEARED: " + STAR.name + " is still up, and it is the last ball", "#ffe08a");
@@ -2431,7 +2542,7 @@ function frame(now) {
 
   pushTrail(ship.trail, ship.x, ship.y, 500);
   for (const k of balls) pushTrail(k.trail, k.x, k.y, 400);
-  for (const b of bodies) if (b.alive && b.struck) pushTrail(b.trail, b.x, b.y, 300);
+  for (const b of bodies) if (b.alive && (b.struck || b.rogue)) pushTrail(b.trail, b.x, b.y, 300);   // a rogue draws where it has been
   if (STAR.alive && STAR.struck) pushTrail(STAR.trail, STAR.x, STAR.y, 300);
 
   // LMB up, the forecast is rebuilt every other frame (it is being looked at, not aimed,
@@ -2942,7 +3053,7 @@ function draw(realDt) {
     }
   }
   // authored rings, for worlds still on them
-  for (const b of bodies) if (b.alive && !b.struck) drawRing(ORIGIN.x, ORIGIN.y, b.orbitR, "rgba(120,150,200,0.16)", 1);
+  for (const b of bodies) if (b.alive && !b.struck && b.orbit) drawOrbit(b.orbit, "rgba(120,150,200,0.16)", 1);
   // pockets: influence ring, dark well, sprite
   for (const p of POCKETS) {
     drawRing(p.x, p.y, p.reach, "rgba(180,140,255,0.18)", 1, [3, 6]);
@@ -2971,7 +3082,7 @@ function draw(realDt) {
   // trails
   strokePts(ship.trail, "#4fc3f7", 0.3, 1);
   for (const k of balls) if (!k.flash) strokePts(k.trail, "#ffffff", 0.35, 1);
-  for (const b of bodies) if (b.alive && b.struck) strokePts(b.trail, b.color, 0.4, 1);
+  for (const b of bodies) if (b.alive && (b.struck || b.rogue)) strokePts(b.trail, b.color, 0.4, 1);
   for (const k of balls) if (k.flash) drawBurningTrail(k.flash.pts);
   for (const tr of fx.trails) drawBurningTrail(tr);
   // THE AIM LINE in Geometry Pool's hierarchy, drawn back to front: THE CUE BALL IS SOLID
@@ -3314,7 +3425,7 @@ function drawHud(W, H) {
   cx.font = `12px "Share Tech Mono", monospace`; cx.textAlign = "left";
   const alive = bodies.filter(b => b.alive).length;
   const lines = [
-    ["SHOTS " + score.shots + "   FOULS " + score.fouls + "   POTTED " + score.potted + "/" + bodies.length +
+    ["SHOTS " + score.shots + "   FOULS " + score.fouls + "   POTTED " + score.potted + "/" + bodies.filter(b => !b.rogue).length + (score.bonus ? " +" + score.bonus + " BONUS" : "") +
      "   BALLS " + ballsLeft() + "   " + STAR.name.toUpperCase() + " " + (score.starPotted ? "POTTED" : "STILL UP"), ballsLeft() <= 1 ? "#ff8c70" : "#cfe0ff"],
     ["T " + simYears.toFixed(2) + " yr" + (score.deaths ? "   SHIP LOST " + score.deaths : ""), "#9fb4cc"],
     ["ACB " + (acb.mode === "attached" ? "ON THE NOSE" : acb.mode === "capturing" ? "WINCHING IN" :
@@ -3904,6 +4015,7 @@ window.RIG = {
   set: (k, v) => { S[k] = v; },
   reset: resetWorld,
   setNose: a => { ship.nose = a; },
+  seed: n => { rackSeed = n | 0; seedPinned = n != null; },   // pin the rack seed (null unpins); takes effect at the next reset
   fire: (dx, dy, p) => fireAcb(dx, dy, p),
   step: (yr) => { if (hitstop) return; const n = Math.ceil(yr / MAX_SUBSTEP_YR), h = yr / n; for (let i = 0; i < n; i++) { stabiliseStep(h); if (simStep(h, false)) break; } simYears += yr; if (acb.mode === "attached") placeAcbOnNose(); },
   endImpact: () => { if (hitstop) endImpactFrame(); },
