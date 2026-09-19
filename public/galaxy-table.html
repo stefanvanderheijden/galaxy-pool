@@ -71,10 +71,7 @@ const __vite_glob_0_0 = `{
       "kind": "star",
       "id": "star",
       "name": "Solaris",
-      "sprite": "sun",
-      "mass": 0.45,
-      "drawR": 0.012,
-      "color": "#ff4b2b",
+      "type": "red-dwarf",
       "brief": {
         "class": "M-type main sequence",
         "diameterKm": 625328,
@@ -426,6 +423,16 @@ const PLAYER_DEFAULTS = {
   gravityHorizonYr: 0.1
   // gravity is drawn as the velocity it adds over this
 };
+const STAR_TYPES = {
+  "red-dwarf": { name: "Red dwarf", mass: 0.45, drawR: 0.012, color: "#ff4b2b", strikes: ["night", "thermo"] },
+  "yellow-dwarf": { name: "Yellow dwarf", mass: 1, drawR: 0.016, color: "#ffd27a", strikes: ["night", "thermo"] },
+  // small and dense: even a standard ball can knock it about, so it is the easy one to pot
+  "white-dwarf": { name: "White dwarf", mass: 0.6, drawR: 5e-3, color: "#e8f0ff", strikes: ["night", "thermo", "standard"] },
+  // heavy and huge: the table turns fast, its burn is wide, and only a thermonuclear moves it
+  "blue-giant": { name: "Blue giant", mass: 2.5, drawR: 0.03, color: "#7fb0ff", strikes: ["thermo"] },
+  // tiny and heavy: only the Night ball strikes it and comes back out
+  "neutron-star": { name: "Neutron star", mass: 1.4, drawR: 3e-3, color: "#c8e0ff", strikes: ["night"] }
+};
 const BALL_TYPES = {
   standard: { name: "Standard", short: "STD", color: "#ffffff", hi: "#ffffff", lo: "#8a97a8" },
   thermo: { name: "Thermonuclear", short: "THERMO", color: "#ffd23a", hi: "#fff2a0", lo: "#a8781a" },
@@ -460,8 +467,10 @@ const LEVEL_SCHEMA = {
   // AN ORBIT, one of two shapes, both derived in closed form (keplerState). Circular: radius.
   // Elliptical: semiMajor, eccentricity and periapsisAngle (where the closest approach is).
   // angle is where the body starts, seen from what it orbits, in both. retrograde runs it clockwise.
+  // around names a star, or lists two or more: a world round a group circles the group's
+  // shared centre, on the group's whole mass. A companion star orbits the centre star.
   orbit: {
-    around: { type: "string" },
+    around: { type: "around" },
     angle: { type: "number" },
     radius: { type: "number", min: 1e-3, optional: true },
     semiMajor: { type: "number", min: 1e-3, optional: true },
@@ -489,14 +498,19 @@ const LEVEL_SCHEMA = {
     note: { type: "string" }
   },
   // THE KINDS. A new gameplay element is a new entry here (§11.3), never a special case in the loader
+  // A STAR has a type (STAR_TYPES in src/rules.js), and may set its own mass, drawR, colour and
+  // sprite over the type's. The centre star has no orbit and the id "star"; any other star is a
+  // companion, on an orbit round it, and the system turns about their shared centre.
   star: {
     kind: {},
     id: { type: "string" },
     name: { type: "string" },
-    sprite: { type: "sprite" },
-    mass: { type: "number", min: 0 },
-    drawR: { type: "number", min: 0 },
-    color: { type: "color" },
+    type: { type: "startype" },
+    sprite: { type: "sprite", optional: true },
+    mass: { type: "number", min: 0, optional: true },
+    drawR: { type: "number", min: 0, optional: true },
+    color: { type: "color", optional: true },
+    orbit: { type: "orbit", optional: true },
     brief: { type: "brief" }
   },
   planet: {
@@ -576,17 +590,29 @@ const traitOf = (o, t) => {
   return null;
 };
 const hasTrait = (o, t) => !!traitOf(o, t);
+function starProps(s, starTypes) {
+  const T = starTypes[s.type];
+  return { mass: s.mass ?? T.mass, drawR: s.drawR ?? T.drawR, color: s.color ?? T.color, sprite: s.sprite ?? "sun", strikes: T.strikes };
+}
+const apoAU = (o) => o.radius !== void 0 ? o.radius : o.semiMajor * (1 + o.eccentricity);
 function outermostAU(raw) {
+  const starApo = {};
+  for (const b of raw.bodies) if (b.kind === "star") starApo[b.id] = b.orbit ? apoAU(b.orbit) : 0;
   let m = 0;
-  for (const b of raw.bodies) if (b.kind === "planet") m = Math.max(m, b.orbit.radius !== void 0 ? b.orbit.radius : b.orbit.semiMajor * (1 + b.orbit.eccentricity));
+  for (const b of raw.bodies) {
+    if (b.kind === "star" && b.orbit) m = Math.max(m, starApo[b.id]);
+    if (b.kind === "planet") m = Math.max(m, apoAU(b.orbit) + (typeof b.orbit.around === "string" ? starApo[b.orbit.around] || 0 : 0));
+  }
   return m;
 }
-function checkRogue(r, raw, star, fail, ctx) {
+function checkRogue(r, raw, stars2, fail, ctx) {
+  const props = stars2.map((s) => starProps(s, ctx.starTypes)), mass = props.reduce((m, p) => m + p.mass, 0);
+  const star = { mass, drawR: Math.max(...props.map((p) => p.drawR)) };
   const a = r.arrival, gm = ctx.G * star.mass, at = r.id + ".arrival";
   const rr = Math.hypot(a.x, a.y), v2 = a.vx * a.vx + a.vy * a.vy;
   if (rr < 1e-9) fail(at + ": it starts on the star");
   const energy = v2 / 2 - gm / rr;
-  if (energy <= 0) console.warn("level: " + at + " is bound to the star (specific energy " + energy.toFixed(3) + "), so it comes back; allowed, as in Unity");
+  if (energy <= 0 && ctx.warn) ctx.warn(at + " is bound to the star (specific energy " + energy.toFixed(3) + "), so it comes back; allowed, as in Unity");
   const out = outermostAU(raw);
   if (rr <= out) fail(at + ": starts " + rr.toFixed(3) + " AU out, inside the outermost orbit (" + out.toFixed(3) + " AU): a rogue arrives from outside");
   if (a.x * a.vx + a.y * a.vy >= 0) fail(at + ": moving away from the star: a rogue arrives inbound");
@@ -629,6 +655,11 @@ function parseLevel(text, id, ctx) {
       if (typeof v !== "string" || !/^#[0-9a-fA-F]{6}$/.test(v)) fail(at + ": a colour like #ff4b2b, not " + JSON.stringify(v));
     } else if (t === "ball") {
       if (!ctx.balls[v]) fail(at + ": a ball type (" + Object.keys(ctx.balls).join(", ") + "), not " + JSON.stringify(v));
+    } else if (t === "startype") {
+      if (!ctx.starTypes[v]) fail(at + ": a star type (" + Object.keys(ctx.starTypes).join(", ") + "), not " + JSON.stringify(v));
+    } else if (t === "around") {
+      const ok = typeof v === "string" ? !!v : Array.isArray(v) && v.length >= 2 && v.every((x) => typeof x === "string" && x) && new Set(v).size === v.length;
+      if (!ok) fail(at + ": a star's id, or a list of two or more different star ids, not " + JSON.stringify(v));
     } else if (t === "sprite") {
       if (!ctx.sprites[v]) fail(at + ": a baked sprite (" + Object.keys(ctx.sprites).join(", ") + "), not " + JSON.stringify(v));
     } else if (t === "list") {
@@ -678,22 +709,23 @@ function parseLevel(text, id, ctx) {
     ids.add(b.id);
   }
   const of = (k) => raw.bodies.filter((b) => b.kind === k);
-  if (of("star").length !== 1) fail("one star, for now: multi-star systems are §11.3, not built yet");
-  if (of("star")[0].id !== "star") fail(`the star's id is "star" until multi-star lands; its name is free`);
+  const stars2 = of("star"), starIds = new Set(stars2.map((s) => s.id)), centres = stars2.filter((s) => !s.orbit);
+  if (centres.length !== 1) fail(centres.length ? "one centre star (a star with no orbit), not " + centres.length + ": give the others an orbit round it" : "no star without an orbit: one star is the centre");
+  if (centres[0].id !== "star") fail(`the centre star's id is "star"; its name is free`);
+  for (const s of stars2) if (s.orbit && s.orbit.around !== "star") fail(s.id + '.orbit.around: a companion star orbits the centre star, "star", not ' + JSON.stringify(s.orbit.around));
   if (!of("planet").length) fail("no planets: nothing to pot");
   if (!of("pocket").length) fail("no pockets: nowhere to pot it");
   if (of("belt").length !== 1) fail("one belt, for now");
   if (of("pocket").filter((p) => hasTrait(p, "eats-belt")).length > 1) fail("one pocket at most eats the belt");
-  const star = of("star")[0];
-  for (const p of of("planet")) {
+  for (const p of of("planet").concat(stars2.filter((s) => s.orbit))) {
     const o = p.orbit, at = p.id + ".orbit";
-    if (o.around !== "star") fail(at + '.around: "star" (the only star), not ' + JSON.stringify(o.around));
+    for (const id2 of [].concat(o.around)) if (!starIds.has(id2)) fail(at + ".around: " + JSON.stringify(id2) + " is not a star here (the stars: " + [...starIds].join(", ") + ")");
     const ell = ["semiMajor", "eccentricity", "periapsisAngle"].filter((k) => o[k] !== void 0);
     if (o.radius !== void 0 && ell.length) fail(at + ": circular (radius) or elliptical (semiMajor, eccentricity, periapsisAngle), not both");
     if (o.radius === void 0 && ell.length !== 3) fail(at + ": needs radius, or all of semiMajor, eccentricity and periapsisAngle");
     if (o.eccentricity !== void 0 && o.eccentricity >= 1) fail(at + ".eccentricity: below 1 (1 or more never comes back: that is a rogue), not " + o.eccentricity);
   }
-  for (const r of of("rogue")) checkRogue(r, raw, star, fail, ctx);
+  for (const r of of("rogue")) checkRogue(r, raw, stars2, fail, ctx);
   return raw;
 }
 function canon(v, shape) {
@@ -949,6 +981,24 @@ function createEditor(api) {
       brief: brief("Rogue planetary body")
     }));
   }
+  function addStar() {
+    change(() => {
+      let at = -1;
+      draft.bodies.forEach((b, i) => {
+        if (b.kind === "star") at = i;
+      });
+      const body = {
+        kind: "star",
+        id: uniqueId("companion"),
+        name: "New star",
+        type: "red-dwarf",
+        orbit: { around: "star", angle: r4(Math.random() * TAU$1), radius: 0.35 },
+        brief: brief("M-type main sequence")
+      };
+      draft.bodies.splice(at + 1, 0, body);
+      sel = body.id;
+    });
+  }
   function addPocket() {
     change(() => insertAfterKind("pocket", {
       kind: "pocket",
@@ -969,8 +1019,8 @@ function createEditor(api) {
       renderBar();
       return;
     }
-    if (b.kind === "star" || b.kind === "belt") {
-      status = "the " + b.kind + " stays: a table has one";
+    if (b.kind === "star" && !b.orbit || b.kind === "belt") {
+      status = "the " + (b.kind === "star" ? "centre star" : b.kind) + " stays: a table has one";
       renderBar();
       return;
     }
@@ -979,15 +1029,16 @@ function createEditor(api) {
       sel = null;
     });
   }
+  const plus = (c, v) => [c[0] + v[0], c[1] + v[1]];
   function handles() {
     const s = k(), out = [];
     for (const b of draft.bodies) {
-      if (b.kind === "star") out.push({ id: b.id, role: "select", w: [0, 0] });
-      else if (b.kind === "planet" && b.orbit) {
-        const o = b.orbit;
-        out.push({ id: b.id, role: "body", w: polar(orbitR(o) * s, o.angle) });
+      if (b.kind === "star" && !b.orbit) out.push({ id: b.id, role: "select", w: api.centre(b.id) });
+      else if ((b.kind === "planet" || b.kind === "star") && b.orbit) {
+        const o = b.orbit, c = api.centre(o.around);
+        out.push({ id: b.id, role: "body", w: plus(c, polar(orbitR(o) * s, o.angle)) });
         const circ = o.radius !== void 0;
-        out.push({ id: b.id, role: "shape", w: circ ? polar(o.radius * s, o.angle + Math.PI) : polar(o.semiMajor * (1 - o.eccentricity) * s, o.periapsisAngle) });
+        out.push({ id: b.id, role: "shape", w: plus(c, circ ? polar(o.radius * s, o.angle + Math.PI) : polar(o.semiMajor * (1 - o.eccentricity) * s, o.periapsisAngle)) });
       } else if (b.kind === "rogue" && b.arrival) {
         const a = b.arrival, v = 1 / Math.sqrt(s);
         out.push({ id: b.id, role: "body", w: [a.x * s, a.y * s] });
@@ -1021,17 +1072,18 @@ function createEditor(api) {
       b.spawn.angle = ang;
       return;
     }
-    if (b.kind === "planet") {
-      const o = b.orbit;
+    if (b.orbit) {
+      const o = b.orbit, c = api.centre(o.around), rx = wx - c[0], ry = wy - c[1];
+      const d2 = Math.hypot(rx, ry) / s, ang2 = r4((Math.atan2(ry, rx) % TAU$1 + TAU$1) % TAU$1);
       if (h.role === "body") {
-        o.angle = ang;
-        if (o.radius !== void 0) o.radius = r4(Math.max(0.05, d));
+        o.angle = ang2;
+        if (o.radius !== void 0) o.radius = r4(Math.max(0.05, d2));
         else {
           const e = o.eccentricity;
-          o.semiMajor = r4(Math.max(0.05, d * (1 + e * Math.cos(ang - o.periapsisAngle)) / (1 - e * e)));
+          o.semiMajor = r4(Math.max(0.05, d2 * (1 + e * Math.cos(ang2 - o.periapsisAngle)) / (1 - e * e)));
         }
       } else if (h.role === "shape") {
-        const A = o.radius !== void 0 ? o.radius : o.semiMajor, e = Math.min(0.95, Math.max(0, 1 - d / A));
+        const A = o.radius !== void 0 ? o.radius : o.semiMajor, e = Math.min(0.95, Math.max(0, 1 - d2 / A));
         if (e < 0.02) {
           delete o.semiMajor;
           delete o.eccentricity;
@@ -1041,10 +1093,12 @@ function createEditor(api) {
           delete o.radius;
           o.semiMajor = r4(A);
           o.eccentricity = r4(e);
-          o.periapsisAngle = ang;
+          o.periapsisAngle = ang2;
         }
       }
-    } else if (b.kind === "rogue") {
+      return;
+    }
+    if (b.kind === "rogue") {
       const ar = b.arrival;
       if (h.role === "body") {
         ar.x = r4(wx / s);
@@ -1224,6 +1278,7 @@ function createEditor(api) {
         btn("Undo", undo, { disabled: !history.length }),
         btn("Redo", redo, { disabled: !future.length }),
         btn("+ Planet", addPlanet),
+        btn("+ Star", addStar),
         btn("+ Rogue", addRogue),
         btn("+ Pocket", addPocket),
         btn("Delete", removeSel, { disabled: !sel }),
@@ -1243,11 +1298,12 @@ function createEditor(api) {
     const label = el("label", {}, el("span", {}, key2 + (spec.optional ? "" : "")));
     let input;
     if (t === "number" || t === "int") {
+      const typed = owner === "star" && obj.type && STAR_TYPES[obj.type] ? STAR_TYPES[obj.type][key2] : void 0;
       input = el("input", {
         type: "number",
         step: "any",
         value: v ?? "",
-        placeholder: spec.optional ? "(none)" : "",
+        placeholder: typed !== void 0 ? String(typed) + " (type)" : spec.optional ? "(none)" : "",
         onchange: (e) => {
           const s = e.target.value.trim();
           set(s === "" ? spec.optional ? void 0 : obj[key2] : Number(s));
@@ -1266,9 +1322,27 @@ function createEditor(api) {
         spec.optional ? el("input", { type: "checkbox", checked: v !== void 0, title: "on / off", onchange: (e) => set(e.target.checked ? v || "#ffffff" : void 0) }) : null,
         el("input", { type: "color", value: v || "#ffffff", disabled: v === void 0, onchange: (e) => set(e.target.value) })
       );
-    } else if (t === "sprite" || t === "ball") {
-      const opts = Object.keys(t === "sprite" ? SPRITES : BALL_TYPES);
-      input = el("select", { onchange: (e) => set(e.target.value) }, ...opts.map((o) => el("option", { value: o, selected: o === v }, o)));
+    } else if (t === "sprite" || t === "ball" || t === "startype") {
+      const opts = Object.keys(t === "sprite" ? SPRITES : t === "ball" ? BALL_TYPES : STAR_TYPES);
+      input = el(
+        "select",
+        { onchange: (e) => set(e.target.value === "" ? void 0 : e.target.value) },
+        spec.optional ? el("option", { value: "", selected: v === void 0 }, "(the type's)") : null,
+        ...opts.map((o) => el("option", { value: o, selected: o === v }, t === "startype" ? STAR_TYPES[o].name : o))
+      );
+    } else if (t === "around") {
+      if (owner === "star") input = el("span", {}, "the centre star");
+      else {
+        const stars2 = draft.bodies.filter((b) => b.kind === "star"), cur = [].concat(v);
+        input = el("span", { class: "pair" }, ...stars2.map((st) => el("label", { class: "inline" }, el("input", { type: "checkbox", checked: cur.includes(st.id), onchange: (e) => {
+          const next = e.target.checked ? stars2.map((x) => x.id).filter((id) => id === st.id || cur.includes(id)) : cur.filter((id) => id !== st.id);
+          if (!next.length) {
+            e.target.checked = true;
+            return;
+          }
+          set(next.length === 1 ? next[0] : next);
+        } }), st.name)));
+      }
     } else if (t === "list" && spec.of === "ball") {
       input = el(
         "span",
@@ -1286,6 +1360,7 @@ function createEditor(api) {
     } else if (t === "traits") {
       return traitsBox(obj, owner);
     } else if (LEVEL_SCHEMA[t]) {
+      if (obj[key2] === void 0) return spec.optional && owner === "star" && key2 === "orbit" ? el("div", { class: "hint" }, "orbit: none, this is the centre star") : null;
       return group(key2, obj[key2], t, owner);
     } else return null;
     label.append(input);
@@ -1428,7 +1503,7 @@ const PLAYER_KEY = "galaxytable.player.v1", RULES_KEY = "galaxytable.rules.v1";
 let S = loadSettings();
 const LEVEL_FILES = /* @__PURE__ */ Object.assign({ "../levels/level-01.json": __vite_glob_0_0 });
 const LEVEL_IDS = Object.keys(LEVEL_FILES).map((k) => k.replace(/^.*\/|\.json$/g, "")).sort();
-const LEVEL_CTX = { G, balls: BALL_TYPES, sprites: SPRITES, rules: TABLE_RULES };
+const LEVEL_CTX = { G, balls: BALL_TYPES, starTypes: STAR_TYPES, sprites: SPRITES, rules: TABLE_RULES };
 function loadLevel(id) {
   try {
     const text = LEVEL_FILES["../levels/" + id + ".json"];
@@ -1445,18 +1520,19 @@ function loadLevel(id) {
 const LEVEL_ID = new URLSearchParams(location.search).get("level") || "level-01";
 let LEVEL = loadLevel(LEVEL_ID);
 const LEVEL_OF = (k) => LEVEL.bodies.filter((b) => b.kind === k);
-let STAR_DEF, PLANET_DEFS, ROGUE_DEFS, POCKETS, EATER, BELT_DEF, BELT, BELT_N, BELT_HALF, BELT_ROCKS, BRIEF;
-const STAR = { x: 0, y: 0, vx: 0, vy: 0, fragile: false, alive: true, struck: false, trail: [], spin: 0 };
+let STAR_DEF, STAR_DEFS, PLANET_DEFS, ROGUE_DEFS, POCKETS, EATER, BELT_DEF, BELT, BELT_N, BELT_HALF, BELT_ROCKS, BRIEF;
+const STAR = { x: 0, y: 0, vx: 0, vy: 0, fragile: false, alive: true, struck: false, trail: [], spin: 0, isStar: true };
+let STARS = [STAR];
 let editing = false;
 let editor = null;
 function deriveLevel() {
-  STAR_DEF = LEVEL_OF("star")[0];
-  Object.assign(STAR, { id: STAR_DEF.id, name: STAR_DEF.name, sprite: STAR_DEF.sprite, mass: STAR_DEF.mass, drawR: STAR_DEF.drawR, color: STAR_DEF.color });
+  STAR_DEFS = LEVEL_OF("star").map((s) => ({ id: s.id, name: s.name, type: s.type, ...starProps(s, STAR_TYPES), orbit: s.orbit ? orbitDef(s.orbit) : null })).sort((a, b) => (a.orbit ? 1 : 0) - (b.orbit ? 1 : 0));
+  STAR_DEF = STAR_DEFS[0];
+  Object.assign(STAR, { id: STAR_DEF.id, name: STAR_DEF.name, sprite: STAR_DEF.sprite, mass: STAR_DEF.mass, drawR: STAR_DEF.drawR, color: STAR_DEF.color, strikes: STAR_DEF.strikes });
   derivePlanetDefs();
   derivePockets();
   deriveBelt();
   deriveBrief();
-  retintSun();
 }
 function applyLevel(L) {
   LEVEL = L;
@@ -1464,26 +1540,23 @@ function applyLevel(L) {
   resetWorld();
 }
 const ORIGIN = { x: 0, y: 0 };
+function orbitDef(o) {
+  const circ = o.radius !== void 0;
+  return { around: o.around, r: circ ? o.radius : o.semiMajor, a: o.angle, e: circ ? 0 : o.eccentricity, w: circ ? 0 : o.periapsisAngle, retro: !!o.retrograde };
+}
 function derivePlanetDefs() {
-  PLANET_DEFS = LEVEL_OF("planet").map((p) => {
-    const o = p.orbit, circ = o.radius !== void 0;
-    return {
-      id: p.id,
-      name: p.name,
-      sprite: p.sprite,
-      r: circ ? o.radius : o.semiMajor,
-      a: o.angle,
-      e: circ ? 0 : o.eccentricity,
-      w: circ ? 0 : o.periapsisAngle,
-      retro: !!o.retrograde,
-      mass: p.mass,
-      drawR: p.drawR,
-      color: p.color,
-      atmosphere: p.atmosphere || null,
-      fragile: hasTrait(p, "fragile"),
-      inhabited: hasTrait(p, "inhabited")
-    };
-  });
+  PLANET_DEFS = LEVEL_OF("planet").map((p) => ({
+    id: p.id,
+    name: p.name,
+    sprite: p.sprite,
+    ...orbitDef(p.orbit),
+    mass: p.mass,
+    drawR: p.drawR,
+    color: p.color,
+    atmosphere: p.atmosphere || null,
+    fragile: hasTrait(p, "fragile"),
+    inhabited: hasTrait(p, "inhabited")
+  }));
   ROGUE_DEFS = LEVEL_OF("rogue").map((p) => ({
     id: p.id,
     name: p.name,
@@ -1498,8 +1571,8 @@ function derivePlanetDefs() {
     inhabited: hasTrait(p, "inhabited")
   }));
 }
-function strikesStar(type) {
-  return type === "night" || type === "thermo";
+function strikesStar(ballType, star) {
+  return star.strikes.includes(ballType);
 }
 function shipSpawn() {
   const r = LEVEL.ship.spawn.radius * S.systemScale, a = LEVEL.ship.spawn.angle;
@@ -1550,7 +1623,7 @@ function deriveBelt() {
   }
 }
 function beltOmega() {
-  return Math.sqrt(G * STAR.mass / Math.pow(BELT.r, 3));
+  return Math.sqrt(G * STAR_DEFS.reduce((m, s) => m + s.mass, 0) / Math.pow(BELT.r, 3));
 }
 function beltTheta(t) {
   return beltOmega() * t;
@@ -1612,10 +1685,63 @@ const bodyNames = {};
 function nameFor(key, def) {
   return bodyNames[key] && !editing ? bodyNames[key].name : def;
 }
-function keplerState(a, e, w, ang, retro) {
-  const p = a * (1 - e * e), nu = ang - w, r = p / (1 + e * Math.cos(nu)), k = Math.sqrt(G * STAR.mass / p) * (retro ? -1 : 1);
-  const vr = k * e * Math.sin(nu), vt = k * (1 + e * Math.cos(nu)), c = Math.cos(ang), sn = Math.sin(ang);
-  return { x: STAR.x + r * c, y: STAR.y + r * sn, vx: vr * c - vt * sn, vy: vr * sn + vt * c };
+function keplerState(a, e, w, ang, retro, c) {
+  const p = a * (1 - e * e), nu = ang - w, r = p / (1 + e * Math.cos(nu)), k = Math.sqrt(G * c.mass / p) * (retro ? -1 : 1);
+  const vr = k * e * Math.sin(nu), vt = k * (1 + e * Math.cos(nu)), co = Math.cos(ang), sn = Math.sin(ang);
+  return { x: c.x + r * co, y: c.y + r * sn, vx: vr * co - vt * sn + c.vx, vy: vr * sn + vt * co + c.vy };
+}
+function massCentre(list) {
+  if (list.length === 1) return list[0];
+  let m = 0, x = 0, y = 0, vx = 0, vy = 0;
+  for (const s of list) {
+    m += s.mass;
+    x += s.mass * s.x;
+    y += s.mass * s.y;
+    vx += s.mass * s.vx;
+    vy += s.mass * s.vy;
+  }
+  return { mass: m, x: x / m, y: y / m, vx: vx / m, vy: vy / m };
+}
+function centreOf(around, stars2) {
+  return massCentre([].concat(around).map((id) => stars2.find((s) => s.id === id)));
+}
+function makeStars() {
+  const out = STAR_DEFS.map((d) => ({
+    id: d.id,
+    name: nameFor(d.id, d.name),
+    sprite: d.sprite,
+    mass: d.mass,
+    drawR: d.drawR,
+    color: d.color,
+    strikes: d.strikes,
+    x: ORIGIN.x,
+    y: ORIGIN.y,
+    vx: 0,
+    vy: 0,
+    alive: true,
+    struck: false,
+    escaped: false,
+    trail: [],
+    spin: 0,
+    isStar: true,
+    moving: STAR_DEFS.length > 1
+  }));
+  if (out.length > 1) {
+    const root = out[0], k = S.systemScale;
+    STAR_DEFS.forEach((d, i) => {
+      if (!d.orbit) return;
+      const o = d.orbit, st = keplerState(o.r * k, o.e, o.w, o.a, o.retro, { mass: root.mass + out[i].mass, x: 0, y: 0, vx: 0, vy: 0 });
+      Object.assign(out[i], { x: root.x + st.x, y: root.y + st.y, vx: st.vx, vy: st.vy });
+    });
+    const c = massCentre(out);
+    for (const s of out) {
+      s.x -= c.x - ORIGIN.x;
+      s.y -= c.y - ORIGIN.y;
+      s.vx -= c.vx;
+      s.vy -= c.vy;
+    }
+  }
+  return out;
 }
 let rackSeed = 0, seedPinned = false;
 function rogueArrives(d) {
@@ -1633,8 +1759,8 @@ function rogueArrives(d) {
 function deriveRogue(d) {
   const k = S.systemScale, v = 1 / Math.sqrt(k);
   return {
-    x: STAR.x + d.arrival.x * k,
-    y: STAR.y + d.arrival.y * k,
+    x: ORIGIN.x + d.arrival.x * k,
+    y: ORIGIN.y + d.arrival.y * k,
     vx: d.arrival.vx * v,
     vy: d.arrival.vy * v,
     rogue: true,
@@ -1655,11 +1781,11 @@ function deriveRogue(d) {
     spin: Math.random() * TAU
   };
 }
-function derivePlanet(d) {
-  const r = d.r * S.systemScale;
+function derivePlanet(d, stars2) {
+  const r = d.r * S.systemScale, c = centreOf(d.around, stars2 || STARS);
   return {
-    ...keplerState(r, d.e, d.w, d.a, d.retro),
-    orbit: { a: r, e: d.e, w: d.w },
+    ...keplerState(r, d.e, d.w, d.a, d.retro, c),
+    orbit: { a: r, e: d.e, w: d.w, around: d.around },
     id: d.id,
     name: nameFor(d.id, d.name),
     sprite: d.sprite,
@@ -1683,24 +1809,25 @@ function applySystemScale() {
   viewR = LEVEL.viewRadius * k;
 }
 function ballR(b) {
-  return b === STAR || b.id === "star" ? Math.max(b.drawR * S.ballScale, 0.1) : Math.max(b.drawR * S.ballScale, S.minBallAU);
+  return b.isStar ? Math.max(b.drawR * S.ballScale, 0.1) : Math.max(b.drawR * S.ballScale, S.minBallAU);
 }
 function ballsLeft() {
   return (acb.mode === "attached" || acb.mode === "capturing" ? 1 : 0) + chamber.length + balls.length;
 }
-function starR() {
-  return ballR(STAR);
+function starR(star) {
+  return ballR(star || STAR);
 }
-function contactList(list, star) {
-  return star.alive ? list.concat([star]) : list;
+function contactList(list, stars2) {
+  return list.concat((stars2 || STARS).filter((s) => s.alive));
 }
 function resetWorld() {
   if (!seedPinned) rackSeed = Math.random() * 2 ** 31 | 0;
   applySystemScale();
-  STAR.name = nameFor("star", STAR_DEF.name);
   for (const p of POCKETS) p.name = nameFor(p.id, LEVEL_OF("pocket").find((q) => q.id === p.id).name);
-  Object.assign(STAR, { x: 0, y: 0, vx: 0, vy: 0, alive: true, struck: false, trail: [], broken: false, brokenNoted: false, escaped: false });
-  bodies = PLANET_DEFS.map(derivePlanet).concat(ROGUE_DEFS.filter(rogueArrives).map(deriveRogue));
+  const fresh = makeStars();
+  Object.assign(STAR, fresh[0], { broken: false, brokenNoted: false });
+  STARS = [STAR, ...fresh.slice(1)];
+  bodies = PLANET_DEFS.map((d) => derivePlanet(d)).concat(ROGUE_DEFS.filter(rogueArrives).map(deriveRogue));
   ship = { ...shipSpawn(), trail: [] };
   acb = { mode: "attached", type: LEVEL.loadout.nose, x: 0, y: 0, vx: 0, vy: 0, cap: null, lostT: 0 };
   balls = [];
@@ -1746,7 +1873,18 @@ let panelWasHidden = false;
 function introStops() {
   const framing = (o, R, px) => ({ o, R, px });
   const stops = [];
-  stops.push({ ...framing(STAR, starR(), 130), key: "star", name: STAR.name, defName: STAR_DEF.name, pause: !bodyNames.star, mass: STAR.mass, unit: "solar masses", speed: 0, sprite: "sun", tint: true });
+  STARS.forEach((st, i) => stops.push({
+    ...framing(st, starR(st), 130),
+    key: st.id,
+    name: st.name,
+    defName: STAR_DEFS[i].name,
+    pause: !bodyNames[st.id],
+    mass: st.mass,
+    unit: "solar masses",
+    speed: st.moving ? Math.hypot(st.vx, st.vy) : 0,
+    sprite: st.sprite,
+    tint: true
+  }));
   for (const b of bodies) {
     const d = PLANET_DEFS.find((q) => q.id === b.id) || ROGUE_DEFS.find((q) => q.id === b.id);
     stops.push({ ...framing(b, ballR(b), 110), key: b.id, name: b.name, defName: d ? d.name : b.name, mass: b.mass / 3003e-9, unit: "Earth masses", speed: Math.hypot(b.vx, b.vy), sprite: b.sprite, pause: !bodyNames[b.id] });
@@ -1977,11 +2115,13 @@ function introKey(e) {
   if (e.key.length === 1 && n.typed.length < NAME_MAX && /[\p{L}\p{N} '.-]/u.test(e.key)) n.typed += e.key;
 }
 function drawOrbit(o, stroke, width) {
-  if (o.e === 0) return drawRing(ORIGIN.x, ORIGIN.y, o.a, stroke, width);
+  const live = [].concat(o.around || []).map((id) => STARS.find((st) => st.id === id)).filter((st) => st && st.alive);
+  const c = live.length ? massCentre(live) : ORIGIN;
+  if (o.e === 0) return drawRing(c.x, c.y, o.a, stroke, width);
   const p = o.a * (1 - o.e * o.e), pts = [];
   for (let i = 0; i <= 128; i++) {
     const t = i / 128 * TAU, r = p / (1 + o.e * Math.cos(t - o.w));
-    pts.push({ x: ORIGIN.x + r * Math.cos(t), y: ORIGIN.y + r * Math.sin(t) });
+    pts.push({ x: c.x + r * Math.cos(t), y: c.y + r * Math.sin(t) });
   }
   cx.strokeStyle = stroke;
   cx.lineWidth = width;
@@ -2141,8 +2281,8 @@ function drawInspector(st, a, W, H) {
   cx.arc(px, py, R + 2, 0, TAU);
   cx.clip();
   if (st.sprite) {
-    const drawn = st.o.orbitR || st.o.rogue ? drawWorld(st.o, px, py, R, a) : st.tint ? drawStarCard(px, py, R * 0.8) : st.pocket ? drawHoleCard(px, py, R) : false;
-    if (!drawn && !drawSprite(st.sprite, px, py, R, st.tint ? sunTinted : null, a)) circle(px, py, R, st.o.color);
+    const drawn = st.o.orbitR || st.o.rogue ? drawWorld(st.o, px, py, R, a) : st.tint ? drawStarCard(px, py, R * 0.8, st.o.color) : st.pocket ? drawHoleCard(px, py, R) : false;
+    if (!drawn && !drawSprite(st.sprite, px, py, R, st.tint && st.sprite === "sun" ? sunTint(st.o.color) : null, a)) circle(px, py, R, st.o.color);
   } else {
     cx.save();
     cx.translate(px, py);
@@ -2298,18 +2438,29 @@ function pull(sx, sy, gm, b, h) {
 function pullPockets(b, h) {
   for (const p of POCKETS) if (dist(b.x, b.y, p.x, p.y) < p.reach) pull(p.x, p.y, G * p.mass, b, h);
 }
-function stepWorlds(list, h, star) {
-  star = star || STAR;
+function stepWorlds(list, h, stars2) {
+  stars2 = stars2 || STARS;
   for (const b of list) {
     if (!b.alive) continue;
-    if (star.alive) pull(star.x, star.y, G * star.mass, b, h);
+    for (const st of stars2) if (st.alive) pull(st.x, st.y, G * st.mass, b, h);
     if (b.struck) pullPockets(b, h);
   }
-  if (star.alive && star.struck) pullPockets(star, h);
+  for (let i = 0; i < stars2.length; i++) for (let j = i + 1; j < stars2.length; j++) {
+    const a = stars2[i], c = stars2[j];
+    if (!a.alive || !c.alive) continue;
+    pull(c.x, c.y, G * c.mass, a, h);
+    pull(a.x, a.y, G * a.mass, c, h);
+  }
+  for (const st of stars2) if (st.alive && st.struck) pullPockets(st, h);
 }
-function gameGravity(o, list, h, feelWorlds, star) {
-  star = star || STAR;
-  if (star.alive) pull(star.x, star.y, G * star.mass, o, h);
+function stepStars(stars2, h) {
+  for (const st of stars2) if (st.alive && (st.struck || st.moving)) {
+    st.x += st.vx * h;
+    st.y += st.vy * h;
+  }
+}
+function gameGravity(o, list, h, feelWorlds, stars2) {
+  for (const st of stars2 || STARS) if (st.alive) pull(st.x, st.y, G * st.mass, o, h);
   if (feelWorlds) {
     for (const b of list) if (b.alive) pull(b.x, b.y, G * b.mass * S.planetBoost, o, h);
   }
@@ -2339,10 +2490,11 @@ function resolveContacts(list, freeBalls, events) {
   const rA = S.acbRadiusAU;
   for (const ball of freeBalls) for (const b of list) {
     if (!b.alive || ball.dead) continue;
-    if (b.id === "star" && !strikesStar(ball.type)) {
+    if (b.isStar && !strikesStar(ball.type, b)) {
       if (dist(ball.x, ball.y, b.x, b.y) < rA + ballR(b)) {
         ball.dead = true;
         ball.burned = true;
+        ball.burnedIn = b.name;
         events.push({ kind: "burned", ball, b, x: ball.x, y: ball.y });
       }
       continue;
@@ -2372,7 +2524,7 @@ function resolveContacts(list, freeBalls, events) {
   if (S.planetsCollide) for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
     const p = list[i], q = list[j];
     if (!p.alive || !q.alive || !p.struck && !q.struck) continue;
-    if (p.id === "star" || q.id === "star") continue;
+    if (p.isStar || q.isStar) continue;
     if (collide(p, p.mass, ballR(p), q, q.mass, ballR(q))) {
       for (const w of [p, q]) if (!w.struck) {
         w.struck = true;
@@ -2506,33 +2658,53 @@ function gravitizeAll(freeBalls, list, others, shipObj, h) {
     if (shipObj) gravitize(k, shipObj, h);
   }
 }
-function fateOf(b, star) {
-  const r0 = Math.hypot(b.x - ORIGIN.x, b.y - ORIGIN.y), rx = b.x - star.x, ry = b.y - star.y;
+function fateOf(b, stars2) {
+  stars2 = stars2 || STARS;
+  const r0 = Math.hypot(b.x - ORIGIN.x, b.y - ORIGIN.y);
   if (b.rogue) {
-    if (BELT && r0 > BELT.r + OFF_TABLE_AU && rx * b.vx + ry * b.vy > 0 && (b.vx * b.vx + b.vy * b.vy) / 2 > G * star.mass / Math.hypot(rx, ry)) return { kind: "left" };
+    const live = stars2.filter((s) => s.alive);
+    if (live.length) {
+      const c = massCentre(live), rx = b.x - c.x, ry = b.y - c.y;
+      if (BELT && r0 > BELT.r + OFF_TABLE_AU && rx * b.vx + ry * b.vy > 0 && (b.vx * b.vx + b.vy * b.vy) / 2 > G * c.mass / Math.hypot(rx, ry)) return { kind: "left" };
+    }
   } else if (BELT && r0 > S.escapeBelts * BELT.r) return { kind: "escaped" };
   const p = pocketAt(b.x, b.y, 0);
   if (p) return { kind: "potted", pocket: p };
-  if (star.alive && dist(b.x, b.y, star.x, star.y) < starR() + ballR(b)) return { kind: "burned" };
+  for (const st of stars2) if (st.alive && dist(b.x, b.y, st.x, st.y) < starR(st) + ballR(b)) return { kind: "burned", star: st };
+  return null;
+}
+function starFateOf(st) {
+  const p = pocketAt(st.x, st.y, 0);
+  if (p) return { kind: "potted", pocket: p };
+  if (BELT && Math.hypot(st.x - ORIGIN.x, st.y - ORIGIN.y) > S.escapeBelts * BELT.r) return { kind: "escaped" };
   return null;
 }
 function forwardCheck(years) {
-  const h = MAX_SUBSTEP_YR, n = Math.round(years / h), star = { ...STAR, x: ORIGIN.x, y: ORIGIN.y, vx: 0, vy: 0, alive: true, struck: false, trail: [] };
-  const list = PLANET_DEFS.map(derivePlanet).concat(ROGUE_DEFS.map(deriveRogue));
+  const h = MAX_SUBSTEP_YR, n = Math.round(years / h), stars2 = makeStars();
+  const list = PLANET_DEFS.map((d) => derivePlanet(d, stars2)).concat(ROGUE_DEFS.map(deriveRogue));
   const spawn = shipSpawn(), events = [], touching = /* @__PURE__ */ new Set(), overShip = /* @__PURE__ */ new Set();
   for (let i = 1; i <= n; i++) {
-    stepWorlds(list, h, star);
+    stepWorlds(list, h, stars2);
     for (const b of list) if (b.alive) {
       b.x += b.vx * h;
       b.y += b.vy * h;
     }
+    stepStars(stars2, h);
     const t = i * h;
+    for (const st of stars2) {
+      if (!st.alive) continue;
+      const f = starFateOf(st);
+      if (f) {
+        st.alive = false;
+        events.push({ t, kind: f.kind, id: st.id, name: st.name, pocket: f.pocket && f.pocket.name, x: st.x, y: st.y });
+      }
+    }
     for (const b of list) {
       if (!b.alive) continue;
-      const f = fateOf(b, star);
+      const f = fateOf(b, stars2);
       if (f) {
         b.alive = false;
-        events.push({ t, kind: f.kind, id: b.id, name: b.name, pocket: f.pocket && f.pocket.name, x: b.x, y: b.y });
+        events.push({ t, kind: f.kind, id: b.id, name: b.name, pocket: f.pocket && f.pocket.name, star: f.star && f.star.name, x: b.x, y: b.y });
         continue;
       }
       if (t < 1 && !overShip.has(b.id) && dist(b.x, b.y, spawn.x, spawn.y) < ballR(b) + HULL_LEN * 2) {
@@ -2540,8 +2712,10 @@ function forwardCheck(years) {
         events.push({ t, kind: "over-ship", id: b.id, name: b.name, x: b.x, y: b.y });
       }
     }
-    for (let a = 0; a < list.length; a++) for (let c = a + 1; c < list.length; c++) {
-      const p = list[a], q = list[c], key = p.id + "|" + q.id;
+    const all = list.concat(stars2);
+    for (let a = 0; a < all.length; a++) for (let c = a + 1; c < all.length; c++) {
+      const p = all[a], q = all[c], key = p.id + "|" + q.id;
+      if (p.isStar !== q.isStar) continue;
       if (!p.alive || !q.alive) {
         touching.delete(key);
         continue;
@@ -2565,16 +2739,13 @@ function simStep(h, offGravity) {
   stepWorlds(bodies, h);
   if (!offGravity) gameGravity(ship, bodies, h, true);
   for (const k of balls) if (!k.flash) gameGravity(k, bodies, h, S.acbFeelsWorlds);
-  gravitizeAll(balls, contactList(bodies, STAR), balls, offGravity ? null : ship, h);
+  gravitizeAll(balls, contactList(bodies), balls, offGravity ? null : ship, h);
   for (const b of bodies) if (b.alive) {
     b.x += b.vx * h;
     b.y += b.vy * h;
     b.spin += h * 40;
   }
-  if (STAR.alive && STAR.struck) {
-    STAR.x += STAR.vx * h;
-    STAR.y += STAR.vy * h;
-  }
+  stepStars(STARS, h);
   if (!shipOwnClock) {
     ship.x += ship.vx * h;
     ship.y += ship.vy * h;
@@ -2590,7 +2761,7 @@ function simStep(h, offGravity) {
     sweepShip = ship;
     let hit = null, hLeft = h, bounces = 0;
     while (hLeft > 0 && bounces < 8) {
-      hit = sweepBall(k, contactList(bodies, STAR), balls, hLeft);
+      hit = sweepBall(k, contactList(bodies), balls, hLeft);
       k.flash.pts.push({ x: k.x, y: k.y, age: 0 });
       armCheck(k, ship.x, ship.y);
       if (!(hit && hit.belt)) break;
@@ -2612,11 +2783,12 @@ function simStep(h, offGravity) {
       shipCause = "hit by its own cue ball";
       continue;
     }
-    if (hit && hit.id === "star" && !strikesStar(k.type)) {
+    if (hit && hit.isStar && !strikesStar(k.type, hit)) {
       fx.trails.push(k.flash.pts);
       k.flash = null;
       k.dead = true;
       k.burned = true;
+      k.burnedIn = hit.name;
       burst(k.x, k.y, 0.15, "#ff8a3c");
       flash(k.x, k.y, 0.2, "#ff5030");
       continue;
@@ -2642,7 +2814,7 @@ function simStep(h, offGravity) {
       note("BOUNCED off the belt", "#c8b090");
     }
   }
-  for (const b of contactList(bodies, STAR)) if (b.alive && b.struck) {
+  for (const b of contactList(bodies)) if (b.alive && b.struck) {
     const i = beltContact(b, ballR(b), belt, simYears);
     if (i >= 0) {
       beltBreak(i, b.x, b.y);
@@ -2650,7 +2822,7 @@ function simStep(h, offGravity) {
     }
   }
   const events = [];
-  resolveContacts(contactList(bodies, STAR), balls.filter((k) => !k.flash), events);
+  resolveContacts(contactList(bodies), balls.filter((k) => !k.flash), events);
   for (const e of events) {
     if (e.kind === "struck") {
       flash(e.x, e.y, 0.15, e.b.color);
@@ -2673,7 +2845,7 @@ function simStep(h, offGravity) {
   }
   for (const b of bodies) {
     if (!b.alive) continue;
-    const f = fateOf(b, STAR);
+    const f = fateOf(b);
     if (!f) continue;
     b.alive = false;
     if (f.kind === "left") {
@@ -2695,26 +2867,28 @@ function simStep(h, offGravity) {
       score.fouls++;
       flash(b.x, b.y, 0.25, "#ff5030");
       burst(b.x, b.y, 0.1, "#ff5030");
-      note("BURNED: " + b.name + " (foul)", "#ff5030");
+      note("BURNED: " + b.name + (STARS.length > 1 ? " in " + f.star.name : "") + " (foul)", "#ff5030");
     }
   }
-  if (STAR.alive) {
-    const p = pocketAt(STAR.x, STAR.y, 0);
-    if (p) {
-      STAR.alive = false;
+  for (const st of STARS) {
+    if (!st.alive) continue;
+    const f = starFateOf(st);
+    if (!f) continue;
+    st.alive = false;
+    if (f.kind === "potted") {
       score.starPotted = true;
-      flash(STAR.x, STAR.y, 0.8, "#ff4b2b");
-      burst(STAR.x, STAR.y, 0.4, "#ffd9a0");
-      burst(STAR.x, STAR.y, 0.25, "#ffffff");
+      score.starsPotted = (score.starsPotted || 0) + 1;
+      flash(st.x, st.y, 0.8, st.color);
+      burst(st.x, st.y, 0.4, "#ffd9a0");
+      burst(st.x, st.y, 0.25, "#ffffff");
       fx.flashA = Math.max(fx.flashA, 0.8);
       fx.shake = Math.max(fx.shake, 1);
-      note(STAR.name.toUpperCase() + " POTTED into " + p.name, "#ffe08a");
-    } else if (BELT && Math.hypot(STAR.x - ORIGIN.x, STAR.y - ORIGIN.y) > S.escapeBelts * BELT.r) {
-      STAR.alive = false;
-      STAR.escaped = true;
+      note(st.name.toUpperCase() + " POTTED into " + f.pocket.name, "#ffe08a");
+    } else {
+      st.escaped = true;
       score.escaped++;
       score.fouls++;
-      note("ESCAPED: " + STAR.name + " left the table (foul)", "#ff5030");
+      note("ESCAPED: " + st.name + " left the table (foul)", "#ff5030");
     }
   }
   for (const b of bodies) if (b.broken && !b.brokenNoted) {
@@ -2730,7 +2904,7 @@ function simStep(h, offGravity) {
   const gone = [];
   for (const k of balls) {
     if (k.dead) {
-      gone.push({ k, why: k.burned ? "ACB BURNED in " + STAR.name : "THERMONUCLEAR SPENT" });
+      gone.push({ k, why: k.burned ? "ACB BURNED in " + (k.burnedIn || STAR.name) : "THERMONUCLEAR SPENT" });
       continue;
     }
     const p = pocketAt(k.x, k.y, 0);
@@ -2757,7 +2931,12 @@ function simStep(h, offGravity) {
   }
   const shipPk = pocketAt(ship.x, ship.y, 0);
   if (!shipCause && shipPk) shipCause = "fell into " + shipPk.name;
-  if (!shipCause && STAR.alive && dist(ship.x, ship.y, STAR.x, STAR.y) < starR() + SHIP_R) shipCause = "burned in " + STAR.name;
+  if (!shipCause) {
+    for (const st of STARS) if (st.alive && dist(ship.x, ship.y, st.x, st.y) < starR(st) + SHIP_R) {
+      shipCause = "burned in " + st.name;
+      break;
+    }
+  }
   const safe = ship.safeT > 0;
   if (!shipCause && !safe) {
     for (const b of bodies) if (b.alive && dist(ship.x, ship.y, b.x, b.y) < ballR(b) + SHIP_R) {
@@ -2792,9 +2971,10 @@ function simStep(h, offGravity) {
   const worldsGone = bodies.every((b) => !b.alive || b.rogue);
   if (worldsGone && !score.worldsCleared) {
     score.worldsCleared = true;
-    if (STAR.alive) note("WORLDS CLEARED: " + STAR.name + " is still up, and it is the last ball", "#ffe08a");
+    const up = STARS.filter((s) => s.alive).map((s) => s.name);
+    if (up.length) note("WORLDS CLEARED: " + up.join(" and ") + (up.length > 1 ? " are" : " is") + " still up, and " + (up.length > 1 ? "they are the last balls" : "it is the last ball"), "#ffe08a");
   }
-  if (!score.won && worldsGone && !STAR.alive) {
+  if (!score.won && worldsGone && STARS.every((s) => !s.alive)) {
     score.won = true;
     score.wonAt = simYears;
     note("TABLE CLEARED", "#ffe08a");
@@ -3004,14 +3184,16 @@ function fireAcb(dx, dy, power) {
 }
 function stabiliseStep(h) {
   if (!stab) return;
-  if (!STAR.alive) {
+  const live = STARS.filter((s) => s.alive);
+  if (!live.length) {
     stab = null;
     note("STABILISER: no star to orbit", "#e8b463");
     return;
   }
-  const dx = ship.x - STAR.x, dy = ship.y - STAR.y, r = Math.hypot(dx, dy);
+  const c = massCentre(live);
+  const dx = ship.x - c.x, dy = ship.y - c.y, r = Math.hypot(dx, dy);
   if (r < 1e-6) return;
-  const v = Math.sqrt(G * STAR.mass / r);
+  const v = Math.sqrt(G * c.mass / r);
   const cw = dx * ship.vy - dy * ship.vx >= 0 ? 1 : -1;
   const tx = -dy / r * v * cw, ty = dx / r * v * cw;
   const ex = tx - ship.vx, ey = ty - ship.vy, err = Math.hypot(ex, ey);
@@ -3291,7 +3473,7 @@ function buildGhost() {
     return;
   }
   const gb = bodies.map((b) => ({ ...b, trail: null }));
-  const gstar = { ...STAR, trail: null };
+  const gstars = STARS.map((st) => ({ ...st, trail: null }));
   const gbelt = belt.slice();
   let gt = simYears;
   const out = { pending: null, hit: null, terminus: null, fates: [], balls: [], worlds: [] };
@@ -3305,7 +3487,7 @@ function buildGhost() {
     out.fates.push({ kind, x, y, name, cue: !!cue });
   };
   const track = /* @__PURE__ */ new Map();
-  for (const b of gb.concat([gstar])) if (b.struck && b.alive) track.set(b.id, { color: b.color, pts: [{ x: b.x, y: b.y }] });
+  for (const b of gb.concat(gstars)) if (b.struck && b.alive) track.set(b.id, { color: b.color, pts: [{ x: b.x, y: b.y }] });
   for (const k of sim) {
     if (!k.flash) continue;
     sweepTime = gt;
@@ -3313,7 +3495,7 @@ function buildGhost() {
     sweepShip = ship;
     let hit = null, bounces = 0;
     while (k.flash.remain > 1e-6 && bounces < 8 && !offTable(k)) {
-      hit = sweepBall(k, contactList(gb, gstar), sim, Math.min(k.flash.remain, exitDistance(k) + 1e-3) / Math.hypot(k.vx, k.vy));
+      hit = sweepBall(k, contactList(gb, gstars), sim, Math.min(k.flash.remain, exitDistance(k) + 1e-3) / Math.hypot(k.vx, k.vy));
       k.pts.push({ x: k.x, y: k.y });
       armCheck(k, sx0, sy0);
       if (!(hit && hit.belt)) {
@@ -3331,7 +3513,7 @@ function buildGhost() {
       k.dead = true;
       continue;
     }
-    if (hit && hit.id === "star" && !strikesStar(k.type)) {
+    if (hit && hit.isStar && !strikesStar(k.type, hit)) {
       if (k === pending) {
         addFate("star", k.x, k.y, null, true);
         if (!out.sunHit) out.sunHit = { x: k.x, y: k.y };
@@ -3356,8 +3538,8 @@ function buildGhost() {
     }
     if (hit) {
       if (k === pending) out.hit = { x: k.x, y: k.y };
-      if (k === pending && hit.id !== "star" && !out.planetHit) out.planetHit = { x: k.x, y: k.y };
-      if (k === pending && hit.id === "star" && !out.sunHit) out.sunHit = { x: k.x, y: k.y };
+      if (k === pending && !hit.isStar && !out.planetHit) out.planetHit = { x: k.x, y: k.y };
+      if (k === pending && hit.isStar && !out.sunHit) out.sunHit = { x: k.x, y: k.y };
       const [ivx, ivy] = impactVelocity(k);
       k.vx = ivx;
       k.vy = ivy;
@@ -3379,31 +3561,28 @@ function buildGhost() {
     k.flash = null;
   }
   const H0 = 2e-4, H1 = 6e-4, NEAR = 1500, N = NEAR + 4500, AFTER_STAR = 1500;
-  let starStruckAt = gstar.struck ? 0 : Infinity;
-  if (gstar.struck || pending && out.hit && track.has("star")) starStruckAt = 0;
+  let starStruckAt = gstars.some((st) => st.struck) ? 0 : Infinity;
+  if (pending && out.hit && gstars.some((st) => track.has(st.id))) starStruckAt = 0;
   for (let i = 0; i < N; i++) {
     const H = i < NEAR ? H0 : H1;
-    stepWorlds(gb, H, gstar);
+    stepWorlds(gb, H, gstars);
     const live = sim.filter((k) => !k.dead);
-    for (const k of live) gameGravity(k, gb, H, S.acbFeelsWorlds, gstar);
-    gravitizeAll(live, contactList(gb, gstar), live, null, H);
+    for (const k of live) gameGravity(k, gb, H, S.acbFeelsWorlds, gstars);
+    gravitizeAll(live, contactList(gb, gstars), live, null, H);
     for (const b of gb) if (b.alive) {
       b.x += b.vx * H;
       b.y += b.vy * H;
     }
-    if (gstar.alive && gstar.struck) {
-      gstar.x += gstar.vx * H;
-      gstar.y += gstar.vy * H;
-    }
+    stepStars(gstars, H);
     for (const k of live) {
       k.x += k.vx * H;
       k.y += k.vy * H;
     }
     gt += H;
     for (const k of live) beltContact(k, S.acbRadiusAU, gbelt, gt);
-    for (const b of contactList(gb, gstar)) if (b.alive && b.struck) beltContact(b, ballR(b), gbelt, gt);
+    for (const b of contactList(gb, gstars)) if (b.alive && b.struck) beltContact(b, ballR(b), gbelt, gt);
     const events = [];
-    resolveContacts(contactList(gb, gstar), live, events);
+    resolveContacts(contactList(gb, gstars), live, events);
     for (const e of events) {
       if (e.kind === "burned") {
         if (e.ball === pending) {
@@ -3413,10 +3592,10 @@ function buildGhost() {
         continue;
       }
       if (!out.hit && pending && !pending.dead && dist(e.x, e.y, pending.x, pending.y) < 0.2) out.hit = { x: e.x, y: e.y };
-      if (!out.planetHit && pending && e.ball === pending && e.b && e.b.id !== "star") out.planetHit = { x: pending.x, y: pending.y };
-      if (!out.sunHit && pending && e.ball === pending && e.b && e.b.id === "star") out.sunHit = { x: pending.x, y: pending.y };
+      if (!out.planetHit && pending && e.ball === pending && e.b && !e.b.isStar) out.planetHit = { x: pending.x, y: pending.y };
+      if (!out.sunHit && pending && e.ball === pending && e.b && e.b.isStar) out.sunHit = { x: pending.x, y: pending.y };
       if (e.b && !track.has(e.b.id)) track.set(e.b.id, { color: e.b.color, direct: !!e.ball, pts: [{ x: e.b.x, y: e.b.y }] });
-      if (e.b === gstar || e.kind === "struck" && e.b && e.b.id === "star") starStruckAt = Math.min(starStruckAt, i);
+      if (e.b && e.b.isStar) starStruckAt = Math.min(starStruckAt, i);
       if (e.ball && e.ball.type === "thermo") thermoAftermath(e.ball, e.b);
     }
     for (const b of gb) {
@@ -3425,14 +3604,14 @@ function buildGhost() {
       if (pk) {
         b.alive = false;
         if (track.has(b.id)) addFate("pot", b.x, b.y, b.name);
-      } else if (gstar.alive && dist(b.x, b.y, gstar.x, gstar.y) < starR() + ballR(b)) {
+      } else if (gstars.some((st) => st.alive && dist(b.x, b.y, st.x, st.y) < starR(st) + ballR(b))) {
         b.alive = false;
         if (track.has(b.id)) addFate("star", b.x, b.y, b.name);
       }
     }
-    if (gstar.alive && pocketAt(gstar.x, gstar.y, 0)) {
-      gstar.alive = false;
-      addFate("pot", gstar.x, gstar.y, STAR.name);
+    for (const st of gstars) if (st.alive && pocketAt(st.x, st.y, 0)) {
+      st.alive = false;
+      addFate("pot", st.x, st.y, st.name);
     }
     for (const k of live) if (pocketAt(k.x, k.y, 0)) {
       k.dead = true;
@@ -3447,7 +3626,7 @@ function buildGhost() {
       }
     }
     if (!shipFate) {
-      for (const b of gb.concat([gstar])) if (b.alive && dist(b.x, b.y, sx0, sy0) < (b === gstar ? starR() : ballR(b)) + SHIP_R) {
+      for (const b of gb.concat(gstars)) if (b.alive && dist(b.x, b.y, sx0, sy0) < ballR(b) + SHIP_R) {
         addFate("ship", sx0, sy0, b.name);
         break;
       }
@@ -3455,7 +3634,7 @@ function buildGhost() {
     if (i < NEAR ? i % 8 === 0 : i % 3 === 0) {
       for (const k of sim) if (!k.dead) k.pts.push({ x: k.x, y: k.y });
       const cut = i > starStruckAt + AFTER_STAR;
-      for (const b of gb.concat([gstar])) {
+      for (const b of gb.concat(gstars)) {
         const t = track.get(b.id);
         if (t && b.alive && !(cut && !t.direct)) t.pts.push({ x: b.x, y: b.y });
       }
@@ -3623,7 +3802,7 @@ function frame(now) {
   pushTrail(ship.trail, ship.x, ship.y, 500);
   for (const k of balls) pushTrail(k.trail, k.x, k.y, 400);
   for (const b of bodies) if (b.alive && (b.struck || b.rogue)) pushTrail(b.trail, b.x, b.y, 300);
-  if (STAR.alive && STAR.struck) pushTrail(STAR.trail, STAR.x, STAR.y, 300);
+  for (const st of STARS) if (st.alive && (st.struck || st.moving)) pushTrail(st.trail, st.x, st.y, 300);
   ghostTick ^= 1;
   if (S.projections) {
     if (shotHeld() || !ghost || ghostTick) buildGhost();
@@ -3673,22 +3852,23 @@ for (const k in SPRITES) {
   im.src = SPRITES[k].src;
   IMG[k] = im;
 }
-let sunTinted = null;
-function retintSun() {
-  if (!IMG.sun.complete || !IMG.sun.width) return;
+const sunTints = /* @__PURE__ */ new Map();
+function sunTint(color) {
+  if (!IMG.sun.complete || !IMG.sun.width) return null;
+  if (sunTints.has(color)) return sunTints.get(color);
   const c = document.createElement("canvas");
   c.width = IMG.sun.width;
   c.height = IMG.sun.height;
   const g = c.getContext("2d");
   g.drawImage(IMG.sun, 0, 0);
   g.globalCompositeOperation = "multiply";
-  g.fillStyle = STAR.color;
+  g.fillStyle = color;
   g.fillRect(0, 0, c.width, c.height);
   g.globalCompositeOperation = "destination-in";
   g.drawImage(IMG.sun, 0, 0);
-  sunTinted = c;
+  sunTints.set(color, c);
+  return c;
 }
-IMG.sun.onload = retintSun;
 function drawSprite(key, sx, sy, R, img, alpha) {
   const sp = SPRITES[key], im = img || IMG[key];
   if (!im || !(im.complete || im instanceof HTMLCanvasElement) || !im.width) return false;
@@ -3918,13 +4098,13 @@ function glCanvasSized(size) {
   gl.clear(gl.COLOR_BUFFER_BIT);
   return size;
 }
-function drawStarCard(sx, sy, R) {
+function drawStarCard(sx, sy, R, color) {
   if (!S.fauxSpheres || !sphereInit() || !artTexture("sun")) return false;
   const gl = SPHERE.gl, st = SPHERE.star, im = IMG.sun;
   const size = glCanvasSized(2 * R * im.width / (2 * SPHERE.sunCoreR) + 2);
   gl.useProgram(st.prog);
   gl.bindTexture(gl.TEXTURE_2D, SPHERE.tex.sun);
-  const c = colRGB(STAR.color), t = performance.now() / 1e3;
+  const c = colRGB(color || STAR.color), t = performance.now() / 1e3;
   gl.uniform3f(st.u.uColor, Math.pow(c[0] / 255, 2.2), Math.pow(c[1] / 255, 2.2), Math.pow(c[2] / 255, 2.2));
   gl.uniform1f(st.u.uTime, t);
   gl.uniform1f(st.u.uSpin, t / 90 * TAU);
@@ -3975,7 +4155,15 @@ function drawWorld(b, sx, sy, R, alpha) {
   const gl = SPHERE.gl, c = SPHERE.canvas, u = SPHERE.u;
   const size = glCanvasSized(2 * R * SPHERE_EXTENT + 2);
   gl.useProgram(SPHERE.prog);
-  let lx = STAR.x - b.x, ly = STAR.y - b.y;
+  let near = STAR, nd = Infinity;
+  for (const st of STARS) if (st.alive || st === STAR) {
+    const d = dist(st.x, st.y, b.x, b.y);
+    if (d < nd) {
+      nd = d;
+      near = st;
+    }
+  }
+  let lx = near.x - b.x, ly = near.y - b.y;
   const ll = Math.hypot(lx, ly) || 1;
   lx /= ll;
   ly /= ll;
@@ -4293,19 +4481,18 @@ function draw(realDt) {
     cx.textAlign = "center";
     cx.fillText(p.name.toUpperCase(), sx, sy + R + 14);
   }
-  if (STAR.alive) {
-    const [sx, sy] = worldToScreen(STAR.x, STAR.y) || [-1e4, -1e4], R = starR() * scAt(STAR.x, STAR.y);
-    if (!drawStarCard(sx, sy, R)) {
+  for (const st of STARS) {
+    if (!st.alive) continue;
+    const [sx, sy] = worldToScreen(st.x, st.y) || [-1e4, -1e4], R = starR(st) * scAt(st.x, st.y);
+    if (!drawStarCard(sx, sy, R, st.color)) {
       const g = cx.createRadialGradient(sx, sy, R * 0.8, sx, sy, R * 3);
-      g.addColorStop(0, "rgba(255,75,43,0.35)");
-      g.addColorStop(1, "rgba(255,75,43,0)");
+      g.addColorStop(0, colA(st.color, 0.35));
+      g.addColorStop(1, colA(st.color, 0));
       circle(sx, sy, R * 3, g);
-      if (!drawSprite("sun", sx, sy, R, sunTinted)) circle(sx, sy, R, STAR.color);
+      if (!drawSprite(st.sprite, sx, sy, R, st.sprite === "sun" ? sunTint(st.color) : null)) circle(sx, sy, R, st.color);
     }
-    if (STAR.struck) {
-      strokePts(STAR.trail, STAR.color, 0.4, 1);
-      circle(sx, sy, R + 4, null, colA(STAR.color, 0.5), 1);
-    }
+    if (st.struck || st.moving) strokePts(st.trail, st.color, 0.4, 1);
+    if (st.struck) circle(sx, sy, R + 4, null, colA(st.color, 0.5), 1);
   }
   strokePts(ship.trail, "#4fc3f7", 0.3, 1);
   for (const k of balls) if (!k.flash) strokePts(k.trail, "#ffffff", 0.35, 1);
@@ -4764,7 +4951,7 @@ function drawHud(W, H) {
   cx.textAlign = "left";
   bodies.filter((b) => b.alive).length;
   const lines = [
-    ["SHOTS " + score.shots + "   FOULS " + score.fouls + "   POTTED " + score.potted + "/" + bodies.filter((b) => !b.rogue).length + (score.bonus ? " +" + score.bonus + " BONUS" : "") + "   BALLS " + ballsLeft() + "   " + STAR.name.toUpperCase() + " " + (score.starPotted ? "POTTED" : STAR.escaped ? "ESCAPED" : "STILL UP"), ballsLeft() <= 1 ? "#ff8c70" : "#cfe0ff"],
+    ["SHOTS " + score.shots + "   FOULS " + score.fouls + "   POTTED " + score.potted + "/" + bodies.filter((b) => !b.rogue).length + (score.bonus ? " +" + score.bonus + " BONUS" : "") + "   BALLS " + ballsLeft() + "   " + (STARS.length === 1 ? STAR.name.toUpperCase() + " " + (score.starPotted ? "POTTED" : STAR.escaped ? "ESCAPED" : "STILL UP") : "STARS " + STARS.filter((s) => s.alive).length + "/" + STARS.length + " UP"), ballsLeft() <= 1 ? "#ff8c70" : "#cfe0ff"],
     ["T " + simYears.toFixed(2) + " yr" + (score.deaths ? "   SHIP LOST " + score.deaths : ""), "#9fb4cc"],
     [
       "ACB " + (acb.mode === "attached" ? "ON THE NOSE" : acb.mode === "capturing" ? "WINCHING IN" : acb.mode === "empty" ? pad.active && pad.owns ? "OUT, get in its ring and press CROSS" + (chamber.length ? " (or CROSS or L2 loads the next)" : "") : "OUT, get in its ring and press Space" + (chamber.length ? " (or Space or LMB loads the next)" : "") : score.failed ? "NONE LEFT" : chamber.length ? "DESTROYED, next loads in " + Math.max(0, S.respawnSeconds - acb.lostT).toFixed(1) + " s" : "DESTROYED, catch one") + (balls.length > 1 || balls.length === 1 && acb.mode !== "empty" ? "   " + balls.length + " BALL" + (balls.length > 1 ? "S" : "") + " OUT" : ""),
@@ -5619,6 +5806,7 @@ window.RIG = {
     chamber: [...chamber],
     ballsLeft: ballsLeft(),
     star: { x: STAR.x, y: STAR.y, vx: STAR.vx, vy: STAR.vy, alive: STAR.alive, struck: STAR.struck },
+    stars: STARS.map((st) => ({ id: st.id, name: st.name, x: st.x, y: st.y, vx: st.vx, vy: st.vy, mass: st.mass, alive: st.alive, struck: st.struck })),
     belt: { intact: belt.reduce((a, b) => a + b, 0), theta: beltTheta(simYears), eating: beltEat.filter((e) => e > 0).length },
     balls: balls.map((k) => ({ type: k.type, x: k.x, y: k.y, vx: k.vx, vy: k.vy, dwell: k.dwell, lock: k.lock, flash: !!k.flash })),
     hitstop: hitstop ? { t: hitstop.t, planet: hitstop.planet.name } : null,
@@ -5730,7 +5918,7 @@ window.RIG = {
   },
   skipIntro: () => skipIntro(),
   naming: () => intro && intro.naming ? { idx: intro.naming.idx, key: intro.stops[intro.naming.idx].key, typed: intro.naming.typed, done: intro.naming.done, typedOut: inspectorTyped(intro.stops[intro.naming.idx]) } : null,
-  names: () => [STAR.name, ...bodies.map((b) => b.name), ...POCKETS.map((p) => p.name)],
+  names: () => [...STARS.map((st) => st.name), ...bodies.map((b) => b.name), ...POCKETS.map((p) => p.name)],
   integrity: () => bodies.map((b) => +b.integrity.toFixed(3)),
   pad: () => ({ active: pad.active, owns: pad.owns, teleporting: pad.teleporting, aiming: pad.aiming, power: pad.power }),
   project: (x, y) => worldToScreen(x, y),
@@ -5777,17 +5965,26 @@ editor = createEditor({
   worldToScreen,
   screenToWorld,
   forward: () => forwardCheck(S.forwardYears),
+  // where an orbit's centre is on the racked table: a star by id, or a group's shared centre
+  // (a star the draft has and the rack does not yet, mid-edit, counts as the table's centre)
+  centre: (around) => {
+    const f = [].concat(around).map((id) => STARS.find((st) => st.id === id)).filter(Boolean);
+    if (!f.length) return [ORIGIN.x, ORIGIN.y];
+    const c = massCentre(f);
+    return [c.x, c.y];
+  },
   // a rogue's path from the rack as the game made it, flown on the game's own stepWorlds
   rogueTrack: (id, years) => {
     const b = bodies.find((q) => q.id === id);
     if (!b) return [];
-    const o = { ...b, trail: [] }, star = { ...STAR, struck: false }, h = 1e-3, pts = [{ x: o.x, y: o.y }];
+    const o = { ...b, trail: [] }, stars2 = STARS.map((st) => ({ ...st, struck: false, trail: [] })), h = 1e-3, pts = [{ x: o.x, y: o.y }];
     for (let i = 0, n = Math.round(years / h); i < n; i++) {
-      stepWorlds([o], h, star);
+      stepWorlds([o], h, stars2);
       o.x += o.vx * h;
       o.y += o.vy * h;
+      stepStars(stars2, h);
       if (i % 4 === 3) pts.push({ x: o.x, y: o.y });
-      if (dist(o.x, o.y, star.x, star.y) < starR() || Math.hypot(o.x, o.y) > 4 * (BELT ? BELT.r : 3)) break;
+      if (stars2.some((st) => dist(o.x, o.y, st.x, st.y) < starR(st)) || Math.hypot(o.x, o.y) > 4 * (BELT ? BELT.r : 3)) break;
     }
     return pts;
   }
@@ -5863,7 +6060,9 @@ requestAnimationFrame(frame);</script>
 #edbar .fwd.ok { color: #8fe8b0; margin-top: 5px; }
 #edbar .fwd.potted, #edbar .fwd.overlap { color: #e8b463; }
 #edbar .fwd.burned, #edbar .fwd.escaped, #edbar .fwd.over-ship { color: #ff8c70; }
-#edbar .fwd.left { color: #8fc3e8; }</style>
+#edbar .fwd.left { color: #8fc3e8; }
+#edpanel label.inline { display: inline-flex; gap: 3px; margin: 0 6px 0 0; }
+#edpanel .hint { color: #8fa6c8; font-style: italic; margin: 4px 0; }</style>
 </head>
 <body>
 <canvas id="cv"></canvas>
