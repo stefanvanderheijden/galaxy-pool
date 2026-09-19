@@ -425,13 +425,13 @@ const PLAYER_DEFAULTS = {
 };
 const STAR_TYPES = {
   "red-dwarf": { name: "Red dwarf", mass: 0.45, drawR: 0.012, color: "#ff4b2b", strikes: ["night", "thermo"] },
-  "yellow-dwarf": { name: "Yellow dwarf", mass: 1, drawR: 0.016, color: "#ffd27a", strikes: ["night", "thermo"] },
+  "yellow-dwarf": { name: "Yellow dwarf", mass: 1, drawR: 0.016, color: "#ffd23a", strikes: ["night", "thermo"] },
   // small and dense: even a standard ball can knock it about, so it is the easy one to pot
-  "white-dwarf": { name: "White dwarf", mass: 0.6, drawR: 5e-3, color: "#e8f0ff", strikes: ["night", "thermo", "standard"] },
+  "white-dwarf": { name: "White dwarf", mass: 0.6, drawR: 5e-3, color: "#f2f6ff", strikes: ["night", "thermo", "standard"] },
   // heavy and huge: the table turns fast, its burn is wide, and only a thermonuclear moves it
-  "blue-giant": { name: "Blue giant", mass: 2.5, drawR: 0.03, color: "#7fb0ff", strikes: ["thermo"] },
+  "blue-giant": { name: "Blue giant", mass: 2.5, drawR: 0.03, color: "#4a7dff", strikes: ["thermo"] },
   // tiny and heavy: only the Night ball strikes it and comes back out
-  "neutron-star": { name: "Neutron star", mass: 1.4, drawR: 3e-3, color: "#c8e0ff", strikes: ["night"] }
+  "neutron-star": { name: "Neutron star", mass: 1.4, drawR: 3e-3, color: "#7ff0ff", strikes: ["night"] }
 };
 const BALL_TYPES = {
   standard: { name: "Standard", short: "STD", color: "#ffffff", hi: "#ffffff", lo: "#8a97a8" },
@@ -441,14 +441,15 @@ const BALL_TYPES = {
 };
 const TYPE_ORDER = ["standard", "thermo", "grav", "night"];
 const LEVEL_SCHEMA_VERSION = 2;
+const A = [0, 6.2832];
 const LEVEL_SCHEMA = {
-  // type: "number" | "int" | "bool" | "string" | "color" | "ball" | "sprite" | "list" | "traits" | a shape below
+  // type: "number" | "int" | "bool" | "string" | "color" | "ball" | "sprite" | "startype" | "around" | "list" | "traits" | a shape below
   level: {
     schemaVersion: { type: "int" },
     id: { type: "string" },
     name: { type: "string" },
     // name: the level's, and the system's
-    viewRadius: { type: "number", min: 0.1 },
+    viewRadius: { type: "number", min: 0.1, ui: [1, 8] },
     // AU: the whole-table camera, half the screen's short side
     ship: { type: "ship" },
     loadout: { type: "loadout" },
@@ -462,7 +463,7 @@ const LEVEL_SCHEMA = {
   },
   loadout: { nose: { type: "ball" }, chamber: { type: "list", of: "ball", max: 2 } },
   // the chamber menu has two slots
-  polar: { radius: { type: "number", min: 0 }, angle: { type: "number" } },
+  polar: { radius: { type: "number", min: 0, ui: [0, 5] }, angle: { type: "number", ui: A } },
   // AU from the table's centre, radians
   // AN ORBIT, one of two shapes, both derived in closed form (keplerState). Circular: radius.
   // Elliptical: semiMajor, eccentricity and periapsisAngle (where the closest approach is).
@@ -471,11 +472,11 @@ const LEVEL_SCHEMA = {
   // shared centre, on the group's whole mass. A companion star orbits the centre star.
   orbit: {
     around: { type: "around" },
-    angle: { type: "number" },
-    radius: { type: "number", min: 1e-3, optional: true },
-    semiMajor: { type: "number", min: 1e-3, optional: true },
-    eccentricity: { type: "number", min: 0, optional: true },
-    periapsisAngle: { type: "number", optional: true },
+    angle: { type: "number", ui: A },
+    radius: { type: "number", min: 1e-3, optional: true, ui: [0.05, 4] },
+    semiMajor: { type: "number", min: 1e-3, optional: true, ui: [0.05, 4] },
+    eccentricity: { type: "number", min: 0, optional: true, ui: [0, 0.95] },
+    periapsisAngle: { type: "number", optional: true, ui: A },
     retrograde: { type: "bool", optional: true }
   },
   // A ROGUE'S ARRIVAL is raw state, on purpose: a rogue has no orbit to derive, so where it
@@ -483,18 +484,18 @@ const LEVEL_SCHEMA = {
   // (checkRogue). There is no arrival time: it is on the table from the first frame, outside
   // the orbits and inbound, and "arriving" is something it does by flying.
   arrival: {
-    x: { type: "number" },
-    y: { type: "number" },
+    x: { type: "number", ui: [-6, 6] },
+    y: { type: "number", ui: [-6, 6] },
     // AU from the table's centre, +y DOWN
-    vx: { type: "number" },
-    vy: { type: "number" }
+    vx: { type: "number", ui: [-8, 8] },
+    vy: { type: "number", ui: [-8, 8] }
   },
   // AU/yr
   // the inspector card. diameterKm feeds size and composition (density from mass); note is Robert's, hand-written
   brief: {
     class: { type: "string" },
-    diameterKm: { type: "number", min: 0, optional: true },
-    tempC: { type: "number", optional: true },
+    diameterKm: { type: "number", min: 0, optional: true, ui: [1, 3e6], log: true },
+    tempC: { type: "number", optional: true, ui: [-273, 6e3] },
     note: { type: "string" }
   },
   // THE KINDS. A new gameplay element is a new entry here (§11.3), never a special case in the loader
@@ -507,8 +508,8 @@ const LEVEL_SCHEMA = {
     name: { type: "string" },
     type: { type: "startype" },
     sprite: { type: "sprite", optional: true },
-    mass: { type: "number", min: 0, optional: true },
-    drawR: { type: "number", min: 0, optional: true },
+    mass: { type: "number", min: 0, optional: true, ui: [0.05, 10], log: true },
+    drawR: { type: "number", min: 0, optional: true, ui: [1e-3, 0.06], log: true },
     color: { type: "color", optional: true },
     orbit: { type: "orbit", optional: true },
     brief: { type: "brief" }
@@ -518,8 +519,8 @@ const LEVEL_SCHEMA = {
     id: { type: "string" },
     name: { type: "string" },
     sprite: { type: "sprite" },
-    mass: { type: "number", min: 0 },
-    drawR: { type: "number", min: 0 },
+    mass: { type: "number", min: 0, ui: [1e-9, 1e-4], log: true },
+    drawR: { type: "number", min: 0, ui: [1e-3, 0.02], log: true },
     color: { type: "color" },
     atmosphere: { type: "color", optional: true },
     // the faux-sphere halo; without it, the body colour lifted
@@ -532,12 +533,12 @@ const LEVEL_SCHEMA = {
     id: { type: "string" },
     name: { type: "string" },
     sprite: { type: "sprite" },
-    mass: { type: "number", min: 0 },
-    drawR: { type: "number", min: 0 },
+    mass: { type: "number", min: 0, ui: [1e-9, 1e-4], log: true },
+    drawR: { type: "number", min: 0, ui: [1e-3, 0.02], log: true },
     color: { type: "color" },
     atmosphere: { type: "color", optional: true },
     arrival: { type: "arrival" },
-    chance: { type: "number", min: 0 },
+    chance: { type: "number", min: 0, ui: [0, 1] },
     // 0..1: is it on this table at all (rogueArrives)
     traits: { type: "traits", optional: true },
     brief: { type: "brief" }
@@ -548,11 +549,11 @@ const LEVEL_SCHEMA = {
     name: { type: "string" },
     color: { type: "color" },
     position: { type: "polar" },
-    mass: { type: "number", min: 0 },
+    mass: { type: "number", min: 0, ui: [0.05, 3], log: true },
     // solar masses, pulling only inside reach
-    reach: { type: "number", min: 0 },
+    reach: { type: "number", min: 0, ui: [0.05, 2] },
     // AU: the pull's radius, and the dashed ring
-    size: { type: "number", min: 0 },
+    size: { type: "number", min: 0, ui: [0.02, 0.5] },
     // AU: what touches this is potted
     traits: { type: "traits", optional: true },
     brief: { type: "brief" }
@@ -560,15 +561,32 @@ const LEVEL_SCHEMA = {
   belt: {
     kind: {},
     id: { type: "string" },
-    radius: { type: "number", min: 0 },
+    radius: { type: "number", min: 0, ui: [0.5, 6] },
     // AU from the table's centre
-    sections: { type: "int", min: 1 },
-    halfWidth: { type: "number", min: 0 },
-    restitution: { type: "number", min: 0 }
-  }
+    sections: { type: "int", min: 1, ui: [4, 128] },
+    halfWidth: { type: "number", min: 0, ui: [0.01, 0.3] },
+    restitution: { type: "number", min: 0, ui: [0, 1.2] }
+  },
   // radial bounce off an intact section: 1 is elastic
+  // A NEBULA: a cloud of gas along a line, from one point to another, radius wide, as Unity's
+  // gas cloud (Sim.GasCloudDensityAt). Its density falls smoothly from the line to the edge, and
+  // it drags what moves freely through it (the ship, the balls, struck worlds and rogues) by
+  // drag per year at full density; worlds on their authored orbits pass through, as they pass
+  // the belt. It hides what is inside it, and thins when the ship is in it.
+  nebula: {
+    kind: {},
+    id: { type: "string" },
+    name: { type: "string" },
+    color: { type: "color" },
+    from: { type: "polar" },
+    to: { type: "polar" },
+    radius: { type: "number", min: 0.01, ui: [0.05, 1.5] },
+    // AU: from the line to the edge
+    drag: { type: "number", min: 0, ui: [0, 40] }
+  }
+  // per year, at the line: 9 is Unity's
 };
-const LEVEL_KINDS = ["star", "planet", "rogue", "pocket", "belt"];
+const LEVEL_KINDS = ["star", "planet", "rogue", "pocket", "belt", "nebula"];
 const LEVEL_TRAITS = {
   fragile: { on: ["planet", "rogue"] },
   // shatters when a thermonuclear hits it
@@ -576,11 +594,23 @@ const LEVEL_TRAITS = {
   // an anomaly on the card
   "eats-belt": { on: ["pocket"], fields: {
     // sits out by the belt and swallows the sections that turn through its reach
-    radius: { type: "number", min: 0 },
+    radius: { type: "number", min: 0, ui: [0.5, 6] },
     // AU from the centre, replacing its position's radius
-    years: { type: "number", min: 1e-6 }
-  } }
+    years: { type: "number", min: 1e-6, ui: [0.01, 2], log: true }
+  } },
   // sim years for a section inside the reach to go
+  // SHOOTS BACK: an inhabited world that fires on the ark when it comes within range, a shot
+  // every so many sim years, flying straight at where the ark was, at speed. A hit wrecks the
+  // ark as a crash does. With provoked, it holds its fire until it has been struck.
+  defended: { on: ["planet", "rogue"], fields: {
+    range: { type: "number", min: 0.01, ui: [0.1, 3] },
+    // AU
+    every: { type: "number", min: 1e-4, ui: [5e-3, 1], log: true },
+    // sim years between shots
+    speed: { type: "number", min: 0.1, ui: [1, 40] },
+    // AU/yr
+    provoked: { type: "bool", optional: true }
+  } }
 };
 const traitOf = (o, t) => {
   for (const x of o.traits || []) {
@@ -619,7 +649,7 @@ function checkRogue(r, raw, stars2, fail, ctx) {
   const h = a.x * a.vy - a.y * a.vx, e = Math.sqrt(1 + 2 * energy * h * h / (gm * gm)), q = h * h / (gm * (1 + e));
   if (q >= out) fail(at + ": passes " + q.toFixed(3) + " AU from the star, outside every orbit (" + out.toFixed(3) + " AU): it misses the table");
   const burn = Math.max(star.drawR * ctx.rules.ballScale, 0.1) + Math.max(r.drawR * ctx.rules.ballScale, ctx.rules.minBallAU);
-  if (q <= burn) fail(at + ": passes " + q.toFixed(3) + " AU from the star, inside its burn (" + burn.toFixed(3) + " AU): it would fly into the star");
+  if (q <= burn && ctx.warn) ctx.warn(at + ": passes " + q.toFixed(3) + " AU from the star, inside its burn (" + burn.toFixed(3) + " AU): it will fly into the star");
   if (r.chance > 1) fail(r.id + ".chance: 0 to 1, not " + r.chance);
 }
 class LevelError extends Error {
@@ -717,6 +747,7 @@ function parseLevel(text, id, ctx) {
   if (!of("pocket").length) fail("no pockets: nowhere to pot it");
   if (of("belt").length !== 1) fail("one belt, for now");
   if (of("pocket").filter((p) => hasTrait(p, "eats-belt")).length > 1) fail("one pocket at most eats the belt");
+  for (const b of raw.bodies) if (hasTrait(b, "defended") && !hasTrait(b, "inhabited")) fail(b.id + '.traits: only an inhabited world shoots back: add "inhabited"');
   for (const p of of("planet").concat(stars2.filter((s) => s.orbit))) {
     const o = p.orbit, at = p.id + ".orbit";
     for (const id2 of [].concat(o.around)) if (!starIds.has(id2)) fail(at + ".around: " + JSON.stringify(id2) + " is not a star here (the stars: " + [...starIds].join(", ") + ")");
@@ -769,7 +800,8 @@ const FWD_TEXT = {
   "over-ship": (e) => e.name + " runs over the ship's start"
 };
 const FWD_COLOR = { potted: "#e8b463", burned: "#ff5030", escaped: "#ff5030", left: "#8fc3e8", overlap: "#e8b463", "over-ship": "#ff8c70" };
-const TRAIT_DEFAULTS = { "eats-belt": { radius: 2.3, years: 0.15 } };
+const TRAIT_DEFAULTS = { "eats-belt": { radius: 2.3, years: 0.15 }, defended: { range: 0.8, every: 0.05, speed: 8 } };
+const sig4 = (v) => v === 0 ? 0 : Number(v.toPrecision(4));
 function el(tag, attrs, ...kids) {
   const e = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) {
@@ -790,7 +822,7 @@ function polar(r, a) {
 }
 function createEditor(api) {
   let draft = null, saved = "", history = [], future = [], sel = null, drag2 = null;
-  let err = null, status = "", open = false, canSave = false, tracks = {}, fwd = null, fwdTimer = 0;
+  let err = null, status = "", open = false, canSave = false, tracks = {}, fwd = null, fwdTimer = 0, warns = [];
   const bar = el("div", { id: "edbar" }), panel = el("div", { id: "edpanel" });
   const enterBtn = el("button", { id: "edenter", title: "Edit this table (L)", onclick: () => enter() }, "EDIT TABLE");
   document.body.append(bar, panel, enterBtn);
@@ -855,6 +887,7 @@ function createEditor(api) {
   function apply() {
     draft = canonLevel(draft);
     err = api.check(draft);
+    warns = err ? [] : api.warnings(draft);
     if (!err) {
       api.apply(clone(draft));
       refreshTracks();
@@ -999,6 +1032,22 @@ function createEditor(api) {
       sel = body.id;
     });
   }
+  function addNebula() {
+    change(() => {
+      const a = r4(Math.random() * TAU$1);
+      draft.bodies.push({
+        kind: "nebula",
+        id: uniqueId("nebula"),
+        name: "New nebula",
+        color: "#78b48c",
+        from: { radius: 1.6, angle: a },
+        to: { radius: 1.9, angle: r4((a + 0.5) % TAU$1) },
+        radius: 0.3,
+        drag: 9
+      });
+      sel = draft.bodies[draft.bodies.length - 1].id;
+    });
+  }
   function addPocket() {
     change(() => insertAfterKind("pocket", {
       kind: "pocket",
@@ -1047,6 +1096,10 @@ function createEditor(api) {
         const eat = traitOf(b, "eats-belt");
         out.push({ id: b.id, role: "body", w: polar((eat ? eat.radius : b.position.radius) * s, b.position.angle) });
       } else if (b.kind === "belt") out.push({ id: b.id, role: "radius", w: polar(b.radius * s, -Math.PI / 2) });
+      else if (b.kind === "nebula") {
+        out.push({ id: b.id, role: "from", w: polar(b.from.radius * s, b.from.angle) });
+        out.push({ id: b.id, role: "to", w: polar(b.to.radius * s, b.to.angle) });
+      }
     }
     out.push({ id: "ship", role: "body", w: polar(draft.ship.spawn.radius * s, draft.ship.spawn.angle) });
     return out;
@@ -1083,15 +1136,15 @@ function createEditor(api) {
           o.semiMajor = r4(Math.max(0.05, d2 * (1 + e * Math.cos(ang2 - o.periapsisAngle)) / (1 - e * e)));
         }
       } else if (h.role === "shape") {
-        const A = o.radius !== void 0 ? o.radius : o.semiMajor, e = Math.min(0.95, Math.max(0, 1 - d2 / A));
+        const A2 = o.radius !== void 0 ? o.radius : o.semiMajor, e = Math.min(0.95, Math.max(0, 1 - d2 / A2));
         if (e < 0.02) {
           delete o.semiMajor;
           delete o.eccentricity;
           delete o.periapsisAngle;
-          o.radius = r4(A);
+          o.radius = r4(A2);
         } else {
           delete o.radius;
-          o.semiMajor = r4(A);
+          o.semiMajor = r4(A2);
           o.eccentricity = r4(e);
           o.periapsisAngle = ang2;
         }
@@ -1114,6 +1167,11 @@ function createEditor(api) {
       if (eat) eat.radius = r4(d);
       else b.position.radius = r4(d);
     } else if (b.kind === "belt") b.radius = r4(Math.max(0.5, d));
+    else if (b.kind === "nebula") {
+      const end = h.role === "to" ? b.to : b.from;
+      end.radius = r4(d);
+      end.angle = ang;
+    }
   }
   function mouse2(type, e) {
     if (type === "down") {
@@ -1281,12 +1339,14 @@ function createEditor(api) {
         btn("+ Star", addStar),
         btn("+ Rogue", addRogue),
         btn("+ Pocket", addPocket),
+        btn("+ Nebula", addNebula),
         btn("Delete", removeSel, { disabled: !sel }),
         canSave ? btn("Save", save, { class: "go" }) : null,
         btn("Copy JSON", copyJson),
         btn("▶ Play", play, { class: "play" })
       ),
       ...err ? [el("div", { class: "err" }, "DOES NOT LOAD: " + err)] : status ? [el("div", { class: "note" }, status)] : [],
+      ...warns.map((w) => el("div", { class: "warn" }, "WARNING: " + w)),
       ...forwardLines()
     );
   }
@@ -1299,16 +1359,53 @@ function createEditor(api) {
     let input;
     if (t === "number" || t === "int") {
       const typed = owner === "star" && obj.type && STAR_TYPES[obj.type] ? STAR_TYPES[obj.type][key2] : void 0;
-      input = el("input", {
-        type: "number",
-        step: "any",
+      const text = el("input", {
+        type: "text",
+        inputmode: "decimal",
+        class: "num",
         value: v ?? "",
         placeholder: typed !== void 0 ? String(typed) + " (type)" : spec.optional ? "(none)" : "",
         onchange: (e) => {
           const s = e.target.value.trim();
+          if (s !== "" && !isFinite(Number(s))) {
+            e.target.value = v ?? "";
+            return;
+          }
           set(s === "" ? spec.optional ? void 0 : obj[key2] : Number(s));
         }
       });
+      if (!spec.ui) input = text;
+      else {
+        const [lo, hi] = spec.ui, lg = !!spec.log && lo > 0;
+        const toT = (x) => lg ? Math.log(x / lo) / Math.log(hi / lo) : (x - lo) / (hi - lo);
+        const fromT = (u) => {
+          const x = lg ? lo * Math.pow(hi / lo, u) : lo + (hi - lo) * u;
+          return t === "int" ? Math.round(x) : sig4(x);
+        };
+        const cur = v ?? typed ?? lo;
+        let held = false;
+        const slider = el("input", {
+          type: "range",
+          min: 0,
+          max: 1,
+          step: 1e-3,
+          value: Math.min(1, Math.max(0, toT(cur))),
+          oninput: (e) => {
+            if (!held) {
+              snapshot();
+              held = true;
+            }
+            obj[key2] = fromT(Number(e.target.value));
+            text.value = obj[key2];
+            apply();
+          },
+          onchange: () => {
+            held = false;
+            renderPanel();
+          }
+        });
+        input = el("span", { class: "slide" }, slider, text);
+      }
     } else if (t === "bool") {
       input = el("input", { type: "checkbox", checked: !!v, onchange: (e) => set(e.target.checked ? true : spec.optional ? void 0 : false) });
     } else if (t === "string") {
@@ -1381,15 +1478,15 @@ function createEditor(api) {
     const circ = o.radius !== void 0;
     return el("label", {}, el("span", {}, "shape"), el("select", { onchange: (e) => change(() => {
       if (e.target.value === "circle") {
-        const A = o.semiMajor;
+        const A2 = o.semiMajor;
         delete o.semiMajor;
         delete o.eccentricity;
         delete o.periapsisAngle;
-        o.radius = A;
+        o.radius = A2;
       } else {
-        const A = o.radius;
+        const A2 = o.radius;
         delete o.radius;
-        o.semiMajor = A;
+        o.semiMajor = A2;
         o.eccentricity = 0.3;
         o.periapsisAngle = r4((o.angle + Math.PI) % TAU$1);
       }
@@ -1403,6 +1500,7 @@ function createEditor(api) {
       box.append(el("label", {}, el("span", {}, name), el("input", { type: "checkbox", checked: !!cur, onchange: (e) => change(() => {
         const list = (obj.traits || []).filter((x) => (typeof x === "string" ? x : Object.keys(x)[0]) !== name);
         if (e.target.checked) list.push(T.fields ? { [name]: clone(TRAIT_DEFAULTS[name] || {}) } : name);
+        if (e.target.checked && name === "defended" && !list.includes("inhabited")) list.push("inhabited");
         if (list.length) obj.traits = list;
         else delete obj.traits;
       }) })));
@@ -1520,7 +1618,7 @@ function loadLevel(id) {
 const LEVEL_ID = new URLSearchParams(location.search).get("level") || "level-01";
 let LEVEL = loadLevel(LEVEL_ID);
 const LEVEL_OF = (k) => LEVEL.bodies.filter((b) => b.kind === k);
-let STAR_DEF, STAR_DEFS, PLANET_DEFS, ROGUE_DEFS, POCKETS, EATER, BELT_DEF, BELT, BELT_N, BELT_HALF, BELT_ROCKS, BRIEF;
+let STAR_DEF, STAR_DEFS, PLANET_DEFS, ROGUE_DEFS, NEBULA_DEFS, NEBULAE = [], POCKETS, EATER, BELT_DEF, BELT, BELT_N, BELT_HALF, BELT_ROCKS, BRIEF;
 const STAR = { x: 0, y: 0, vx: 0, vy: 0, fragile: false, alive: true, struck: false, trail: [], spin: 0, isStar: true };
 let STARS = [STAR];
 let editing = false;
@@ -1533,6 +1631,7 @@ function deriveLevel() {
   derivePockets();
   deriveBelt();
   deriveBrief();
+  NEBULA_DEFS = LEVEL_OF("nebula").map((n) => ({ id: n.id, name: n.name, color: n.color, from: n.from, to: n.to, r: n.radius, drag: n.drag }));
 }
 function applyLevel(L) {
   LEVEL = L;
@@ -1555,7 +1654,8 @@ function derivePlanetDefs() {
     color: p.color,
     atmosphere: p.atmosphere || null,
     fragile: hasTrait(p, "fragile"),
-    inhabited: hasTrait(p, "inhabited")
+    inhabited: hasTrait(p, "inhabited"),
+    gun: traitOf(p, "defended")
   }));
   ROGUE_DEFS = LEVEL_OF("rogue").map((p) => ({
     id: p.id,
@@ -1568,7 +1668,8 @@ function derivePlanetDefs() {
     color: p.color,
     atmosphere: p.atmosphere || null,
     fragile: hasTrait(p, "fragile"),
-    inhabited: hasTrait(p, "inhabited")
+    inhabited: hasTrait(p, "inhabited"),
+    gun: traitOf(p, "defended")
   }));
 }
 function strikesStar(ballType, star) {
@@ -1606,7 +1707,7 @@ function layoutPockets() {
     p.y = r * Math.sin(p.a);
   }
 }
-let bodies, ship, acb, balls, chamber, score, simYears, belt, beltEat;
+let bodies, ship, acb, balls, chamber, score, simYears, belt, beltEat, shots = [];
 let viewR = 1;
 function deriveBelt() {
   BELT_DEF = LEVEL_OF("belt")[0] || null;
@@ -1773,6 +1874,7 @@ function deriveRogue(d) {
     atmosphere: d.atmosphere,
     fragile: d.fragile,
     inhabited: d.inhabited,
+    gun: makeGun(d.gun),
     integrity: 1,
     orbitR: 0,
     struck: false,
@@ -1795,6 +1897,7 @@ function derivePlanet(d, stars2) {
     atmosphere: d.atmosphere,
     fragile: d.fragile,
     inhabited: d.inhabited,
+    gun: makeGun(d.gun),
     integrity: 1,
     orbitR: r,
     struck: false,
@@ -1807,6 +1910,42 @@ function applySystemScale() {
   const k = S.systemScale;
   if (BELT) BELT.r = BELT_DEF.radius * k;
   viewR = LEVEL.viewRadius * k;
+  NEBULAE = NEBULA_DEFS.map((n) => ({
+    ...n,
+    x1: ORIGIN.x + n.from.radius * k * Math.cos(n.from.angle),
+    y1: ORIGIN.y + n.from.radius * k * Math.sin(n.from.angle),
+    x2: ORIGIN.x + n.to.radius * k * Math.cos(n.to.angle),
+    y2: ORIGIN.y + n.to.radius * k * Math.sin(n.to.angle),
+    r: n.r * k
+  }));
+}
+function nebulaDensity(n, x, y) {
+  const sx = n.x2 - n.x1, sy = n.y2 - n.y1, len2 = sx * sx + sy * sy;
+  let t = len2 > 0 ? ((x - n.x1) * sx + (y - n.y1) * sy) / len2 : 0;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  const d = Math.hypot(x - (n.x1 + t * sx), y - (n.y1 + t * sy));
+  if (d >= n.r) return 0;
+  const e = 1 - d / n.r;
+  return e * e * (3 - 2 * e);
+}
+function inNebula(x, y) {
+  let m = 0;
+  for (const n of NEBULAE) m = Math.max(m, nebulaDensity(n, x, y));
+  return m;
+}
+function nebulaDrag(o, h) {
+  for (const n of NEBULAE) {
+    const d = n.drag > 0 ? nebulaDensity(n, o.x, o.y) : 0;
+    if (d > 0) {
+      const k = Math.exp(-n.drag * d * h);
+      o.vx *= k;
+      o.vy *= k;
+    }
+  }
+}
+const dragsIn = (b) => b.alive && (b.struck || b.rogue);
+function makeGun(g) {
+  return g ? { range: g.range * S.systemScale, every: g.every, speed: g.speed, provoked: !!g.provoked, cd: g.every, warned: false } : null;
 }
 function ballR(b) {
   return b.isStar ? Math.max(b.drawR * S.ballScale, 0.1) : Math.max(b.drawR * S.ballScale, S.minBallAU);
@@ -1853,6 +1992,7 @@ function resetWorld() {
   fx.shake = 0;
   flashes = [];
   ghost = null;
+  shots = [];
   timePaused = false;
   teleportCd = 0;
   note("zerograv freeflight: ENGAGED", "#8fc3e8");
@@ -2114,6 +2254,25 @@ function introKey(e) {
   }
   if (e.key.length === 1 && n.typed.length < NAME_MAX && /[\p{L}\p{N} '.-]/u.test(e.key)) n.typed += e.key;
 }
+function drawNebulae() {
+  if (!NEBULAE.length) return;
+  const thin = 1 - 0.65 * inNebula(ship.x, ship.y);
+  for (const n of NEBULAE) {
+    const L = Math.hypot(n.x2 - n.x1, n.y2 - n.y1), steps = Math.max(1, Math.ceil(L / (n.r * 0.5)));
+    const c = colRGB(n.color);
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps, wx = n.x1 + (n.x2 - n.x1) * t, wy = n.y1 + (n.y2 - n.y1) * t;
+      const q = worldToScreen(wx, wy);
+      if (!q) continue;
+      const R = n.r * (persp ? q[2] : cam.scale);
+      const g = cx.createRadialGradient(q[0], q[1], 0, q[0], q[1], R);
+      g.addColorStop(0, `rgba(${c[0]},${c[1]},${c[2]},${0.34 * thin})`);
+      g.addColorStop(0.55, `rgba(${c[0]},${c[1]},${c[2]},${0.2 * thin})`);
+      g.addColorStop(1, `rgba(${c[0]},${c[1]},${c[2]},0)`);
+      circle(q[0], q[1], R, g);
+    }
+  }
+}
 function drawOrbit(o, stroke, width) {
   const live = [].concat(o.around || []).map((id) => STARS.find((st) => st.id === id)).filter((st) => st && st.alive);
   const c = live.length ? massCentre(live) : ORIGIN;
@@ -2223,6 +2382,7 @@ function inspectorLines(st) {
   if (B.inhabited) anomalies.push("inhabited");
   if (st.o && st.o.fragile) anomalies.push("fragile");
   if (st.o && st.o.rogue) anomalies.push("rogue");
+  if (st.o && st.o.gun) anomalies.push(st.o.gun.provoked ? "armed: returns fire" : "armed: fires on approach");
   return [["type", B.cls || "unknown"], ["mass", massClass(st)], ["size", sizeClass(st, B)], ["composition", compositionClass(st, B)], ["anomalies", anomalies.length ? "" : "none"]].concat(anomalies.map((x) => ["", x]));
 }
 function inspectorTyped(st) {
@@ -2542,15 +2702,15 @@ function sweepBall(k, list, others, h) {
   for (const b of targets) {
     const R = S.acbRadiusAU + (b.ball ? S.acbRadiusAU : b.shipHit ? SHIP_R : ballR(b));
     const fx0 = k.x - b.x, fy0 = k.y - b.y;
-    const A = dx * dx + dy * dy, B = 2 * (fx0 * dx + fy0 * dy), C = fx0 * fx0 + fy0 * fy0 - R * R;
+    const A2 = dx * dx + dy * dy, B = 2 * (fx0 * dx + fy0 * dy), C = fx0 * fx0 + fy0 * fy0 - R * R;
     if (C <= 0) {
       best = b;
       bestT = 0;
       break;
     }
-    const disc = B * B - 4 * A * C;
+    const disc = B * B - 4 * A2 * C;
     if (disc < 0) continue;
-    const t = (-B - Math.sqrt(disc)) / (2 * A);
+    const t = (-B - Math.sqrt(disc)) / (2 * A2);
     if (t >= 0 && t < bestT) {
       bestT = t;
       best = b;
@@ -2561,11 +2721,11 @@ function sweepBall(k, list, others, h) {
     const inside = r0 < BELT.r;
     const Rf = inside ? BELT.r - BELT_HALF - S.acbRadiusAU : BELT.r + BELT_HALF + S.acbRadiusAU;
     const fx0 = k.x - ORIGIN.x, fy0 = k.y - ORIGIN.y;
-    const A = dx * dx + dy * dy, B = 2 * (fx0 * dx + fy0 * dy), C = fx0 * fx0 + fy0 * fy0 - Rf * Rf;
-    const disc = B * B - 4 * A * C;
+    const A2 = dx * dx + dy * dy, B = 2 * (fx0 * dx + fy0 * dy), C = fx0 * fx0 + fy0 * fy0 - Rf * Rf;
+    const disc = B * B - 4 * A2 * C;
     if (disc >= 0) {
       const sq = Math.sqrt(disc);
-      const t = inside ? (-B + sq) / (2 * A) : (-B - sq) / (2 * A);
+      const t = inside ? (-B + sq) / (2 * A2) : (-B - sq) / (2 * A2);
       if (t >= 0 && t < bestT) {
         const hx = k.x + dx * t, hy = k.y + dy * t;
         const i = beltSection(hx, hy, sweepTime);
@@ -2685,6 +2845,9 @@ function forwardCheck(years) {
   const spawn = shipSpawn(), events = [], touching = /* @__PURE__ */ new Set(), overShip = /* @__PURE__ */ new Set();
   for (let i = 1; i <= n; i++) {
     stepWorlds(list, h, stars2);
+    if (NEBULAE.length) {
+      for (const b of list) if (dragsIn(b)) nebulaDrag(b, h);
+    }
     for (const b of list) if (b.alive) {
       b.x += b.vx * h;
       b.y += b.vy * h;
@@ -2730,6 +2893,35 @@ function forwardCheck(years) {
   }
   return { years, events };
 }
+const SHOT_R = 0.015;
+function stepGuns(h, safe) {
+  let cause = null;
+  for (const b of bodies) {
+    const g = b.gun;
+    if (!g || !b.alive || g.provoked && !b.struck) continue;
+    g.cd = Math.max(0, g.cd - h);
+    const d = dist(b.x, b.y, ship.x, ship.y);
+    if (g.cd > 0 || safe || d > g.range || d < 1e-9) continue;
+    const ux = (ship.x - b.x) / d, uy = (ship.y - b.y) / d, r0 = ballR(b) + SHOT_R * 2;
+    shots.push({ x: b.x + ux * r0, y: b.y + uy * r0, vx: ux * g.speed, vy: uy * g.speed, life: 1.5 * g.range / g.speed, from: b.name, color: b.color });
+    g.cd = g.every;
+    if (!g.warned) {
+      g.warned = true;
+      note(b.name.toUpperCase() + " IS FIRING ON THE ARK", "#ff5030");
+    }
+  }
+  for (const sh of shots) {
+    sh.x += sh.vx * h;
+    sh.y += sh.vy * h;
+    sh.life -= h;
+    if (!cause && !safe && dist(sh.x, sh.y, ship.x, ship.y) < SHIP_R + SHOT_R) {
+      cause = "shot down by " + sh.from;
+      sh.life = 0;
+    }
+  }
+  shots = shots.filter((sh) => sh.life > 0);
+  return cause;
+}
 function pocketAt(x, y, r) {
   for (const p of POCKETS) if (dist(x, y, p.x, p.y) < p.size + r) return p;
   return null;
@@ -2738,6 +2930,12 @@ function simStep(h, offGravity) {
   let shipCause = null;
   stepWorlds(bodies, h);
   if (!offGravity) gameGravity(ship, bodies, h, true);
+  if (NEBULAE.length) {
+    nebulaDrag(ship, h);
+    for (const k of balls) if (!k.flash) nebulaDrag(k, h);
+    for (const b of bodies) if (dragsIn(b)) nebulaDrag(b, h);
+    for (const st of STARS) if (st.alive && st.struck) nebulaDrag(st, h);
+  }
   for (const k of balls) if (!k.flash) gameGravity(k, bodies, h, S.acbFeelsWorlds);
   gravitizeAll(balls, contactList(bodies), balls, offGravity ? null : ship, h);
   for (const b of bodies) if (b.alive) {
@@ -2938,6 +3136,7 @@ function simStep(h, offGravity) {
     }
   }
   const safe = ship.safeT > 0;
+  if (!shipCause) shipCause = stepGuns(h, safe);
   if (!shipCause && !safe) {
     for (const b of bodies) if (b.alive && dist(ship.x, ship.y, b.x, b.y) < ballR(b) + SHIP_R) {
       shipCause = "crashed into " + b.name;
@@ -3568,6 +3767,11 @@ function buildGhost() {
     stepWorlds(gb, H, gstars);
     const live = sim.filter((k) => !k.dead);
     for (const k of live) gameGravity(k, gb, H, S.acbFeelsWorlds, gstars);
+    if (NEBULAE.length) {
+      for (const k of live) if (!k.flash) nebulaDrag(k, H);
+      for (const b of gb) if (dragsIn(b)) nebulaDrag(b, H);
+      for (const st of gstars) if (st.alive && st.struck) nebulaDrag(st, H);
+    }
     gravitizeAll(live, contactList(gb, gstars), live, null, H);
     for (const b of gb) if (b.alive) {
       b.x += b.vx * H;
@@ -3952,7 +4156,10 @@ void main() {
   float lum = dot(lin, vec3(0.2126, 0.7152, 0.0722));
   float core = smoothstep(0.75, 1.0, t.a);
   float pulse = 1.0 + 0.05 * sin(uTime * 1.3) * core + 0.22 * sin(uTime * 0.9 + 1.0) * (1.0 - core);
-  vec3 col = uColor * lum * 1.6 + vec3(1.0, 0.92, 0.8) * pow(lum, 5.0) * 0.5;
+  // the white-hot core leans to the star's own colour, so a red dwarf, a blue giant and a
+  // neutron star read as different stars and not the same white glare
+  vec3 hot = mix(vec3(1.0, 0.92, 0.8), uColor / max(max(uColor.r, uColor.g), max(uColor.b, 1e-3)), 0.75);
+  vec3 col = uColor * lum * 1.6 + hot * pow(lum, 5.0) * 0.5;
   float a = t.a * pulse;
   vec3 rgb = pow(clamp(col * pulse, 0.0, 1.0), vec3(1.0 / 2.2));
   fragColor = vec4(rgb * a, a);
@@ -4600,6 +4807,20 @@ function draw(realDt) {
   if (acb.mode === "attached" || acb.mode === "capturing") {
     const q = worldToScreen(acb.x, acb.y);
     if (q) drawBall(q[0], q[1], acb.type, false);
+  }
+  drawNebulae();
+  for (const b of bodies) if (b.alive && b.gun && dist(b.x, b.y, ship.x, ship.y) < b.gun.range * 1.4 && !(b.gun.provoked && !b.struck)) drawRing(b.x, b.y, b.gun.range, "rgba(255,80,48,0.35)", 1, [2, 5]);
+  for (const sh of shots) {
+    const q = worldToScreen(sh.x, sh.y);
+    if (!q) continue;
+    const v = Math.hypot(sh.vx, sh.vy) || 1, L = 7;
+    cx.strokeStyle = "#ff5030";
+    cx.lineWidth = 2;
+    cx.beginPath();
+    cx.moveTo(q[0], q[1]);
+    cx.lineTo(q[0] - sh.vx / v * L, q[1] - sh.vy / v * L);
+    cx.stroke();
+    circle(q[0], q[1], 2.2, "#ffd0b0");
   }
   if (worldToScreen(ship.x, ship.y)) {
     const [sx, sy] = worldToScreen(ship.x, ship.y);
@@ -5786,6 +6007,8 @@ window.RIG = {
   levels: () => LEVEL_IDS.slice(),
   editor: () => editor,
   forward: (years) => forwardCheck(years || S.forwardYears),
+  shots: () => shots.map((s) => ({ ...s })),
+  nebulae: () => NEBULAE.map((n) => ({ ...n })),
   editing: () => editing,
   endIntro: () => endIntro(),
   briefing: () => introStops().map((st) => ({ key: st.key, mass: st.mass, R: st.R, lines: inspectorLines(st) })),
@@ -5940,6 +6163,15 @@ editor = createEditor({
       return e.detail || e.message;
     }
   },
+  // what loads but is worth saying: a rogue that will dive into a star (GAME_DESIGN §11.4)
+  warnings: (L) => {
+    const w = [];
+    try {
+      parseLevel(JSON.stringify(L), L.id, { ...LEVEL_CTX, warn: (m) => w.push(m) });
+    } catch {
+    }
+    return w.filter((m) => !/is bound to the star/.test(m));
+  },
   // a briefing under way is dropped, not finished: Robert does not name what the player has not
   enter: (L) => {
     if (intro) {
@@ -6062,7 +6294,11 @@ requestAnimationFrame(frame);</script>
 #edbar .fwd.burned, #edbar .fwd.escaped, #edbar .fwd.over-ship { color: #ff8c70; }
 #edbar .fwd.left { color: #8fc3e8; }
 #edpanel label.inline { display: inline-flex; gap: 3px; margin: 0 6px 0 0; }
-#edpanel .hint { color: #8fa6c8; font-style: italic; margin: 4px 0; }</style>
+#edpanel .hint { color: #8fa6c8; font-style: italic; margin: 4px 0; }
+#edbar .warn { color: #e8b463; margin-top: 3px; }
+#edpanel .slide { display: flex; align-items: center; gap: 5px; }
+#edpanel .slide input[type=range] { width: 96px; }
+#edpanel input.num { width: 72px; }</style>
 </head>
 <body>
 <canvas id="cv"></canvas>
