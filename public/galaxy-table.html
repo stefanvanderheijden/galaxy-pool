@@ -87,14 +87,14 @@ const __vite_glob_0_0 = `{
       "id": "smell",
       "name": "Red",
       "sprite": "red",
-      "mass": 4.1e-06,
+      "mass": 0.0000041,
       "drawR": 0.0068,
       "color": "#d98c4a",
       "atmosphere": "#c9a84e",
       "orbit": {
         "around": "star",
-        "radius": 0.55,
-        "angle": 2.35
+        "angle": 2.35,
+        "radius": 0.55
       },
       "brief": {
         "class": "Terrestrial, veiled",
@@ -108,14 +108,14 @@ const __vite_glob_0_0 = `{
       "id": "hearing",
       "name": "Terra",
       "sprite": "terra",
-      "mass": 1.55e-06,
+      "mass": 0.00000155,
       "drawR": 0.0052,
       "color": "#7fa8a0",
       "atmosphere": "#7fb0e6",
       "orbit": {
         "around": "star",
-        "radius": 0.92,
-        "angle": 0.62
+        "angle": 0.62,
+        "radius": 0.92
       },
       "traits": [
         "fragile",
@@ -133,13 +133,13 @@ const __vite_glob_0_0 = `{
       "id": "touch",
       "name": "Vera",
       "sprite": "vera",
-      "mass": 4.2e-07,
+      "mass": 4.2e-7,
       "drawR": 0.0038,
       "color": "#cfd8e3",
       "orbit": {
         "around": "star",
-        "radius": 1.45,
-        "angle": 5.583
+        "angle": 5.583,
+        "radius": 1.45
       },
       "traits": [
         "fragile"
@@ -156,7 +156,7 @@ const __vite_glob_0_0 = `{
       "id": "dune",
       "name": "Dune",
       "sprite": "dune",
-      "mass": 1.1e-06,
+      "mass": 0.0000011,
       "drawR": 0.0048,
       "color": "#d6a960",
       "atmosphere": "#e6c07a",
@@ -179,7 +179,7 @@ const __vite_glob_0_0 = `{
       "id": "taste",
       "name": "Sanguinus",
       "sprite": "sanguinus",
-      "mass": 9e-09,
+      "mass": 9e-9,
       "drawR": 0.0026,
       "color": "#5f5b76",
       "arrival": {
@@ -264,9 +264,9 @@ const __vite_glob_0_0 = `{
     {
       "kind": "belt",
       "id": "belt",
+      "radius": 2.7,
       "sections": 48,
       "halfWidth": 0.07,
-      "radius": 2.7,
       "restitution": 0.85
     }
   ]
@@ -694,6 +694,663 @@ function parseLevel(text, id, ctx) {
   for (const r of of("rogue")) checkRogue(r, raw, star, fail, ctx);
   return raw;
 }
+const TAU$1 = Math.PI * 2;
+const clone = (o) => JSON.parse(JSON.stringify(o));
+const HIT_PX = 13;
+const VEL_T = 0.3;
+const TRACK_YEARS = 8;
+const RESUME_KEY = "galaxytable.editing";
+const r4 = (v) => Math.round(v * 1e4) / 1e4, r5 = (v) => Math.round(v * 1e5) / 1e5;
+const TRAIT_DEFAULTS = { "eats-belt": { radius: 2.3, years: 0.15 } };
+function el(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (k === "class") e.className = v;
+    else if (v !== false && v != null) e.setAttribute(k, v === true ? "" : v);
+  }
+  for (const k of kids) if (k != null) e.append(k);
+  return e;
+}
+function canon(v, shape) {
+  const fields = LEVEL_SCHEMA[shape];
+  if (!fields || !v || typeof v !== "object" || Array.isArray(v)) return v;
+  const out = {};
+  for (const [k, f] of Object.entries(fields)) {
+    if (v[k] === void 0) continue;
+    if (k === "bodies") out[k] = v[k].map((b) => canon(b, b.kind));
+    else if (f.type === "traits") out[k] = v[k].map((t) => typeof t === "string" ? t : { [Object.keys(t)[0]]: canonFields(t[Object.keys(t)[0]], LEVEL_TRAITS[Object.keys(t)[0]].fields) });
+    else out[k] = canon(v[k], f.type);
+  }
+  for (const k of Object.keys(v)) if (!(k in out)) out[k] = v[k];
+  return out;
+}
+function canonFields(v, fields) {
+  const out = {};
+  for (const k of Object.keys(fields || {})) if (v[k] !== void 0) out[k] = v[k];
+  for (const k of Object.keys(v)) if (!(k in out)) out[k] = v[k];
+  return out;
+}
+function orbitR(o) {
+  if (o.radius !== void 0) return o.radius;
+  const e = o.eccentricity;
+  return o.semiMajor * (1 - e * e) / (1 + e * Math.cos(o.angle - o.periapsisAngle));
+}
+function polar(r, a) {
+  return [r * Math.cos(a), r * Math.sin(a)];
+}
+function createEditor(api) {
+  let draft = null, saved = "", history = [], future = [], sel = null, drag2 = null;
+  let err = null, status = "", open = false, canSave = false, tracks = {};
+  const bar = el("div", { id: "edbar" }), panel = el("div", { id: "edpanel" });
+  const enterBtn = el("button", { id: "edenter", title: "Edit this table (L)", onclick: () => enter() }, "EDIT TABLE");
+  document.body.append(bar, panel, enterBtn);
+  bar.style.display = panel.style.display = "none";
+  fetch("/api/levels").then((r) => r.ok ? r.json() : null).then((j) => {
+    canSave = Array.isArray(j);
+    if (open) renderBar();
+  }).catch(() => {
+  });
+  addEventListener("beforeunload", (e) => {
+    if (open && dirty()) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+  });
+  const dirty = () => JSON.stringify(canon(draft, "level")) !== saved;
+  const bodyOf = (id) => id === "ship" ? draft.ship : draft.bodies.find((b) => b.id === id);
+  const k = () => api.scale();
+  function enter() {
+    if (open) return;
+    draft = clone(api.level());
+    saved = JSON.stringify(canon(draft, "level"));
+    history = [];
+    future = [];
+    sel = null;
+    drag2 = null;
+    status = "";
+    open = true;
+    enterBtn.style.display = "none";
+    bar.style.display = panel.style.display = "";
+    api.enter(clone(draft));
+    refreshTracks();
+    render();
+  }
+  function play() {
+    if (err) {
+      status = "fix the level first: it does not load";
+      renderBar();
+      return;
+    }
+    open = false;
+    drag2 = null;
+    bar.style.display = panel.style.display = "none";
+    enterBtn.style.display = "";
+    api.leave(clone(canon(draft, "level")));
+  }
+  function toggle() {
+    if (open) play();
+    else if (draft && api.level().id === draft.id) reenter();
+    else enter();
+  }
+  function reenter() {
+    open = true;
+    enterBtn.style.display = "none";
+    bar.style.display = panel.style.display = "";
+    api.enter(clone(draft));
+    refreshTracks();
+    render();
+  }
+  function apply() {
+    draft = canon(draft, "level");
+    err = api.check(draft);
+    if (!err) {
+      api.apply(clone(draft));
+      refreshTracks();
+    }
+    renderBar();
+  }
+  function snapshot() {
+    history.push(JSON.stringify(draft));
+    if (history.length > 200) history.shift();
+    future = [];
+  }
+  function change(fn) {
+    snapshot();
+    fn();
+    apply();
+    renderPanel();
+  }
+  function undo() {
+    if (!history.length) return;
+    future.push(JSON.stringify(draft));
+    draft = JSON.parse(history.pop());
+    if (sel && !bodyOf(sel)) sel = null;
+    apply();
+    renderPanel();
+  }
+  function redo() {
+    if (!future.length) return;
+    history.push(JSON.stringify(draft));
+    draft = JSON.parse(future.pop());
+    apply();
+    renderPanel();
+  }
+  function refreshTracks() {
+    tracks = {};
+    for (const b of draft.bodies) if (b.kind === "rogue") tracks[b.id] = api.rogueTrack(b.id, TRACK_YEARS);
+  }
+  async function save() {
+    if (err) {
+      status = "not saved: the level does not load";
+      renderBar();
+      return;
+    }
+    const text = JSON.stringify(canon(draft, "level"), null, 2) + "\n";
+    try {
+      const r = await fetch("/api/levels/" + draft.id + ".json", { method: "PUT", body: text });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        status = "not saved: " + (j.error || r.status);
+        renderBar();
+        return;
+      }
+      saved = JSON.stringify(canon(draft, "level"));
+      status = "saved levels/" + draft.id + ".json";
+      try {
+        sessionStorage.setItem(RESUME_KEY, JSON.stringify({ id: draft.id, sel }));
+      } catch {
+      }
+      if (draft.id !== api.level().id || draft.id !== api.levelId()) location.search = "?level=" + draft.id;
+      renderBar();
+    } catch (e) {
+      status = "not saved: " + e.message;
+      renderBar();
+    }
+  }
+  async function copyJson() {
+    const text = JSON.stringify(canon(draft, "level"), null, 2) + "\n";
+    try {
+      await navigator.clipboard.writeText(text);
+      status = "copied " + draft.id + ".json to the clipboard";
+    } catch {
+      status = "the browser refused the clipboard";
+    }
+    renderBar();
+  }
+  function uniqueId(base) {
+    let i = 1, id = base;
+    while (draft.bodies.some((b) => b.id === id)) id = base + "-" + ++i;
+    return id;
+  }
+  function insertAfterKind(kind, body) {
+    let at = -1;
+    draft.bodies.forEach((b, i) => {
+      if (b.kind === kind) at = i;
+    });
+    if (at < 0) draft.bodies.forEach((b, i) => {
+      if (b.kind === "planet" || b.kind === "star") at = i;
+    });
+    draft.bodies.splice(at + 1, 0, body);
+    sel = body.id;
+  }
+  const brief = (cls) => ({ class: cls, note: "RC NOTE" });
+  function addPlanet() {
+    change(() => insertAfterKind("planet", {
+      kind: "planet",
+      id: uniqueId("planet"),
+      name: "New world",
+      sprite: "vera",
+      mass: 1e-6,
+      drawR: 4e-3,
+      color: "#cfd8e3",
+      orbit: { around: "star", angle: Math.random() * TAU$1, radius: 1.2 },
+      brief: brief("Terrestrial")
+    }));
+  }
+  function addRogue() {
+    change(() => insertAfterKind("rogue", {
+      kind: "rogue",
+      id: uniqueId("rogue"),
+      name: "New rogue",
+      sprite: "sanguinus",
+      mass: 9e-9,
+      drawR: 26e-4,
+      color: "#5f5b76",
+      arrival: { x: -3.195, y: 1.163, vx: 0.07009, vy: -1.65846 },
+      chance: 1,
+      brief: brief("Rogue planetary body")
+    }));
+  }
+  function addPocket() {
+    change(() => insertAfterKind("pocket", {
+      kind: "pocket",
+      id: uniqueId("pocket"),
+      name: "New pocket",
+      color: "#b48cff",
+      position: { radius: 2.0859, angle: Math.random() * TAU$1 },
+      mass: 0.6,
+      reach: 0.5,
+      size: 0.12,
+      brief: brief("Singularity")
+    }));
+  }
+  function removeSel() {
+    const b = sel && bodyOf(sel);
+    if (!b || sel === "ship") {
+      status = "select a planet, rogue or pocket to delete";
+      renderBar();
+      return;
+    }
+    if (b.kind === "star" || b.kind === "belt") {
+      status = "the " + b.kind + " stays: a table has one";
+      renderBar();
+      return;
+    }
+    change(() => {
+      draft.bodies = draft.bodies.filter((q) => q !== b);
+      sel = null;
+    });
+  }
+  function handles() {
+    const s = k(), out = [];
+    for (const b of draft.bodies) {
+      if (b.kind === "star") out.push({ id: b.id, role: "select", w: [0, 0] });
+      else if (b.kind === "planet" && b.orbit) {
+        const o = b.orbit;
+        out.push({ id: b.id, role: "body", w: polar(orbitR(o) * s, o.angle) });
+        const circ = o.radius !== void 0;
+        out.push({ id: b.id, role: "shape", w: circ ? polar(o.radius * s, o.angle + Math.PI) : polar(o.semiMajor * (1 - o.eccentricity) * s, o.periapsisAngle) });
+      } else if (b.kind === "rogue" && b.arrival) {
+        const a = b.arrival, v = 1 / Math.sqrt(s);
+        out.push({ id: b.id, role: "body", w: [a.x * s, a.y * s] });
+        out.push({ id: b.id, role: "vel", w: [a.x * s + a.vx * v * VEL_T, a.y * s + a.vy * v * VEL_T] });
+      } else if (b.kind === "pocket" && b.position) {
+        const eat = traitOf(b, "eats-belt");
+        out.push({ id: b.id, role: "body", w: polar((eat ? eat.radius : b.position.radius) * s, b.position.angle) });
+      } else if (b.kind === "belt") out.push({ id: b.id, role: "radius", w: polar(b.radius * s, -Math.PI / 2) });
+    }
+    out.push({ id: "ship", role: "body", w: polar(draft.ship.spawn.radius * s, draft.ship.spawn.angle) });
+    return out;
+  }
+  function hit(sx, sy) {
+    let best = null, bd = HIT_PX;
+    for (const h of handles()) {
+      const q = api.worldToScreen(h.w[0], h.w[1]);
+      if (!q) continue;
+      const d = Math.hypot(q[0] - sx, q[1] - sy) - (h.role === "shape" || h.role === "vel" ? 2 : 0);
+      if (d < bd) {
+        bd = d;
+        best = h;
+      }
+    }
+    return best;
+  }
+  function dragTo(h, wx, wy) {
+    const s = k(), b = bodyOf(h.id), d = Math.hypot(wx, wy) / s, a = Math.atan2(wy, wx);
+    const ang = r4((a % TAU$1 + TAU$1) % TAU$1);
+    if (h.id === "ship") {
+      b.spawn.radius = r4(d);
+      b.spawn.angle = ang;
+      return;
+    }
+    if (b.kind === "planet") {
+      const o = b.orbit;
+      if (h.role === "body") {
+        o.angle = ang;
+        if (o.radius !== void 0) o.radius = r4(Math.max(0.05, d));
+        else {
+          const e = o.eccentricity;
+          o.semiMajor = r4(Math.max(0.05, d * (1 + e * Math.cos(ang - o.periapsisAngle)) / (1 - e * e)));
+        }
+      } else if (h.role === "shape") {
+        const A = o.radius !== void 0 ? o.radius : o.semiMajor, e = Math.min(0.95, Math.max(0, 1 - d / A));
+        if (e < 0.02) {
+          delete o.semiMajor;
+          delete o.eccentricity;
+          delete o.periapsisAngle;
+          o.radius = r4(A);
+        } else {
+          delete o.radius;
+          o.semiMajor = r4(A);
+          o.eccentricity = r4(e);
+          o.periapsisAngle = ang;
+        }
+      }
+    } else if (b.kind === "rogue") {
+      const ar = b.arrival;
+      if (h.role === "body") {
+        ar.x = r4(wx / s);
+        ar.y = r4(wy / s);
+      } else {
+        const v = Math.sqrt(s);
+        ar.vx = r5((wx - ar.x * s) / VEL_T * v);
+        ar.vy = r5((wy - ar.y * s) / VEL_T * v);
+      }
+    } else if (b.kind === "pocket") {
+      b.position.angle = ang;
+      const eat = traitOf(b, "eats-belt");
+      if (eat) eat.radius = r4(d);
+      else b.position.radius = r4(d);
+    } else if (b.kind === "belt") b.radius = r4(Math.max(0.5, d));
+  }
+  function mouse2(type, e) {
+    if (type === "down") {
+      if (e.button !== 0) return;
+      const h = hit(e.clientX, e.clientY);
+      sel = h ? h.id : null;
+      drag2 = h && h.role !== "select" ? { h, moved: false } : null;
+      renderPanel();
+    } else if (type === "move" && drag2) {
+      if (!drag2.moved) {
+        snapshot();
+        drag2.moved = true;
+      }
+      const [wx, wy] = api.screenToWorld(e.clientX, e.clientY);
+      dragTo(drag2.h, wx, wy);
+      apply();
+    } else if (type === "up" && drag2) {
+      const moved = drag2.moved;
+      drag2 = null;
+      if (moved) renderPanel();
+    }
+  }
+  function key(e) {
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod && e.code === "KeyZ") {
+      e.shiftKey ? redo() : undo();
+      e.preventDefault();
+      return;
+    }
+    if (mod && e.code === "KeyY") {
+      redo();
+      e.preventDefault();
+      return;
+    }
+    if (mod && e.code === "KeyS") {
+      if (canSave) save();
+      else copyJson();
+      e.preventDefault();
+      return;
+    }
+    if (e.code === "KeyL" && !e.repeat) {
+      play();
+      return;
+    }
+    if (e.code === "Escape") {
+      sel = null;
+      renderPanel();
+      return;
+    }
+    if (e.code === "Delete" || e.code === "Backspace") {
+      removeSel();
+      e.preventDefault();
+      return;
+    }
+    if (e.code === "Space" || e.code === "Tab") e.preventDefault();
+  }
+  function draw2(W, H) {
+    const cx2 = api.cx;
+    for (const b of draft.bodies) if (b.kind === "rogue" && tracks[b.id]) {
+      const pts = tracks[b.id];
+      cx2.strokeStyle = b.color;
+      cx2.globalAlpha = 0.55;
+      cx2.lineWidth = 1.5;
+      cx2.setLineDash([4, 6]);
+      cx2.beginPath();
+      let pen = false;
+      for (const p of pts) {
+        const q = api.worldToScreen(p.x, p.y);
+        if (!q) {
+          pen = false;
+          continue;
+        }
+        if (pen) cx2.lineTo(q[0], q[1]);
+        else cx2.moveTo(q[0], q[1]);
+        pen = true;
+      }
+      cx2.stroke();
+      cx2.setLineDash([]);
+      cx2.globalAlpha = 1;
+    }
+    const hs = handles();
+    for (const h of hs) {
+      const q = api.worldToScreen(h.w[0], h.w[1]);
+      if (!q) continue;
+      const on = h.id === sel;
+      if (h.role === "vel") {
+        const b = hs.find((x) => x.id === h.id && x.role === "body"), p = b && api.worldToScreen(b.w[0], b.w[1]);
+        if (p) {
+          cx2.strokeStyle = on ? "#ffe08a" : "rgba(255,224,138,0.6)";
+          cx2.lineWidth = 1.5;
+          cx2.beginPath();
+          cx2.moveTo(p[0], p[1]);
+          cx2.lineTo(q[0], q[1]);
+          cx2.stroke();
+        }
+      }
+      cx2.lineWidth = on ? 2 : 1.25;
+      cx2.strokeStyle = on ? "#ffe08a" : "rgba(143,195,232,0.9)";
+      cx2.fillStyle = on ? "rgba(255,224,138,0.25)" : "rgba(8,12,22,0.55)";
+      cx2.beginPath();
+      if (h.role === "shape") {
+        cx2.moveTo(q[0], q[1] - 6);
+        cx2.lineTo(q[0] + 6, q[1]);
+        cx2.lineTo(q[0], q[1] + 6);
+        cx2.lineTo(q[0] - 6, q[1]);
+        cx2.closePath();
+      } else if (h.role === "vel") {
+        cx2.arc(q[0], q[1], 4, 0, TAU$1);
+      } else if (h.role === "radius") {
+        cx2.rect(q[0] - 5, q[1] - 5, 10, 10);
+      } else cx2.arc(q[0], q[1], on ? 15 : 12, 0, TAU$1);
+      cx2.fill();
+      cx2.stroke();
+    }
+    cx2.font = `11px "Share Tech Mono", monospace`;
+    cx2.textAlign = "center";
+    cx2.fillStyle = "rgba(159,180,204,0.85)";
+    cx2.fillText("drag a body to move it   drag ◆ to make an orbit an ellipse   drag the dot on a rogue's line to aim it   □ the belt", W / 2, H - 30);
+    cx2.fillText("L plays the table   scroll zooms   Cmd/Ctrl-Z undo   Delete removes   Esc deselects", W / 2, H - 14);
+    cx2.textAlign = "left";
+  }
+  function renderBar() {
+    const ids = api.levelIds();
+    const pick = el("select", { onchange: (e) => {
+      if (dirty() && !confirm("Leave " + draft.id + " with unsaved changes?")) {
+        e.target.value = api.levelId();
+        return;
+      }
+      try {
+        sessionStorage.setItem(RESUME_KEY, JSON.stringify({ id: e.target.value }));
+      } catch {
+      }
+      location.search = "?level=" + e.target.value;
+    } }, ...ids.map((id) => el("option", { value: id, selected: id === api.levelId() }, id)));
+    const btn = (label, fn, attrs) => el("button", { onclick: fn, ...attrs || {} }, label);
+    bar.replaceChildren(
+      el(
+        "div",
+        { class: "row" },
+        el("b", {}, "EDITING"),
+        pick,
+        dirty() ? el("span", { class: "dirty" }, "unsaved") : null,
+        btn("Undo", undo, { disabled: !history.length }),
+        btn("Redo", redo, { disabled: !future.length }),
+        btn("+ Planet", addPlanet),
+        btn("+ Rogue", addRogue),
+        btn("+ Pocket", addPocket),
+        btn("Delete", removeSel, { disabled: !sel }),
+        canSave ? btn("Save", save, { class: "go" }) : null,
+        btn("Copy JSON", copyJson),
+        btn("▶ Play", play, { class: "play" })
+      ),
+      ...err ? [el("div", { class: "err" }, "DOES NOT LOAD: " + err)] : status ? [el("div", { class: "note" }, status)] : []
+    );
+  }
+  function field(obj, key2, spec, owner) {
+    const t = spec.type, v = obj[key2], set = (nv) => change(() => {
+      if (nv === void 0) delete obj[key2];
+      else obj[key2] = nv;
+    });
+    const label = el("label", {}, el("span", {}, key2 + (spec.optional ? "" : "")));
+    let input;
+    if (t === "number" || t === "int") {
+      input = el("input", {
+        type: "number",
+        step: "any",
+        value: v ?? "",
+        placeholder: spec.optional ? "(none)" : "",
+        onchange: (e) => {
+          const s = e.target.value.trim();
+          set(s === "" ? spec.optional ? void 0 : obj[key2] : Number(s));
+        }
+      });
+    } else if (t === "bool") {
+      input = el("input", { type: "checkbox", checked: !!v, onchange: (e) => set(e.target.checked ? true : spec.optional ? void 0 : false) });
+    } else if (t === "string") {
+      const long = key2 === "note";
+      input = el(long ? "textarea" : "input", { rows: long ? 3 : null, value: long ? null : v ?? "", onchange: (e) => set(e.target.value === "" && spec.optional ? void 0 : e.target.value) });
+      if (long) input.value = v ?? "";
+    } else if (t === "color") {
+      input = el(
+        "span",
+        { class: "pair" },
+        spec.optional ? el("input", { type: "checkbox", checked: v !== void 0, title: "on / off", onchange: (e) => set(e.target.checked ? v || "#ffffff" : void 0) }) : null,
+        el("input", { type: "color", value: v || "#ffffff", disabled: v === void 0, onchange: (e) => set(e.target.value) })
+      );
+    } else if (t === "sprite" || t === "ball") {
+      const opts = Object.keys(t === "sprite" ? SPRITES : BALL_TYPES);
+      input = el("select", { onchange: (e) => set(e.target.value) }, ...opts.map((o) => el("option", { value: o, selected: o === v }, o)));
+    } else if (t === "list" && spec.of === "ball") {
+      input = el(
+        "span",
+        { class: "pair" },
+        ...v.map((x, i) => el(
+          "select",
+          { onchange: (e) => change(() => {
+            v[i] = e.target.value;
+          }) },
+          ...Object.keys(BALL_TYPES).map((o) => el("option", { value: o, selected: o === x }, o))
+        )),
+        spec.max == null || v.length < spec.max ? el("button", { onclick: () => change(() => v.push("standard")) }, "+") : null,
+        v.length ? el("button", { onclick: () => change(() => v.pop()) }, "−") : null
+      );
+    } else if (t === "traits") {
+      return traitsBox(obj, owner);
+    } else if (LEVEL_SCHEMA[t]) {
+      return group(key2, obj[key2], t, owner);
+    } else return null;
+    label.append(input);
+    return label;
+  }
+  function group(title, obj, shape, owner) {
+    const box = el("fieldset", {}, el("legend", {}, title));
+    if (shape === "orbit") box.append(orbitShape(obj));
+    for (const [k2, spec] of Object.entries(LEVEL_SCHEMA[shape])) {
+      if (k2 === "kind" || k2 === "bodies") continue;
+      if (shape === "orbit" && !["around", "angle", "retrograde"].includes(k2) && obj[k2] === void 0) continue;
+      const f = field(obj, k2, spec, owner);
+      if (f) box.append(f);
+    }
+    return box;
+  }
+  function orbitShape(o) {
+    const circ = o.radius !== void 0;
+    return el("label", {}, el("span", {}, "shape"), el("select", { onchange: (e) => change(() => {
+      if (e.target.value === "circle") {
+        const A = o.semiMajor;
+        delete o.semiMajor;
+        delete o.eccentricity;
+        delete o.periapsisAngle;
+        o.radius = A;
+      } else {
+        const A = o.radius;
+        delete o.radius;
+        o.semiMajor = A;
+        o.eccentricity = 0.3;
+        o.periapsisAngle = r4((o.angle + Math.PI) % TAU$1);
+      }
+    }) }, el("option", { value: "circle", selected: circ }, "circle"), el("option", { value: "ellipse", selected: !circ }, "ellipse")));
+  }
+  function traitsBox(obj, owner) {
+    const box = el("fieldset", {}, el("legend", {}, "traits"));
+    for (const [name, T] of Object.entries(LEVEL_TRAITS)) {
+      if (!T.on.includes(owner)) continue;
+      const cur = traitOf(obj, name);
+      box.append(el("label", {}, el("span", {}, name), el("input", { type: "checkbox", checked: !!cur, onchange: (e) => change(() => {
+        const list = (obj.traits || []).filter((x) => (typeof x === "string" ? x : Object.keys(x)[0]) !== name);
+        if (e.target.checked) list.push(T.fields ? { [name]: clone(TRAIT_DEFAULTS[name] || {}) } : name);
+        if (list.length) obj.traits = list;
+        else delete obj.traits;
+      }) })));
+      if (cur && T.fields) for (const [k2, spec] of Object.entries(T.fields)) box.append(field(cur, k2, spec, owner));
+    }
+    return box.children.length > 1 ? box : null;
+  }
+  function renderPanel() {
+    const b = sel && bodyOf(sel);
+    const head = (t, sub) => el("div", { class: "head" }, el("b", {}, t), sub ? el("i", {}, sub) : null);
+    const kids = [];
+    if (!b) {
+      kids.push(head("THE TABLE", "click a body, or drag its handle"));
+      for (const key2 of ["id", "name", "viewRadius"]) kids.push(field(draft, key2, LEVEL_SCHEMA.level[key2], "level"));
+      kids.push(group("loadout", draft.loadout, "loadout", "loadout"));
+    } else if (sel === "ship") {
+      kids.push(head("THE ARK", "where the ship starts, at rest"));
+      kids.push(group("ship", draft.ship, "ship", "ship"));
+    } else {
+      kids.push(head((b.name || b.id).toUpperCase(), b.kind));
+      for (const [key2, spec] of Object.entries(LEVEL_SCHEMA[b.kind])) if (key2 !== "kind") {
+        const f = field(b, key2, spec, b.kind);
+        if (f) kids.push(f);
+      }
+    }
+    panel.replaceChildren(...kids.filter(Boolean));
+    renderBar();
+  }
+  function render() {
+    renderPanel();
+  }
+  try {
+    const r = JSON.parse(sessionStorage.getItem(RESUME_KEY) || "null");
+    if (r && r.id === api.levelId()) {
+      sessionStorage.removeItem(RESUME_KEY);
+      setTimeout(() => {
+        enter();
+        if (r.sel && bodyOf(r.sel)) {
+          sel = r.sel;
+          renderPanel();
+        }
+      }, 0);
+    }
+  } catch {
+  }
+  return {
+    get open() {
+      return open;
+    },
+    enter,
+    play,
+    toggle,
+    key,
+    mouse: mouse2,
+    draw: draw2,
+    undo,
+    redo,
+    // for tests: the draft, and a way to drag a handle by its body and role
+    draft: () => draft,
+    error: () => err,
+    handles,
+    dragTo: (id, role, wx, wy) => {
+      const h = handles().find((x) => x.id === id && x.role === role);
+      snapshot();
+      dragTo(h, wx, wy);
+      apply();
+      renderPanel();
+    }
+  };
+}
 const SPY = 31557600;
 const MAX_SUBSTEP_YR = 1e-4;
 const MAX_SUBSTEPS = 200;
@@ -724,59 +1381,62 @@ function loadLevel(id) {
     throw e;
   }
 }
-const LEVEL = loadLevel(new URLSearchParams(location.search).get("level") || "level-01");
+const LEVEL_ID = new URLSearchParams(location.search).get("level") || "level-01";
+let LEVEL = loadLevel(LEVEL_ID);
 const LEVEL_OF = (k) => LEVEL.bodies.filter((b) => b.kind === k);
-const STAR_DEF = LEVEL_OF("star")[0];
-const STAR = {
-  id: STAR_DEF.id,
-  name: STAR_DEF.name,
-  sprite: STAR_DEF.sprite,
-  x: 0,
-  y: 0,
-  vx: 0,
-  vy: 0,
-  mass: STAR_DEF.mass,
-  drawR: STAR_DEF.drawR,
-  color: STAR_DEF.color,
-  fragile: false,
-  alive: true,
-  struck: false,
-  trail: [],
-  spin: 0
-};
+let STAR_DEF, PLANET_DEFS, ROGUE_DEFS, POCKETS, EATER, BELT_DEF, BELT, BELT_N, BELT_HALF, BELT_ROCKS, BRIEF;
+const STAR = { x: 0, y: 0, vx: 0, vy: 0, fragile: false, alive: true, struck: false, trail: [], spin: 0 };
+let editing = false;
+let editor = null;
+function deriveLevel() {
+  STAR_DEF = LEVEL_OF("star")[0];
+  Object.assign(STAR, { id: STAR_DEF.id, name: STAR_DEF.name, sprite: STAR_DEF.sprite, mass: STAR_DEF.mass, drawR: STAR_DEF.drawR, color: STAR_DEF.color });
+  derivePlanetDefs();
+  derivePockets();
+  deriveBelt();
+  deriveBrief();
+  retintSun();
+}
+function applyLevel(L) {
+  LEVEL = L;
+  deriveLevel();
+  resetWorld();
+}
 const ORIGIN = { x: 0, y: 0 };
-const PLANET_DEFS = LEVEL_OF("planet").map((p) => {
-  const o = p.orbit, circ = o.radius !== void 0;
-  return {
+function derivePlanetDefs() {
+  PLANET_DEFS = LEVEL_OF("planet").map((p) => {
+    const o = p.orbit, circ = o.radius !== void 0;
+    return {
+      id: p.id,
+      name: p.name,
+      sprite: p.sprite,
+      r: circ ? o.radius : o.semiMajor,
+      a: o.angle,
+      e: circ ? 0 : o.eccentricity,
+      w: circ ? 0 : o.periapsisAngle,
+      retro: !!o.retrograde,
+      mass: p.mass,
+      drawR: p.drawR,
+      color: p.color,
+      atmosphere: p.atmosphere || null,
+      fragile: hasTrait(p, "fragile"),
+      inhabited: hasTrait(p, "inhabited")
+    };
+  });
+  ROGUE_DEFS = LEVEL_OF("rogue").map((p) => ({
     id: p.id,
     name: p.name,
     sprite: p.sprite,
-    r: circ ? o.radius : o.semiMajor,
-    a: o.angle,
-    e: circ ? 0 : o.eccentricity,
-    w: circ ? 0 : o.periapsisAngle,
-    retro: !!o.retrograde,
+    arrival: p.arrival,
+    chance: p.chance,
     mass: p.mass,
     drawR: p.drawR,
     color: p.color,
     atmosphere: p.atmosphere || null,
     fragile: hasTrait(p, "fragile"),
     inhabited: hasTrait(p, "inhabited")
-  };
-});
-const ROGUE_DEFS = LEVEL_OF("rogue").map((p) => ({
-  id: p.id,
-  name: p.name,
-  sprite: p.sprite,
-  arrival: p.arrival,
-  chance: p.chance,
-  mass: p.mass,
-  drawR: p.drawR,
-  color: p.color,
-  atmosphere: p.atmosphere || null,
-  fragile: hasTrait(p, "fragile"),
-  inhabited: hasTrait(p, "inhabited")
-}));
+  }));
+}
 function strikesStar(type) {
   return type === "night" || type === "thermo";
 }
@@ -784,25 +1444,27 @@ function shipSpawn() {
   const r = LEVEL.ship.spawn.radius * S.systemScale, a = LEVEL.ship.spawn.angle;
   return { x: ORIGIN.x + r * Math.cos(a), y: ORIGIN.y + r * Math.sin(a), vx: 0, vy: 0, nose: a + Math.PI };
 }
-const POCKETS = LEVEL_OF("pocket").map((p) => {
-  const eat = traitOf(p, "eats-belt");
-  return {
-    id: p.id,
-    name: p.name,
-    a: p.position.angle,
-    r: p.position.radius,
-    mass: p.mass,
-    reach: p.reach,
-    size: p.size,
-    eatsBelt: !!eat,
-    eatR: eat ? eat.radius : 0,
-    eatYears: eat ? eat.years : 0,
-    x: 0,
-    y: 0,
-    color: p.color
-  };
-});
-const EATER = POCKETS.find((p) => p.eatsBelt) || null;
+function derivePockets() {
+  POCKETS = LEVEL_OF("pocket").map((p) => {
+    const eat = traitOf(p, "eats-belt");
+    return {
+      id: p.id,
+      name: nameFor(p.id, p.name),
+      a: p.position.angle,
+      r: p.position.radius,
+      mass: p.mass,
+      reach: p.reach,
+      size: p.size,
+      eatsBelt: !!eat,
+      eatR: eat ? eat.radius : 0,
+      eatYears: eat ? eat.years : 0,
+      x: 0,
+      y: 0,
+      color: p.color
+    };
+  });
+  EATER = POCKETS.find((p) => p.eatsBelt) || null;
+}
 function layoutPockets() {
   for (const p of POCKETS) {
     const r = (p.eatsBelt ? p.eatR : p.r) * S.systemScale;
@@ -811,15 +1473,20 @@ function layoutPockets() {
   }
 }
 let bodies, ship, acb, balls, chamber, score, simYears, belt, beltEat;
-const BELT_DEF = LEVEL_OF("belt")[0] || null;
-const BELT = BELT_DEF && { r: BELT_DEF.radius, restitution: BELT_DEF.restitution };
-const BELT_N = BELT_DEF ? BELT_DEF.sections : 0, BELT_HALF = BELT_DEF ? BELT_DEF.halfWidth : 0;
-let viewR = LEVEL.viewRadius;
-const BELT_ROCKS = [];
-for (let i = 0; i < BELT_N; i++) {
-  const rocks = [];
-  for (let j = 0; j < 9; j++) rocks.push({ da: (j + Math.random()) / 9, dr: (Math.random() - 0.5) * 2, size: 0.6 + Math.random() * 1.4, tint: Math.random() });
-  BELT_ROCKS.push(rocks);
+let viewR = 1;
+function deriveBelt() {
+  BELT_DEF = LEVEL_OF("belt")[0] || null;
+  BELT = BELT_DEF && { r: BELT_DEF.radius, restitution: BELT_DEF.restitution };
+  BELT_N = BELT_DEF ? BELT_DEF.sections : 0;
+  BELT_HALF = BELT_DEF ? BELT_DEF.halfWidth : 0;
+  viewR = LEVEL.viewRadius;
+  if (BELT_ROCKS && BELT_ROCKS.length === BELT_N) return;
+  BELT_ROCKS = [];
+  for (let i = 0; i < BELT_N; i++) {
+    const rocks = [];
+    for (let j = 0; j < 9; j++) rocks.push({ da: (j + Math.random()) / 9, dr: (Math.random() - 0.5) * 2, size: 0.6 + Math.random() * 1.4, tint: Math.random() });
+    BELT_ROCKS.push(rocks);
+  }
 }
 function beltOmega() {
   return Math.sqrt(G * STAR.mass / Math.pow(BELT.r, 3));
@@ -882,7 +1549,7 @@ function beltBreak(i, x, y) {
 }
 const bodyNames = {};
 function nameFor(key, def) {
-  return bodyNames[key] ? bodyNames[key].name : def;
+  return bodyNames[key] && !editing ? bodyNames[key].name : def;
 }
 function keplerState(a, e, w, ang, retro) {
   const p = a * (1 - e * e), nu = ang - w, r = p / (1 + e * Math.cos(nu)), k = Math.sqrt(G * STAR.mass / p) * (retro ? -1 : 1);
@@ -891,6 +1558,7 @@ function keplerState(a, e, w, ang, retro) {
 }
 let rackSeed = 0, seedPinned = false;
 function rogueArrives(d) {
+  if (editing) return true;
   let h = 2166136261 ^ rackSeed;
   for (const ch of LEVEL.id + "/" + d.id) {
     h ^= ch.charCodeAt(0);
@@ -969,8 +1637,8 @@ function resetWorld() {
   if (!seedPinned) rackSeed = Math.random() * 2 ** 31 | 0;
   applySystemScale();
   STAR.name = nameFor("star", STAR_DEF.name);
-  for (const p of POCKETS) p.name = nameFor(p.id, p.id);
-  Object.assign(STAR, { x: 0, y: 0, vx: 0, vy: 0, alive: true, struck: false, trail: [], broken: false, brokenNoted: false });
+  for (const p of POCKETS) p.name = nameFor(p.id, LEVEL_OF("pocket").find((q) => q.id === p.id).name);
+  Object.assign(STAR, { x: 0, y: 0, vx: 0, vy: 0, alive: true, struck: false, trail: [], broken: false, brokenNoted: false, escaped: false });
   bodies = PLANET_DEFS.map(derivePlanet).concat(ROGUE_DEFS.filter(rogueArrives).map(deriveRogue));
   ship = { ...shipSpawn(), trail: [] };
   acb = { mode: "attached", type: LEVEL.loadout.nose, x: 0, y: 0, vx: 0, vy: 0, cap: null, lostT: 0 };
@@ -1000,11 +1668,13 @@ function resetWorld() {
   timePaused = false;
   teleportCd = 0;
   note("zerograv freeflight: ENGAGED", "#8fc3e8");
-  if (S.introFlyover) startIntro();
+  if (S.introFlyover && !editing) startIntro();
   else endIntro();
 }
-const BRIEF = { ship: { cls: LEVEL.ship.brief.class, ...LEVEL.ship.brief, inhabited: hasTrait(LEVEL.ship, "inhabited") } };
-for (const b of LEVEL.bodies) if (b.brief) BRIEF[b.id] = { cls: b.brief.class, ...b.brief, inhabited: hasTrait(b, "inhabited") };
+function deriveBrief() {
+  BRIEF = { ship: { cls: LEVEL.ship.brief.class, ...LEVEL.ship.brief, inhabited: hasTrait(LEVEL.ship, "inhabited") } };
+  for (const b of LEVEL.bodies) if (b.brief) BRIEF[b.id] = { cls: b.brief.class, ...b.brief, inhabited: hasTrait(b, "inhabited") };
+}
 const MSUN_KG = 1989e27, MEARTH_KG = 5972e21;
 function densityGcc(massMsun, diameterKm) {
   const r = diameterKm * 0.5 * 1e5;
@@ -1935,6 +2605,12 @@ function simStep(h, offGravity) {
       fx.flashA = Math.max(fx.flashA, 0.8);
       fx.shake = Math.max(fx.shake, 1);
       note(STAR.name.toUpperCase() + " POTTED into " + p.name, "#ffe08a");
+    } else if (BELT && Math.hypot(STAR.x - ORIGIN.x, STAR.y - ORIGIN.y) > S.escapeBelts * BELT.r) {
+      STAR.alive = false;
+      STAR.escaped = true;
+      score.escaped++;
+      score.fouls++;
+      note("ESCAPED: " + STAR.name + " left the table (foul)", "#ff5030");
     }
   }
   for (const b of bodies) if (b.broken && !b.brokenNoted) {
@@ -2012,9 +2688,9 @@ function simStep(h, offGravity) {
   const worldsGone = bodies.every((b) => !b.alive || b.rogue);
   if (worldsGone && !score.worldsCleared) {
     score.worldsCleared = true;
-    if (!score.starPotted) note("WORLDS CLEARED: " + STAR.name + " is still up, and it is the last ball", "#ffe08a");
+    if (STAR.alive) note("WORLDS CLEARED: " + STAR.name + " is still up, and it is the last ball", "#ffe08a");
   }
-  if (!score.won && worldsGone && score.starPotted) {
+  if (!score.won && worldsGone && !STAR.alive) {
     score.won = true;
     score.wonAt = simYears;
     note("TABLE CLEARED", "#ffe08a");
@@ -2751,6 +3427,13 @@ function frame(now) {
   last = now;
   stepFx(realDt);
   layoutPockets();
+  if (editing) {
+    cam.x += (ORIGIN.x - cam.x) * Math.min(1, realDt * 4);
+    cam.y += (ORIGIN.y - cam.y) * Math.min(1, realDt * 4);
+    cam.scale += (Math.min(cv.clientWidth, cv.clientHeight) / 2 / viewR * cam.zoom - cam.scale) * Math.min(1, realDt * 6);
+    draw();
+    return;
+  }
   pollPad(realDt);
   if (intro) {
     stepIntro(realDt);
@@ -2887,7 +3570,8 @@ for (const k in SPRITES) {
   IMG[k] = im;
 }
 let sunTinted = null;
-IMG.sun.onload = () => {
+function retintSun() {
+  if (!IMG.sun.complete || !IMG.sun.width) return;
   const c = document.createElement("canvas");
   c.width = IMG.sun.width;
   c.height = IMG.sun.height;
@@ -2899,7 +3583,8 @@ IMG.sun.onload = () => {
   g.globalCompositeOperation = "destination-in";
   g.drawImage(IMG.sun, 0, 0);
   sunTinted = c;
-};
+}
+IMG.sun.onload = retintSun;
 function drawSprite(key, sx, sy, R, img, alpha) {
   const sp = SPRITES[key], im = img || IMG[key];
   if (!im || !(im.complete || im instanceof HTMLCanvasElement) || !im.width) return false;
@@ -3785,6 +4470,10 @@ function draw(realDt) {
     drawBriefing(W, H);
     return;
   }
+  if (editing) {
+    editor.draw(W, H);
+    return;
+  }
   if (freezeShown > 0.01) {
     const g = cx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.32, W / 2, H / 2, Math.max(W, H) * 0.72);
     g.addColorStop(0, "rgba(90,150,220,0)");
@@ -3971,7 +4660,7 @@ function drawHud(W, H) {
   cx.textAlign = "left";
   bodies.filter((b) => b.alive).length;
   const lines = [
-    ["SHOTS " + score.shots + "   FOULS " + score.fouls + "   POTTED " + score.potted + "/" + bodies.filter((b) => !b.rogue).length + (score.bonus ? " +" + score.bonus + " BONUS" : "") + "   BALLS " + ballsLeft() + "   " + STAR.name.toUpperCase() + " " + (score.starPotted ? "POTTED" : "STILL UP"), ballsLeft() <= 1 ? "#ff8c70" : "#cfe0ff"],
+    ["SHOTS " + score.shots + "   FOULS " + score.fouls + "   POTTED " + score.potted + "/" + bodies.filter((b) => !b.rogue).length + (score.bonus ? " +" + score.bonus + " BONUS" : "") + "   BALLS " + ballsLeft() + "   " + STAR.name.toUpperCase() + " " + (score.starPotted ? "POTTED" : STAR.escaped ? "ESCAPED" : "STILL UP"), ballsLeft() <= 1 ? "#ff8c70" : "#cfe0ff"],
     ["T " + simYears.toFixed(2) + " yr" + (score.deaths ? "   SHIP LOST " + score.deaths : ""), "#9fb4cc"],
     [
       "ACB " + (acb.mode === "attached" ? "ON THE NOSE" : acb.mode === "capturing" ? "WINCHING IN" : acb.mode === "empty" ? pad.active && pad.owns ? "OUT, get in its ring and press CROSS" + (chamber.length ? " (or CROSS or L2 loads the next)" : "") : "OUT, get in its ring and press Space" + (chamber.length ? " (or Space or LMB loads the next)" : "") : score.failed ? "NONE LEFT" : chamber.length ? "DESTROYED, next loads in " + Math.max(0, S.respawnSeconds - acb.lostT).toFixed(1) + " s" : "DESTROYED, catch one") + (balls.length > 1 || balls.length === 1 && acb.mode !== "empty" ? "   " + balls.length + " BALL" + (balls.length > 1 ? "S" : "") + " OUT" : ""),
@@ -4072,12 +4761,12 @@ function renderChamber() {
   const key = JSON.stringify(slots) + (pad.active ? "|" + pad.sel : "");
   if (key === chamberKey) return;
   chamberKey = key;
-  const el = document.getElementById("chamber");
-  el.innerHTML = slots.map((sl, i) => {
+  const el2 = document.getElementById("chamber");
+  el2.innerHTML = slots.map((sl, i) => {
     const T = sl.type ? BALL_TYPES[sl.type] : null;
     return `<div class="slot ${sl.state}${pad.active && i === pad.sel ? " padsel" : ""}" data-i="${i}"><div class="lbl">${sl.lbl}</div><div class="ball">` + (T ? `<div class="dot" style="background:radial-gradient(circle at 35% 35%, ${T.hi}, ${T.color} 55%, ${T.lo})"></div><span class="type">${T.short}</span>` : `<div class="dot" style="background:#1a2233;border:1px dashed #3a4a66"></div><span class="type">${sl.text}</span>`) + `</div></div>`;
   }).join("");
-  el.querySelectorAll(".slot .type").forEach((t, i) => t.addEventListener("click", () => cycleSlot(slots[i])));
+  el2.querySelectorAll(".slot .type").forEach((t, i) => t.addEventListener("click", () => cycleSlot(slots[i])));
 }
 function cycleSlot(sl) {
   if (!sl.type) return;
@@ -4493,10 +5182,18 @@ function drawPadMenu(W, H) {
 }
 const KEYMAP = { KeyW: "w", KeyA: "a", KeyS: "s", KeyD: "d", KeyQ: "q", KeyE: "e" };
 addEventListener("keydown", (e) => {
-  if (e.target.tagName === "INPUT") return;
+  if (["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName)) return;
+  if (editing) {
+    editor.key(e);
+    return;
+  }
   if (intro) {
     introKey(e);
     e.preventDefault();
+    return;
+  }
+  if (e.code === "KeyL" && !e.repeat) {
+    editor.toggle();
     return;
   }
   pad.owns = false;
@@ -4548,6 +5245,10 @@ addEventListener("blur", () => {
 });
 let mouseDrift = 0;
 cv.addEventListener("mousemove", (e) => {
+  if (editing) {
+    editor.mouse("move", e);
+    return;
+  }
   if (pad.owns) {
     mouseDrift += Math.hypot(e.clientX - mouse.sx, e.clientY - mouse.sy);
     if (mouseDrift > 60) pad.owns = false;
@@ -4556,6 +5257,10 @@ cv.addEventListener("mousemove", (e) => {
   mouse.sy = e.clientY;
 });
 cv.addEventListener("mousedown", (e) => {
+  if (editing) {
+    editor.mouse("down", e);
+    return;
+  }
   if (intro) {
     if (intro.naming) resolveName();
     else skipIntro();
@@ -4594,6 +5299,10 @@ cv.addEventListener("mousedown", (e) => {
   drag = { ax: e.clientX, ay: e.clientY, dir: [Math.cos(ship.nose), Math.sin(ship.nose)] };
 });
 addEventListener("mouseup", (e) => {
+  if (editing) {
+    editor.mouse("up", e);
+    return;
+  }
   if (e.button === 2 && mouseADS) {
     mouseADS = false;
     charging = false;
@@ -4695,7 +5404,7 @@ function fmtLog(v) {
   return v < 100 ? v.toFixed(1) : v.toFixed(0);
 }
 function buildPanel() {
-  const el = document.getElementById("panel");
+  const el2 = document.getElementById("panel");
   let html = "", advOpen = false;
   for (const row of PANEL) {
     if (row[0] === "h") {
@@ -4728,8 +5437,8 @@ function buildPanel() {
   }
   if (advOpen) html += `</div>`;
   html += `<hr><button id="resetBtn">reset to defaults</button><button id="rulesBtn">table rules back to the game's</button></div>`;
-  el.innerHTML = html;
-  el.querySelectorAll("input").forEach((inp) => {
+  el2.innerHTML = html;
+  el2.querySelectorAll("input").forEach((inp) => {
     inp.addEventListener("input", () => {
       const k = inp.dataset.k;
       let shown = inp.value;
@@ -4784,6 +5493,8 @@ buildPanel();
 window.RIG = {
   level: () => JSON.parse(JSON.stringify(LEVEL)),
   levels: () => LEVEL_IDS.slice(),
+  editor: () => editor,
+  editing: () => editing,
   endIntro: () => endIntro(),
   briefing: () => introStops().map((st) => ({ key: st.key, mass: st.mass, R: st.R, lines: inspectorLines(st) })),
   checkLevel: (obj) => {
@@ -4920,6 +5631,62 @@ window.RIG = {
   project: (x, y) => worldToScreen(x, y),
   cam: () => ({ ...cam })
 };
+function playUI(on) {
+  document.getElementById("panel").style.display = on ? "" : "none";
+  document.getElementById("chamber").style.display = on ? "" : "none";
+}
+editor = createEditor({
+  level: () => LEVEL,
+  levelId: () => LEVEL_ID,
+  levelIds: () => LEVEL_IDS.slice(),
+  check: (L) => {
+    try {
+      parseLevel(JSON.stringify(L), L.id, LEVEL_CTX);
+      return null;
+    } catch (e) {
+      return e.detail || e.message;
+    }
+  },
+  // a briefing under way is dropped, not finished: Robert does not name what the player has not
+  enter: (L) => {
+    if (intro) {
+      intro = null;
+      persp = null;
+      cv.classList.remove("briefing");
+    }
+    editing = true;
+    applyLevel(L);
+    playUI(false);
+  },
+  apply: (L) => {
+    applyLevel(L);
+    playUI(false);
+  },
+  leave: (L) => {
+    editing = false;
+    applyLevel(L);
+    playUI(true);
+  },
+  scale: () => S.systemScale,
+  cx,
+  worldToScreen,
+  screenToWorld,
+  // a rogue's path from the rack as the game made it, flown on the game's own stepWorlds
+  rogueTrack: (id, years) => {
+    const b = bodies.find((q) => q.id === id);
+    if (!b) return [];
+    const o = { ...b, trail: [] }, star = { ...STAR, struck: false }, h = 1e-3, pts = [{ x: o.x, y: o.y }];
+    for (let i = 0, n = Math.round(years / h); i < n; i++) {
+      stepWorlds([o], h, star);
+      o.x += o.vx * h;
+      o.y += o.vy * h;
+      if (i % 4 === 3) pts.push({ x: o.x, y: o.y });
+      if (dist(o.x, o.y, star.x, star.y) < starR() || Math.hypot(o.x, o.y) > 4 * (BELT ? BELT.r : 3)) break;
+    }
+    return pts;
+  }
+});
+deriveLevel();
 resetWorld();
 requestAnimationFrame(frame);</script>
   <style rel="stylesheet" crossorigin>html, body { margin: 0; height: 100%; background: #05070d; overflow: hidden; }
@@ -4955,7 +5722,37 @@ requestAnimationFrame(frame);</script>
   #chamber .slot.padsel { outline: 1px solid #8fe8b0; outline-offset: 2px; }
   #cv.briefing { cursor: default; }
   #panel button { background: #182640; color: #cfe0ff; border: 1px solid #2f4468; border-radius: 4px;
-    font: inherit; padding: 3px 8px; cursor: pointer; width: 100%; }</style>
+    font: inherit; padding: 3px 8px; cursor: pointer; width: 100%; }
+/* THE LEVEL EDITOR (src/editor.js) */
+#edenter { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 20; background: rgba(8,12,22,0.8); color: #8fc3e8;
+  border: 1px solid #2f4468; border-radius: 4px; font: 11px "Share Tech Mono", Menlo, monospace; letter-spacing: 1px; padding: 4px 10px; cursor: pointer; }
+#edenter:hover { color: #ffffff; border-color: #4fc3f7; }
+#edbar { position: fixed; top: 8px; left: 50%; transform: translateX(-50%); z-index: 20; max-width: calc(100vw - 32px); background: rgba(8,12,22,0.92);
+  border: 1px solid #2f4468; border-radius: 6px; padding: 6px 8px; font: 11px "Share Tech Mono", Menlo, monospace; color: #cfe0ff; }
+#edbar .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+#edbar b { letter-spacing: 1px; color: #ffe08a; }
+#edbar .dirty { color: #e8b463; }
+#edbar .err { color: #ff8c70; margin-top: 5px; max-width: 760px; }
+#edbar .note { color: #8fe8b0; margin-top: 5px; }
+#edbar button, #edpanel button { background: #182640; color: #cfe0ff; border: 1px solid #2f4468; border-radius: 4px; font: inherit; padding: 3px 8px; cursor: pointer; }
+#edbar button:disabled { opacity: 0.4; cursor: default; }
+#edbar button.go { border-color: #4f8f6a; color: #8fe8b0; }
+#edbar button.play { border-color: #4fc3f7; color: #ffffff; }
+#edbar select, #edpanel select, #edpanel input, #edpanel textarea { background: #0d1526; color: #e2ecff; border: 1px solid #2f4468; border-radius: 3px; font: inherit; }
+#edpanel { position: fixed; left: 12px; top: 90px; bottom: 60px; width: 290px; overflow-y: auto; z-index: 20; background: rgba(8,12,22,0.9);
+  border: 1px solid #2a3a55; border-radius: 6px; padding: 8px 10px; font: 11px/1.4 "Share Tech Mono", Menlo, monospace; color: #9fb4cc; }
+#edpanel .head { display: flex; flex-direction: column; margin-bottom: 6px; }
+#edpanel .head b { color: #ffe08a; letter-spacing: 1px; font-size: 12px; }
+#edpanel .head i { color: #8fa6c8; }
+#edpanel label { display: flex; justify-content: space-between; align-items: center; gap: 6px; margin: 3px 0; }
+#edpanel label > span:first-child { color: #cfe0ff; flex: none; }
+#edpanel input[type=number], #edpanel input:not([type]) { width: 130px; }
+#edpanel textarea { width: 100%; resize: vertical; }
+#edpanel label:has(textarea) { flex-direction: column; align-items: stretch; }
+#edpanel .pair { display: flex; gap: 4px; align-items: center; }
+#edpanel fieldset { border: 1px solid #22304a; border-radius: 4px; margin: 6px 0; padding: 4px 8px; }
+#edpanel legend { color: #8fc3e8; padding: 0 4px; }
+@media (max-width: 700px) { #edpanel { top: auto; bottom: 8px; left: 8px; right: 8px; width: auto; height: 40vh; } }</style>
 </head>
 <body>
 <canvas id="cv"></canvas>
