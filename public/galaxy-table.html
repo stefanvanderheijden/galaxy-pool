@@ -696,6 +696,31 @@ function parseLevel(text, id, ctx) {
   for (const r of of("rogue")) checkRogue(r, raw, star, fail, ctx);
   return raw;
 }
+function canon(v, shape) {
+  const fields = LEVEL_SCHEMA[shape];
+  if (!fields || !v || typeof v !== "object" || Array.isArray(v)) return v;
+  const out = {};
+  for (const [k, f] of Object.entries(fields)) {
+    if (v[k] === void 0) continue;
+    if (k === "bodies") out[k] = v[k].map((b) => canon(b, b.kind));
+    else if (f.type === "traits") out[k] = v[k].map((t) => typeof t === "string" ? t : { [Object.keys(t)[0]]: canonFields(t[Object.keys(t)[0]], LEVEL_TRAITS[Object.keys(t)[0]].fields) });
+    else out[k] = canon(v[k], f.type);
+  }
+  for (const k of Object.keys(v)) if (!(k in out)) out[k] = v[k];
+  return out;
+}
+function canonFields(v, fields) {
+  const out = {};
+  for (const k of Object.keys(fields || {})) if (v[k] !== void 0) out[k] = v[k];
+  for (const k of Object.keys(v)) if (!(k in out)) out[k] = v[k];
+  return out;
+}
+function canonLevel(level) {
+  return canon(level, "level");
+}
+function serializeLevel(level) {
+  return JSON.stringify(canonLevel(level), null, 2) + "\n";
+}
 const TAU$1 = Math.PI * 2;
 const clone = (o) => JSON.parse(JSON.stringify(o));
 const HIT_PX = 13;
@@ -723,25 +748,6 @@ function el(tag, attrs, ...kids) {
   for (const k of kids) if (k != null) e.append(k);
   return e;
 }
-function canon(v, shape) {
-  const fields = LEVEL_SCHEMA[shape];
-  if (!fields || !v || typeof v !== "object" || Array.isArray(v)) return v;
-  const out = {};
-  for (const [k, f] of Object.entries(fields)) {
-    if (v[k] === void 0) continue;
-    if (k === "bodies") out[k] = v[k].map((b) => canon(b, b.kind));
-    else if (f.type === "traits") out[k] = v[k].map((t) => typeof t === "string" ? t : { [Object.keys(t)[0]]: canonFields(t[Object.keys(t)[0]], LEVEL_TRAITS[Object.keys(t)[0]].fields) });
-    else out[k] = canon(v[k], f.type);
-  }
-  for (const k of Object.keys(v)) if (!(k in out)) out[k] = v[k];
-  return out;
-}
-function canonFields(v, fields) {
-  const out = {};
-  for (const k of Object.keys(fields || {})) if (v[k] !== void 0) out[k] = v[k];
-  for (const k of Object.keys(v)) if (!(k in out)) out[k] = v[k];
-  return out;
-}
 function orbitR(o) {
   if (o.radius !== void 0) return o.radius;
   const e = o.eccentricity;
@@ -768,13 +774,13 @@ function createEditor(api) {
       e.returnValue = "";
     }
   });
-  const dirty = () => JSON.stringify(canon(draft, "level")) !== saved;
+  const dirty = () => JSON.stringify(canonLevel(draft)) !== saved;
   const bodyOf = (id) => id === "ship" ? draft.ship : draft.bodies.find((b) => b.id === id);
   const k = () => api.scale();
   function enter() {
     if (open) return;
     draft = clone(api.level());
-    saved = JSON.stringify(canon(draft, "level"));
+    saved = JSON.stringify(canonLevel(draft));
     history = [];
     future = [];
     sel = null;
@@ -798,7 +804,7 @@ function createEditor(api) {
     drag2 = null;
     bar.style.display = panel.style.display = "none";
     enterBtn.style.display = "";
-    api.leave(clone(canon(draft, "level")));
+    api.leave(clone(canonLevel(draft)));
   }
   function toggle() {
     if (open) play();
@@ -815,7 +821,7 @@ function createEditor(api) {
     fwdTimer = setTimeout(runForward, 0);
   }
   function apply() {
-    draft = canon(draft, "level");
+    draft = canonLevel(draft);
     err = api.check(draft);
     if (!err) {
       api.apply(clone(draft));
@@ -867,7 +873,7 @@ function createEditor(api) {
       renderBar();
       return;
     }
-    const text = JSON.stringify(canon(draft, "level"), null, 2) + "\n";
+    const text = serializeLevel(draft);
     try {
       const r = await fetch("/api/levels/" + draft.id + ".json", { method: "PUT", body: text });
       const j = await r.json().catch(() => ({}));
@@ -876,7 +882,7 @@ function createEditor(api) {
         renderBar();
         return;
       }
-      saved = JSON.stringify(canon(draft, "level"));
+      saved = JSON.stringify(canonLevel(draft));
       status = "saved levels/" + draft.id + ".json";
       try {
         sessionStorage.setItem(RESUME_KEY, JSON.stringify({ id: draft.id, sel }));
@@ -890,7 +896,7 @@ function createEditor(api) {
     }
   }
   async function copyJson() {
-    const text = JSON.stringify(canon(draft, "level"), null, 2) + "\n";
+    const text = serializeLevel(draft);
     try {
       await navigator.clipboard.writeText(text);
       status = "copied " + draft.id + ".json to the clipboard";
