@@ -884,17 +884,18 @@ function createEditor(api) {
     render();
     fwdTimer = setTimeout(runForward, 0);
   }
-  function apply() {
-    draft = canonLevel(draft);
-    err = api.check(draft);
-    warns = err ? [] : api.warnings(draft);
+  function apply(live) {
+    if (!live) draft = canonLevel(draft);
+    const lv = live ? canonLevel(draft) : draft;
+    err = api.check(lv);
+    warns = err ? [] : api.warnings(lv);
     if (!err) {
-      api.apply(clone(draft));
+      api.apply(clone(lv));
       refreshTracks();
     }
     fwd = null;
     clearTimeout(fwdTimer);
-    if (!err && !drag2) fwdTimer = setTimeout(runForward, 150);
+    if (!err && !drag2 && !live) fwdTimer = setTimeout(runForward, 150);
     renderBar();
   }
   function runForward() {
@@ -1397,10 +1398,11 @@ function createEditor(api) {
             }
             obj[key2] = fromT(Number(e.target.value));
             text.value = obj[key2];
-            apply();
+            apply(true);
           },
           onchange: () => {
             held = false;
+            apply();
             renderPanel();
           }
         });
@@ -6262,7 +6264,7 @@ requestAnimationFrame(frame);</script>
 #edenter { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 20; background: rgba(8,12,22,0.8); color: #8fc3e8;
   border: 1px solid #2f4468; border-radius: 4px; font: 11px "Share Tech Mono", Menlo, monospace; letter-spacing: 1px; padding: 4px 10px; cursor: pointer; }
 #edenter:hover { color: #ffffff; border-color: #4fc3f7; }
-#edbar { position: fixed; top: 8px; left: 50%; transform: translateX(-50%); z-index: 20; max-width: calc(100vw - 32px); background: rgba(8,12,22,0.92);
+#edbar { position: fixed; top: 8px; left: 332px; z-index: 20; max-width: calc(100vw - 344px);   /* beside the panel: the bar grows with the forward check and must not cover it */ background: rgba(8,12,22,0.92);
   border: 1px solid #2f4468; border-radius: 6px; padding: 6px 8px; font: 11px "Share Tech Mono", Menlo, monospace; color: #cfe0ff; }
 #edbar .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 #edbar b { letter-spacing: 1px; color: #ffe08a; }
@@ -6274,7 +6276,7 @@ requestAnimationFrame(frame);</script>
 #edbar button.go { border-color: #4f8f6a; color: #8fe8b0; }
 #edbar button.play { border-color: #4fc3f7; color: #ffffff; }
 #edbar select, #edpanel select, #edpanel input, #edpanel textarea { background: #0d1526; color: #e2ecff; border: 1px solid #2f4468; border-radius: 3px; font: inherit; }
-#edpanel { position: fixed; left: 12px; top: 90px; bottom: 60px; width: 290px; overflow-y: auto; z-index: 20; background: rgba(8,12,22,0.9);
+#edpanel { position: fixed; left: 12px; top: 8px; bottom: 60px; width: 290px; overflow-y: auto; z-index: 20; background: rgba(8,12,22,0.9);
   border: 1px solid #2a3a55; border-radius: 6px; padding: 8px 10px; font: 11px/1.4 "Share Tech Mono", Menlo, monospace; color: #9fb4cc; }
 #edpanel .head { display: flex; flex-direction: column; margin-bottom: 6px; }
 #edpanel .head b { color: #ffe08a; letter-spacing: 1px; font-size: 12px; }
@@ -6287,7 +6289,7 @@ requestAnimationFrame(frame);</script>
 #edpanel .pair { display: flex; gap: 4px; align-items: center; }
 #edpanel fieldset { border: 1px solid #22304a; border-radius: 4px; margin: 6px 0; padding: 4px 8px; }
 #edpanel legend { color: #8fc3e8; padding: 0 4px; }
-@media (max-width: 700px) { #edpanel { top: auto; bottom: 8px; left: 8px; right: 8px; width: auto; height: 40vh; } }
+@media (max-width: 700px) { #edbar { left: 8px; max-width: calc(100vw - 16px); } #edpanel { top: auto; bottom: 8px; left: 8px; right: 8px; width: auto; height: 40vh; } }
 #edbar .fwd { color: #9fb4cc; margin-top: 2px; }
 #edbar .fwd.ok { color: #8fe8b0; margin-top: 5px; }
 #edbar .fwd.potted, #edbar .fwd.overlap { color: #e8b463; }
