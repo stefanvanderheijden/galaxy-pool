@@ -2047,6 +2047,10 @@ function introFocal() {
   return Math.max(1, cv.clientHeight) * 1.1;
 }
 const INTRO_TITLE_S = 3, INTRO_OUTRO_S = 2.2;
+const INTRO_FADE_S = 0.5;
+function outroS() {
+  return S.arrival ? INTRO_FADE_S : INTRO_OUTRO_S;
+}
 const INTRO_CY = 0.36;
 function startIntro() {
   intro = { t: 0, realT: 0, stops: introStops(), done: false, naming: null };
@@ -2092,7 +2096,7 @@ function skipIntro() {
   }
   if (!intro || intro.done || intro.skipped) return;
   intro.naming = null;
-  intro.t = Math.max(intro.t, introTotal() - INTRO_OUTRO_S);
+  intro.t = Math.max(intro.t, introTotal() - outroS());
   intro.skipped = true;
 }
 const ARRIVE_S = 3;
@@ -2191,7 +2195,7 @@ function drawArrival(W, H) {
   }
 }
 function introTotal() {
-  return INTRO_TITLE_S + intro.stops.length * S.introFlyS + INTRO_OUTRO_S;
+  return INTRO_TITLE_S + intro.stops.length * S.introFlyS + outroS();
 }
 function wideRange() {
   return introFocal() / (Math.max(1, Math.min(cv.clientWidth, cv.clientHeight)) / 2 / viewR);
@@ -2208,13 +2212,16 @@ function introPose(t) {
   if (t < INTRO_TITLE_S) {
     u = 0;
     title = 1 - Math.max(0, (t - (INTRO_TITLE_S - 0.5)) / 0.5);
-  } else if (t < total - INTRO_OUTRO_S) {
+  } else if (t < total - outroS()) {
     const w = t - INTRO_TITLE_S, i = Math.min(N - 1, Math.floor(w / per)), f = Math.min(1, w / per - i);
     const pass = 1 - S.introSlow;
     const s0 = i > 0 && stops[i - 1].pause ? 0 : pass, s1 = stops[i].pause ? 0 : pass;
     const g = 3 * f * f - 2 * f * f * f + s0 * (f * f * f - 2 * f * f + f) + s1 * (f * f * f - f * f);
     u = segArcU(pts, i, g);
     cy = 0.5 + (INTRO_CY - 0.5) * easeInOutCubic(Math.min(1, w / per));
+  } else if (S.arrival) {
+    u = N;
+    cy = INTRO_CY;
   } else {
     const f = easeInOutCubic(Math.min(1, (t - (total - INTRO_OUTRO_S)) / INTRO_OUTRO_S));
     u = N + f;
@@ -2469,6 +2476,12 @@ function drawBriefing(W, H) {
   cx.fillText(intro.naming ? pad.active && pad.owns ? "any other button skips the briefing" : "esc skips the briefing" : "any key to skip", W - 16, H - bar / 2 + 4);
   cx.textAlign = "left";
   if (pose.cardIdx >= 0) drawInspector(intro.stops[pose.cardIdx], pose.cardA, W, H);
+  const left = introTotal() - intro.t;
+  if (S.arrival && left < INTRO_FADE_S) {
+    const k = 1 - left / INTRO_FADE_S;
+    cx.fillStyle = `rgba(255,255,255,${k * k})`;
+    cx.fillRect(0, 0, W, H);
+  }
 }
 const RC_ONELINER = "RC ONELINER";
 const rcFace = new Image();
