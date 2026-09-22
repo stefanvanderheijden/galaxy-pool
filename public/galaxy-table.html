@@ -2034,7 +2034,6 @@ function introStops() {
     stops.push({ ...framing(b, ballR(b), 110), key: b.id, name: b.name, defName: d ? d.name : b.name, mass: b.mass / 3003e-9, unit: "Earth masses", speed: Math.hypot(b.vx, b.vy), sprite: b.sprite, pause: !bodyNames[b.id] });
   }
   for (const p of POCKETS) stops.push({ ...framing(p, p.size, 110), key: p.id, name: p.name, defName: p.id, pause: !bodyNames[p.id], mass: p.mass, unit: "solar masses", speed: 0, sprite: "blackhole", pocket: true });
-  stops.push({ ...framing(ship, HULL_LEN * 2.5, 60), key: "ship", name: "THE ARK", mass: null, unit: "", speed: Math.hypot(ship.vx, ship.vy), sprite: null, ship: true });
   return stops;
 }
 function introFocal() {
@@ -4954,7 +4953,7 @@ function draw(realDt) {
     }
     drawBall(sx, sy, k.type, true);
   }
-  if (acb.mode === "attached" || acb.mode === "capturing") {
+  if (!intro && (acb.mode === "attached" || acb.mode === "capturing")) {
     const q = worldToScreen(acb.x, acb.y);
     if (q) drawBall(q[0], q[1], acb.type, false);
   }
@@ -4972,7 +4971,7 @@ function draw(realDt) {
     cx.stroke();
     circle(q[0], q[1], 2.2, "#ffd0b0");
   }
-  if (worldToScreen(ship.x, ship.y)) {
+  if (!intro && worldToScreen(ship.x, ship.y)) {
     const [sx, sy] = worldToScreen(ship.x, ship.y);
     const L = Math.max(HULL_LEN * scAt(ship.x, ship.y), 9);
     cx.save();
