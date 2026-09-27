@@ -2007,6 +2007,7 @@ function resetWorld() {
   ghost = null;
   shots = [];
   timePaused = false;
+  shiftHeld = false;
   teleportCd = 0;
   note("zerograv freeflight: ENGAGED", "#8fc3e8");
   if (S.introFlyover && !editing) startIntro();
@@ -2697,6 +2698,7 @@ let charging = false, charge = 0, reaching = false;
 let mouseADS = false;
 let qArmed = false;
 let timePaused = false, lastPower = 0.5, freezeShown = 0, teleportCd = 0, ghostTick = 0;
+let shiftHeld = false;
 let drag = null;
 let stab = null;
 let hitstop = null;
@@ -4099,7 +4101,7 @@ function frame(now) {
     qArmed = false;
     note("TIME PAUSED", "#8fc3e8");
   }
-  const timeHeld = timePaused || aiming();
+  const timeHeld = timePaused || shiftHeld || aiming();
   freezeShown += ((timeHeld ? 1 : 0) - freezeShown) * Math.min(1, realDt * 8);
   const SLIDE_RATE = 0.45;
   if (timeHeld) sliderT += (0 - sliderT) * Math.min(1, realDt * 8);
@@ -4888,7 +4890,7 @@ function strokePts(pts, color, alpha, width, dash) {
   cx.stroke();
   cx.setLineDash([]);
 }
-function drawFlare(sx, sy, R, color, k, rot, spikeMul) {
+function drawFlare(sx, sy, R, color, k, rot, spikeMul, coreMul, coreAlpha) {
   if (!S.flares || k <= 0.01 || R <= 0.01) return;
   const c = colRGB(color || "#ffffff");
   const tint = (a) => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
@@ -4896,7 +4898,7 @@ function drawFlare(sx, sy, R, color, k, rot, spikeMul) {
   cx.save();
   cx.globalCompositeOperation = "lighter";
   const h = cx.createRadialGradient(sx, sy, 0, sx, sy, R * 5);
-  h.addColorStop(0, `rgba(255,255,255,${0.55 * k})`);
+  h.addColorStop(0, `rgba(255,255,255,${(coreAlpha == null ? 0.55 : 0.2) * k})`);
   h.addColorStop(0.18, tint(0.35 * k));
   h.addColorStop(0.55, tint(0.09 * k));
   h.addColorStop(1, tint(0));
@@ -4922,7 +4924,12 @@ function drawFlare(sx, sy, R, color, k, rot, spikeMul) {
   cx.restore();
   cx.save();
   cx.globalCompositeOperation = "lighter";
-  circle(sx, sy, R * 0.55, `rgba(255,255,255,${Math.min(1, 0.55 * k + 0.1)})`);
+  const cr = R * (coreMul == null ? 0.55 : coreMul), ca = coreAlpha == null ? 0.55 * k + 0.1 : coreAlpha * k;
+  const g2 = cx.createRadialGradient(sx, sy, 0, sx, sy, cr);
+  g2.addColorStop(0, `rgba(255,255,255,${Math.min(1, ca)})`);
+  g2.addColorStop(0.5, `rgba(255,255,255,${Math.min(1, ca * 0.62)})`);
+  g2.addColorStop(1, "rgba(255,255,255,0)");
+  circle(sx, sy, cr, g2);
   cx.restore();
 }
 function circle(sx, sy, r, fill, stroke, width) {
@@ -5017,7 +5024,7 @@ function draw(realDt) {
       circle(sx, sy, R * 3, g);
       if (!drawSprite(st.sprite, sx, sy, R, st.sprite === "sun" ? sunTint(st.color) : null)) circle(sx, sy, R, st.color);
     }
-    drawFlare(sx, sy, R * 0.8, st.color, 0.5 + 0.06 * Math.sin(performance.now() / 1e3 * 0.8 + sx), 0, 0.85);
+    drawFlare(sx, sy, R * 0.8, st.color, 0.5 + 0.06 * Math.sin(performance.now() / 1e3 * 0.8 + sx), 0, 0.85, 1.25, 0.26);
     if (st.struck || st.moving) strokePts(st.trail, st.color, 0.4, 1);
     if (st.struck) circle(sx, sy, R + 4, null, colA(st.color, 0.5), 1);
   }
@@ -5490,7 +5497,7 @@ function drawTimeBand(W, H) {
   cx.fillStyle = "rgba(160,185,215,0.8)";
   cx.font = `12px "Share Tech Mono", monospace`;
   cx.textAlign = "center";
-  const w = warpNow(), held = timePaused || aiming();
+  const w = warpNow(), held = timePaused || shiftHeld || aiming();
   const fmtW = (v) => v < 1e3 ? v.toFixed(0) + "x" : v < 1e6 ? (v / 1e3).toFixed(0) + "K" : (v / 1e6).toFixed(1) + "M";
   cx.fillText(held ? "PAUSED" : padMotion() ? curWarp <= 0 ? "STOPPED: FLY TO RUN TIME" : "MOTION " + fmtW(curWarp) : fmtW(w), W / 2, H - 64);
   cx.textAlign = "left";
@@ -5509,7 +5516,7 @@ function drawHud(W, H) {
     stab ? ["STABILISER burning, " + stab.err.toFixed(2) + " AU/yr to go.  WASD or Shift to override", "#e8b463"] : null,
     charging && !mouseADS && !timePaused ? ["POWERING UP: release LMB to shoot.  RMB holds time (let go of RMB to cancel)", "#8fc3e8"] : null,
     pad.hipCharging ? ["POWERING UP: release R2 to shoot.  L2 holds time (let go of L2 to cancel)", "#8fc3e8"] : null,
-    timePaused || aiming() ? ["TIME PAUSED" + (pad.aiming ? S.padAimMode === "charge" ? ": hold R2 to power up, release to shoot" : !S.padPowerRelative ? ": left stick up for more power, down for less, R2 shoots" : S.padAimMode === "draw" ? ": pull the left stick back for more power, push it forward for less, R2 shoots" : ": left stick along the aim for more power, against it for less, R2 shoots" : drag ? ": pull back for power, swing round to pivot, release to shoot" : mouseADS ? ": aiming down sights, release LMB to shoot, release RMB to cancel" : reaching ? ": further from the ship is harder, release to shoot" : pad.active && pad.owns ? ".  R1 resumes.  Hold L2 to aim" : ".  Shift or E resumes.  Hold LMB to aim"), "#8fc3e8"] : null
+    timePaused || shiftHeld || aiming() ? ["TIME PAUSED" + (pad.aiming ? S.padAimMode === "charge" ? ": hold R2 to power up, release to shoot" : !S.padPowerRelative ? ": left stick up for more power, down for less, R2 shoots" : S.padAimMode === "draw" ? ": pull the left stick back for more power, push it forward for less, R2 shoots" : ": left stick along the aim for more power, against it for less, R2 shoots" : drag ? ": pull back for power, swing round to pivot, release to shoot" : mouseADS ? ": aiming down sights, release LMB to shoot, release RMB to cancel" : reaching ? ": further from the ship is harder, release to shoot" : pad.active && pad.owns ? ".  R1 resumes.  Hold L2 to aim" : ".  Let go of Shift, or E, to resume.  Hold LMB to aim"), "#8fc3e8"] : null
   ].filter(Boolean);
   lines.forEach((l, i) => {
     cx.fillStyle = l[1];
@@ -5529,7 +5536,7 @@ function drawHud(W, H) {
       ["TAB", "next aim mode: " + AIM_NAMES[AIM_NEXT[S.aimMode]].toLowerCase()],
       ["LMB release", "shoot"],
       ["RMB", S.aimMode === "charge" ? "teleport; mid-charge: aim down sights" : "teleport, short range, 2 s recharge"],
-      ["SHIFT", "pause on / off"],
+      ["SHIFT hold", "stop time while held"],
       ["Q / E", "slower / faster time (Q to the end pauses)"],
       ["SPACE", "catch a ball / load the next"],
       ["C", "camera"],
@@ -6052,8 +6059,8 @@ addEventListener("keydown", (e) => {
     e.preventDefault();
   }
   if ((e.code === "ShiftLeft" || e.code === "ShiftRight") && !e.repeat) {
-    timePaused = !timePaused;
-    note(timePaused ? "TIME PAUSED" : "TIME RESUMED", "#8fc3e8");
+    shiftHeld = true;
+    note("TIME PAUSED while SHIFT is held", "#8fc3e8");
   }
   if (e.code === "KeyE" && timePaused) {
     timePaused = false;
@@ -6089,9 +6096,14 @@ addEventListener("keydown", (e) => {
 });
 addEventListener("keyup", (e) => {
   if (KEYMAP[e.code]) keys[KEYMAP[e.code]] = false;
+  if (e.code === "ShiftLeft" || e.code === "ShiftRight") {
+    if (shiftHeld) note("TIME RESUMED", "#8fc3e8");
+    shiftHeld = false;
+  }
 });
 addEventListener("blur", () => {
   for (const k in keys) keys[k] = false;
+  shiftHeld = false;
 });
 let mouseDrift = 0;
 cv.addEventListener("mousemove", (e) => {
