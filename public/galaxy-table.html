@@ -2019,6 +2019,7 @@ function densityGcc(massMsun, diameterKm) {
   const r = diameterKm * 0.5 * 1e5;
   return massMsun * MSUN_KG * 1e3 / (4 / 3 * Math.PI * r * r * r);
 }
+let acbShown = 1;
 let intro = null;
 let panelWasHidden = false;
 function introStops() {
@@ -2053,6 +2054,7 @@ function outroS() {
 }
 const INTRO_CY = 0.36;
 function startIntro() {
+  acbShown = 0;
   intro = { t: 0, realT: 0, stops: introStops(), done: false, naming: null };
   for (const st of intro.stops) if (st.pause) st.o.name = "???";
   const p = document.getElementById("panel");
@@ -2106,6 +2108,7 @@ const ARRIVE_PULL = 1.55;
 const ARRIVE_ZOOM = 30;
 let arrival = null;
 function startArrival() {
+  acbShown = 0;
   arrival = { t: 0, flow: 0, streaks: [] };
   for (let i = 0; i < 260; i++) arrival.streaks.push({ u: Math.random(), v: Math.random(), len: 0.3 + Math.random() * 1.1, a: 0.25 + Math.random() * 0.7 });
   fx.shake = 0;
@@ -3770,6 +3773,7 @@ function stepFx(realDt) {
   fx.shake *= Math.exp(-8 * realDt);
   fx.shakeX = (Math.random() - 0.5) * fx.shake * 24;
   fx.shakeY = (Math.random() - 0.5) * fx.shake * 24;
+  if (!intro && !arrival && acbShown < 1) acbShown = Math.min(1, acbShown + realDt * 2.2);
 }
 function buildGhost() {
   const sim = [];
@@ -4969,9 +4973,13 @@ function draw(realDt) {
     }
     drawBall(sx, sy, k.type, true);
   }
-  if (!intro && (acb.mode === "attached" || acb.mode === "capturing")) {
+  if (acbShown > 0.01 && (acb.mode === "attached" || acb.mode === "capturing")) {
     const q = worldToScreen(acb.x, acb.y);
-    if (q) drawBall(q[0], q[1], acb.type, false);
+    if (q) {
+      cx.globalAlpha = acbShown;
+      drawBall(q[0], q[1], acb.type, false);
+      cx.globalAlpha = 1;
+    }
   }
   drawNebulae();
   for (const b of bodies) if (b.alive && b.gun && dist(b.x, b.y, ship.x, ship.y) < b.gun.range * 1.4 && !(b.gun.provoked && !b.struck)) drawRing(b.x, b.y, b.gun.range, "rgba(255,80,48,0.35)", 1, [2, 5]);
