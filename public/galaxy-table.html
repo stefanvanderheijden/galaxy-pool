@@ -4209,23 +4209,30 @@ function rng(seed) {
     return ((t ^ t >>> 14) >>> 0) / 4294967296;
   };
 }
-const SKY = { canvas: null, w: 0, h: 0 };
+const SKY = { layers: null, w: 0, h: 0 };
 const SKY_RIVERS = [
   { x0: -0.15, y0: 1.05, x1: 0.75, y1: -0.1, wide: 0.16, cols: ["#4a6cff", "#b03a72", "#3ad1a0", "#8fa6c8"] },
   { x0: 0.55, y0: -0.12, x1: 1.2, y1: 0.75, wide: 0.13, cols: ["#4a7dff", "#a8354f", "#c8d4ee", "#6f86b8"] }
 ];
-function buildSky(W, H) {
+const SKY_LAYERS = [
+  { par: 0.02, gas: 1, perRiver: 1e3, field: 380, bright: 0, dim: 1 },
+  { par: 0.055, gas: 0, perRiver: 420, field: 150, bright: 4, dim: 1.15 },
+  { par: 0.13, gas: 0, perRiver: 120, field: 70, bright: 10, dim: 1.4 }
+];
+const SKY_SHIP = 0.5;
+const SKY_TEMPS = [[255, 255, 255], [200, 218, 255], [170, 200, 255], [255, 228, 200], [255, 196, 170], [210, 255, 235]];
+function buildSkyLayer(W, H, L, seed) {
   const c = document.createElement("canvas");
   c.width = Math.max(1, Math.round(W * DPR));
   c.height = Math.max(1, Math.round(H * DPR));
   const g = c.getContext("2d");
   g.setTransform(DPR, 0, 0, DPR, 0, 0);
-  const rnd = rng(20260927);
+  const rnd = rng(seed);
   const put = (fn) => {
     for (const [ox, oy] of [[0, 0], [-W, 0], [W, 0], [0, -H], [0, H]]) fn(ox, oy);
   };
   g.globalCompositeOperation = "lighter";
-  for (const r of SKY_RIVERS) {
+  if (L.gas) for (const r of SKY_RIVERS) {
     for (let i = 0; i < 90; i++) {
       const t = rnd(), wob = Math.sin(t * 5.2 + r.x0 * 9) * 0.06;
       const bx = (r.x0 + (r.x1 - r.x0) * t - wob) * W, by = (r.y0 + (r.y1 - r.y0) * t + wob) * H;
@@ -4233,7 +4240,7 @@ function buildSky(W, H) {
       const x = bx + off * H + along * W, y = by + off * H * 0.8;
       const rad = (0.02 + rnd() * 0.07) * Math.min(W, H) * (1 + 2 * Math.abs(off) / r.wide);
       const col = colRGB(r.cols[rnd() * r.cols.length | 0]);
-      const a = 0.11 * (1 - Math.min(1, Math.abs(off) / r.wide)) + 0.018;
+      const a = (0.11 * (1 - Math.min(1, Math.abs(off) / r.wide)) + 0.018) * L.gas;
       put((ox, oy) => {
         const grd = g.createRadialGradient(x + ox, y + oy, 0, x + ox, y + oy, rad);
         grd.addColorStop(0, `rgba(${col[0] | 0},${col[1] | 0},${col[2] | 0},${a})`);
@@ -4246,7 +4253,7 @@ function buildSky(W, H) {
     }
   }
   const star = (x, y, rad, a, col) => put((ox, oy) => {
-    g.fillStyle = `rgba(${col[0]},${col[1]},${col[2]},${a})`;
+    g.fillStyle = `rgba(${col[0]},${col[1]},${col[2]},${Math.min(1, a)})`;
     if (rad <= 0.9) g.fillRect(x + ox, y + oy, rad * 2, rad * 2);
     else {
       g.beginPath();
@@ -4254,50 +4261,56 @@ function buildSky(W, H) {
       g.fill();
     }
   });
-  const TEMPS = [[255, 255, 255], [200, 218, 255], [170, 200, 255], [255, 228, 200], [255, 196, 170], [210, 255, 235]];
   for (const r of SKY_RIVERS) {
-    for (let i = 0; i < 1100; i++) {
+    for (let i = 0; i < L.perRiver; i++) {
       const t = rnd(), wob = Math.sin(t * 5.2 + r.x0 * 9) * 0.06;
       const off = (rnd() + rnd() + rnd() - 1.5) / 1.5 * r.wide;
       const along = (rnd() - 0.5) * 0.06;
       const x = (r.x0 + (r.x1 - r.x0) * t - wob) * W + off * H + along * W;
       const y = (r.y0 + (r.y1 - r.y0) * t + wob) * H + off * H * 0.8;
       const b = rnd();
-      star(x, y, b > 0.985 ? 1.5 : b > 0.9 ? 1 : 0.6, 0.25 + rnd() * 0.75, TEMPS[rnd() * TEMPS.length | 0]);
+      star(x, y, (b > 0.985 ? 1.5 : b > 0.9 ? 1 : 0.6) * L.dim, (0.25 + rnd() * 0.75) * L.dim, SKY_TEMPS[rnd() * SKY_TEMPS.length | 0]);
     }
   }
-  for (let i = 0; i < 420; i++) star(rnd() * W, rnd() * H, rnd() > 0.94 ? 1 : 0.6, 0.1 + rnd() * 0.45, TEMPS[rnd() * TEMPS.length | 0]);
-  for (let i = 0; i < 14; i++) {
-    const x = rnd() * W, y = rnd() * H, col = TEMPS[rnd() * TEMPS.length | 0], a = 0.5 + rnd() * 0.5, L = 4 + rnd() * 7;
+  for (let i = 0; i < L.field; i++) star(rnd() * W, rnd() * H, (rnd() > 0.94 ? 1 : 0.6) * L.dim, (0.1 + rnd() * 0.45) * L.dim, SKY_TEMPS[rnd() * SKY_TEMPS.length | 0]);
+  for (let i = 0; i < L.bright; i++) {
+    const x = rnd() * W, y = rnd() * H, col = SKY_TEMPS[rnd() * SKY_TEMPS.length | 0], a = 0.5 + rnd() * 0.5, R = 4 + rnd() * 7;
     put((ox, oy) => {
-      const grd = g.createRadialGradient(x + ox, y + oy, 0, x + ox, y + oy, L);
+      const grd = g.createRadialGradient(x + ox, y + oy, 0, x + ox, y + oy, R);
       grd.addColorStop(0, `rgba(255,255,255,${a})`);
       grd.addColorStop(0.35, `rgba(${col[0]},${col[1]},${col[2]},${a * 0.35})`);
       grd.addColorStop(1, "rgba(0,0,0,0)");
       g.fillStyle = grd;
       g.beginPath();
-      g.arc(x + ox, y + oy, L, 0, TAU);
+      g.arc(x + ox, y + oy, R, 0, TAU);
       g.fill();
       g.strokeStyle = `rgba(${col[0]},${col[1]},${col[2]},${a * 0.5})`;
       g.lineWidth = 0.7;
       g.beginPath();
-      g.moveTo(x + ox - L, y + oy);
-      g.lineTo(x + ox + L, y + oy);
-      g.moveTo(x + ox, y + oy - L * 1.4);
-      g.lineTo(x + ox, y + oy + L * 1.4);
+      g.moveTo(x + ox - R, y + oy);
+      g.lineTo(x + ox + R, y + oy);
+      g.moveTo(x + ox, y + oy - R * 1.4);
+      g.lineTo(x + ox, y + oy + R * 1.4);
       g.stroke();
     });
   }
   g.globalCompositeOperation = "source-over";
-  SKY.canvas = c;
-  SKY.w = W;
-  SKY.h = H;
+  return c;
 }
 function drawSky(W, H) {
-  if (!SKY.canvas || SKY.w !== W || SKY.h !== H) buildSky(W, H);
-  const parX = persp ? persp.eye[0] * 60 : cam.x * cam.scale * 0.05, parY = persp ? persp.eye[1] * 60 : cam.y * cam.scale * 0.05;
-  const ox = (-parX % W + W) % W - W, oy = (-parY % H + H) % H - H;
-  for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) cx.drawImage(SKY.canvas, ox + i * W, oy + j * H, W, H);
+  if (!SKY.layers || SKY.w !== W || SKY.h !== H) {
+    SKY.layers = SKY_LAYERS.map((L, i) => buildSkyLayer(W, H, L, 20260927 + i * 7919));
+    SKY.w = W;
+    SKY.h = H;
+  }
+  const fx0 = persp ? null : cam.x + (ship.x - cam.x) * SKY_SHIP, fy0 = persp ? null : cam.y + (ship.y - cam.y) * SKY_SHIP;
+  for (let n = 0; n < SKY.layers.length; n++) {
+    const f = SKY_LAYERS[n].par / 0.05;
+    const parX = (persp ? persp.eye[0] * 60 : fx0 * cam.scale * 0.05) * f;
+    const parY = (persp ? persp.eye[1] * 60 : fy0 * cam.scale * 0.05) * f;
+    const ox = (-parX % W + W) % W - W, oy = (-parY % H + H) % H - H;
+    for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) cx.drawImage(SKY.layers[n], ox + i * W, oy + j * H, W, H);
+  }
 }
 const IMG = {};
 for (const k in SPRITES) {
