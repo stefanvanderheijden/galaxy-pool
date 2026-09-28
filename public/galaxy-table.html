@@ -221,49 +221,214 @@ const __vite_glob_0_0 = `{
       }
     },
     {
-      "kind": "pocket",
-      "id": "Lethe",
-      "name": "Lethe",
-      "color": "#b48cff",
-      "position": {
-        "radius": 2.085857,
-        "angle": 2.695695
-      },
-      "mass": 0.6,
-      "reach": 0.5,
-      "size": 0.12,
-      "brief": {
-        "class": "Singularity",
-        "diameterKm": 30,
-        "tempC": -270,
-        "note": "Pocket two. Same pull, quieter neighbourhood. A world that goes in does not come back, which is the point."
-      }
-    },
-    {
-      "kind": "pocket",
-      "id": "Acheron",
-      "name": "Acheron",
-      "color": "#b48cff",
-      "position": {
-        "radius": 2.085857,
-        "angle": 4.79009
-      },
-      "mass": 0.6,
-      "reach": 0.5,
-      "size": 0.12,
-      "brief": {
-        "class": "Singularity",
-        "diameterKm": 30,
-        "tempC": -270,
-        "note": "Pocket three. Nothing passes inside its reach on its own, so anything that goes in, you put there."
-      }
-    },
-    {
       "kind": "belt",
       "id": "belt",
       "radius": 2.7,
       "sections": 48,
       "halfWidth": 0.07,
+      "restitution": 0.85
+    }
+  ]
+}
+`;
+const __vite_glob_0_1 = '{\n  "schemaVersion": 2,\n  "id": "level-02",\n  "name": "Halcyon",\n  "viewRadius": 2.9,\n  "ship": {\n    "spawn": {\n      "radius": 1.95,\n      "angle": 2\n    },\n    "traits": [\n      "inhabited"\n    ],\n    "brief": {\n      "class": "The ark",\n      "note": "RC NOTE: the ark, level 2. Two worlds here crack if you hit them hard, two will not move unless you do. Same ark, same three balls."\n    }\n  },\n  "loadout": {\n    "nose": "standard",\n    "chamber": [\n      "standard",\n      "grav"\n    ]\n  },\n  "bodies": [\n    {\n      "kind": "star",\n      "id": "star",\n      "name": "Halcyon",\n      "type": "yellow-dwarf",\n      "brief": {\n        "class": "G-type main sequence",\n        "diameterKm": 1392000,\n        "tempC": 5504,\n        "note": "RC NOTE: a yellow dwarf, an ordinary sun. Which balls strike it and which burn, and that the table is not clear until it is potted."\n      }\n    },\n    {\n      "kind": "planet",\n      "id": "glass",\n      "name": "Glass",\n      "sprite": "vera",\n      "mass": 6e-7,\n      "drawR": 0.0052,\n      "color": "#9fd8e8",\n      "atmosphere": "#bfe8f5",\n      "integrity": 0.3,\n      "orbit": {\n        "around": "star",\n        "angle": 0.9,\n        "radius": 0.68\n      },\n      "traits": [\n        "fragile"\n      ],\n      "brief": {\n        "class": "Terrestrial, thin shell",\n        "diameterKm": 9800,\n        "tempC": -41,\n        "note": "RC NOTE: FRAGILE. Barely holds together: a hard shot shatters it, which is a foul. Nudge it, do not hit it."\n      }\n    },\n    {\n      "kind": "planet",\n      "id": "porcelain",\n      "name": "Porcelain",\n      "sprite": "terra",\n      "mass": 9e-7,\n      "drawR": 0.0062,\n      "color": "#e8d8c0",\n      "atmosphere": "#f2e4cf",\n      "integrity": 0.35,\n      "orbit": {\n        "around": "star",\n        "angle": 4,\n        "radius": 1.32\n      },\n      "traits": [\n        "fragile"\n      ],\n      "brief": {\n        "class": "Terrestrial, thin shell",\n        "diameterKm": 11600,\n        "tempC": -63,\n        "note": "RC NOTE: FRAGILE, and it carries a satellite. The satellite rides it, but a hard hit shakes it loose and then there are two of them loose on the table."\n      }\n    },\n    {\n      "kind": "planet",\n      "id": "shard",\n      "name": "Shard",\n      "sprite": "red",\n      "mass": 2e-7,\n      "drawR": 0.0032,\n      "color": "#c8b8a8",\n      "orbit": {\n        "around": "porcelain",\n        "angle": 1.2,\n        "radius": 0.085\n      },\n      "brief": {\n        "class": "Satellite",\n        "diameterKm": 3100,\n        "tempC": -70,\n        "note": "RC NOTE: the satellite. It goes where Porcelain goes until someone hits one of them hard enough."\n      }\n    },\n    {\n      "kind": "planet",\n      "id": "anvil",\n      "name": "Anvil",\n      "sprite": "red",\n      "mass": 0.000024,\n      "drawR": 0.0098,\n      "color": "#8f7f74",\n      "atmosphere": "#a89a86",\n      "orbit": {\n        "around": "star",\n        "angle": 2.4,\n        "radius": 1.02\n      },\n      "brief": {\n        "class": "Terrestrial, dense",\n        "diameterKm": 21400,\n        "tempC": -55,\n        "note": "RC NOTE: HEAVY. Ten times the weight of a normal world: a full shot barely shifts it. Several, or use it as a wall to bounce off."\n      }\n    },\n    {\n      "kind": "planet",\n      "id": "ingot",\n      "name": "Ingot",\n      "sprite": "dune",\n      "mass": 0.000016,\n      "drawR": 0.0088,\n      "color": "#b08858",\n      "atmosphere": "#d8b070",\n      "orbit": {\n        "around": "star",\n        "angle": 5.6,\n        "radius": 1.72\n      },\n      "brief": {\n        "class": "Terrestrial, dense",\n        "diameterKm": 19200,\n        "tempC": -88,\n        "note": "RC NOTE: HEAVY, and further out, so it is the long job. Line it up rather than fight it."\n      }\n    },\n    {\n      "kind": "pocket",\n      "id": "cairn",\n      "name": "Cairn",\n      "color": "#b48cff",\n      "position": {\n        "radius": 2.1,\n        "angle": 1.05\n      },\n      "mass": 0.5,\n      "reach": 0.6,\n      "size": 0.09,\n      "brief": {\n        "class": "Black hole",\n        "note": "RC NOTE: a pocket. What touches it is potted."\n      }\n    },\n    {\n      "kind": "pocket",\n      "id": "vault",\n      "name": "Vault",\n      "color": "#b48cff",\n      "position": {\n        "radius": 2.1,\n        "angle": 4.2\n      },\n      "mass": 0.5,\n      "reach": 0.6,\n      "size": 0.09,\n      "brief": {\n        "class": "Black hole",\n        "note": "RC NOTE: the second pocket, opposite."\n      }\n    },\n    {\n      "kind": "belt",\n      "id": "belt",\n      "radius": 2.1,\n      "sections": 48,\n      "halfWidth": 0.06,\n      "restitution": 0.85\n    }\n  ]\n}\n';
+const __vite_glob_0_2 = `{
+  "schemaVersion": 2,
+  "id": "level-03",
+  "name": "Corvus",
+  "viewRadius": 3.2,
+  "ship": {
+    "spawn": {
+      "radius": 1.95,
+      "angle": 0.9
+    },
+    "traits": [
+      "inhabited"
+    ],
+    "brief": {
+      "class": "The ark",
+      "note": "RC NOTE: the ark, level 3. Two suns, so the middle of the table is not where you think it is, and one of these worlds shoots at us."
+    }
+  },
+  "loadout": {
+    "nose": "standard",
+    "chamber": [
+      "night",
+      "grav"
+    ]
+  },
+  "bodies": [
+    {
+      "kind": "star",
+      "id": "star",
+      "name": "Corvus",
+      "type": "yellow-dwarf",
+      "brief": {
+        "class": "G-type main sequence",
+        "diameterKm": 1392000,
+        "tempC": 5504,
+        "note": "RC NOTE: the primary of a pair. The two of them turn about their shared centre, and every world out here circles both."
+      }
+    },
+    {
+      "kind": "star",
+      "id": "beta",
+      "name": "Corvus B",
+      "type": "red-dwarf",
+      "orbit": {
+        "around": "star",
+        "angle": 0,
+        "radius": 0.34
+      },
+      "brief": {
+        "class": "M-type main sequence",
+        "diameterKm": 625328,
+        "tempC": 3127,
+        "note": "RC NOTE: the companion. Cooler, smaller, and it drags the whole table round with it."
+      }
+    },
+    {
+      "kind": "planet",
+      "id": "sentry",
+      "name": "Sentry",
+      "sprite": "terra",
+      "mass": 0.0000018,
+      "drawR": 0.0068,
+      "color": "#5fa8d8",
+      "atmosphere": "#9fd0f0",
+      "orbit": {
+        "around": [
+          "star",
+          "beta"
+        ],
+        "angle": 1.9,
+        "radius": 1.1
+      },
+      "traits": [
+        "inhabited",
+        {
+          "defended": {
+            "range": 0.95,
+            "every": 0.05,
+            "speed": 9
+          }
+        }
+      ],
+      "brief": {
+        "class": "Terrestrial, inhabited",
+        "diameterKm": 12800,
+        "tempC": -18,
+        "note": "RC NOTE: INHABITED AND ARMED. They shoot at the ark inside their range. Do not sit in it."
+      }
+    },
+    {
+      "kind": "planet",
+      "id": "bastion",
+      "name": "Bastion",
+      "sprite": "red",
+      "mass": 0.000028,
+      "drawR": 0.0102,
+      "color": "#8f6f5a",
+      "atmosphere": "#b08a6a",
+      "orbit": {
+        "around": [
+          "star",
+          "beta"
+        ],
+        "angle": 5,
+        "radius": 1.62
+      },
+      "brief": {
+        "class": "Terrestrial, dense",
+        "diameterKm": 23100,
+        "tempC": -72,
+        "note": "RC NOTE: HEAVY, and it carries a satellite. It takes a beating before it moves at all."
+      }
+    },
+    {
+      "kind": "planet",
+      "id": "watch",
+      "name": "Watch",
+      "sprite": "vera",
+      "mass": 2.5e-7,
+      "drawR": 0.0034,
+      "color": "#cfd8e8",
+      "orbit": {
+        "around": "bastion",
+        "angle": 4.5,
+        "radius": 0.095
+      },
+      "brief": {
+        "class": "Satellite",
+        "diameterKm": 3400,
+        "tempC": -80,
+        "note": "RC NOTE: Bastion's satellite. Light: it is the easy pot, if you can get it off."
+      }
+    },
+    {
+      "kind": "planet",
+      "id": "ember",
+      "name": "Ember",
+      "sprite": "dune",
+      "mass": 8e-7,
+      "drawR": 0.0058,
+      "color": "#d98c4a",
+      "atmosphere": "#e8b070",
+      "orbit": {
+        "around": [
+          "star",
+          "beta"
+        ],
+        "angle": 3.1,
+        "radius": 0.78
+      },
+      "brief": {
+        "class": "Terrestrial",
+        "diameterKm": 10200,
+        "tempC": 34,
+        "note": "RC NOTE: the inner world, close to both suns. Ordinary weight: it goes where it is sent."
+      }
+    },
+    {
+      "kind": "pocket",
+      "id": "crow",
+      "name": "Crow",
+      "color": "#b48cff",
+      "position": {
+        "radius": 2.35,
+        "angle": 0.35
+      },
+      "mass": 0.5,
+      "reach": 0.62,
+      "size": 0.09,
+      "brief": {
+        "class": "Black hole",
+        "note": "RC NOTE: a pocket."
+      }
+    },
+    {
+      "kind": "pocket",
+      "id": "gallows",
+      "name": "Gallows",
+      "color": "#b48cff",
+      "position": {
+        "radius": 2.35,
+        "angle": 3.5
+      },
+      "mass": 0.5,
+      "reach": 0.62,
+      "size": 0.09,
+      "brief": {
+        "class": "Black hole",
+        "note": "RC NOTE: the far pocket."
+      }
+    },
+    {
+      "kind": "belt",
+      "id": "belt",
+      "radius": 2.35,
+      "sections": 52,
+      "halfWidth": 0.06,
       "restitution": 0.85
     }
   ]
@@ -343,7 +508,11 @@ const TABLE_RULES = {
   // the ship's velocity when it leaves. 1 is real physics.
   inheritFrac: 0,
   acbMassRatio: 1,
-  // m_acb / m_world in the collision. 1 = real pool
+  // the cue ball's own mass, in reference worlds. 1 = real pool against a world of the reference mass
+  acbMassRefMsun: 2e-6,
+  // THE REFERENCE WORLD, solar masses (about a third of Earth). A world of this mass
+  // pools exactly like real pool; one ten times heavier takes ten times the hitting to
+  // move, and a light one flies. This is what makes a HEAVY world heavy
   restitution: 1,
   // 1 = elastic
   ballScale: 10,
@@ -391,6 +560,8 @@ const TABLE_RULES = {
   // impact energy as a multiple of a normal shot at this power
   beltKillsShip: true,
   // an intact belt section wrecks the ship; a gap is safe
+  moonBreakAUyr: 0.35,
+  // a satellite rides its world until the world's own speed changes by this much in one step: a hard hit shakes it loose, a gentle one does not
   escapeBelts: 3,
   // a world further out than this many belt radii has ESCAPED: gone, and a foul
   forwardYears: 10,
@@ -481,6 +652,10 @@ const LEVEL_SCHEMA = {
   // angle is where the body starts, seen from what it orbits, in both. retrograde runs it clockwise.
   // around names a star, or lists two or more: a world round a group circles the group's
   // shared centre, on the group's whole mass. A companion star orbits the centre star.
+  // A WORLD MAY ALSO CIRCLE ANOTHER WORLD, which makes it that world's SATELLITE: it rides its
+  // world wherever the world goes, and only comes off it when the world is hit hard (the
+  // rules' moonBreakAUyr) or when the satellite itself is struck. A satellite of a satellite
+  // is refused: one step only.
   orbit: {
     around: { type: "around" },
     angle: { type: "number", ui: A },
@@ -535,6 +710,8 @@ const LEVEL_SCHEMA = {
     color: { type: "color" },
     atmosphere: { type: "color", optional: true },
     // the faux-sphere halo; without it, the body colour lifted
+    integrity: { type: "number", min: 0.05, optional: true, ui: [0.1, 1] },
+    // what it is racked with; 1 unless the level says otherwise. A fragile world is authored low
     orbit: { type: "orbit" },
     traits: { type: "traits", optional: true },
     brief: { type: "brief" }
@@ -642,7 +819,11 @@ function outermostAU(raw) {
   let m = 0;
   for (const b of raw.bodies) {
     if (b.kind === "star" && b.orbit) m = Math.max(m, starApo[b.id]);
-    if (b.kind === "planet") m = Math.max(m, apoAU(b.orbit) + (typeof b.orbit.around === "string" ? starApo[b.orbit.around] || 0 : 0));
+    if (b.kind === "planet") {
+      const par = typeof b.orbit.around === "string" ? b.orbit.around : null;
+      const parent = par ? raw.bodies.find((q) => q.id === par && q.kind === "planet") : null;
+      m = Math.max(m, apoAU(b.orbit) + (parent ? apoAU(parent.orbit) : par ? starApo[par] || 0 : 0));
+    }
   }
   return m;
 }
@@ -759,9 +940,16 @@ function parseLevel(text, id, ctx) {
   if (of("belt").length !== 1) fail("one belt, for now");
   if (of("pocket").filter((p) => hasTrait(p, "eats-belt")).length > 1) fail("one pocket at most eats the belt");
   for (const b of raw.bodies) if (hasTrait(b, "defended") && !hasTrait(b, "inhabited")) fail(b.id + '.traits: only an inhabited world shoots back: add "inhabited"');
+  const planetIds = new Set(of("planet").map((p) => p.id));
+  const isSat = (p) => p.kind === "planet" && typeof p.orbit.around === "string" && planetIds.has(p.orbit.around);
   for (const p of of("planet").concat(stars.filter((s) => s.orbit))) {
     const o = p.orbit, at = p.id + ".orbit";
-    for (const id2 of [].concat(o.around)) if (!starIds.has(id2)) fail(at + ".around: " + JSON.stringify(id2) + " is not a star here (the stars: " + [...starIds].join(", ") + ")");
+    const sat = isSat(p);
+    if (sat) {
+      const parent = of("planet").find((q) => q.id === o.around);
+      if (isSat(parent)) fail(at + ".around: " + JSON.stringify(o.around) + " is itself a satellite, and a satellite of a satellite is one step too many");
+      if (o.radius === void 0) fail(at + ": a satellite goes round its world on a circle (radius), not an ellipse");
+    } else for (const id2 of [].concat(o.around)) if (!starIds.has(id2)) fail(at + ".around: " + JSON.stringify(id2) + " is not a star here, nor a world to be a satellite of (the stars: " + [...starIds].join(", ") + ")");
     const ell = ["semiMajor", "eccentricity", "periapsisAngle"].filter((k) => o[k] !== void 0);
     if (o.radius !== void 0 && ell.length) fail(at + ": circular (radius) or elliptical (semiMajor, eccentricity, periapsisAngle), not both");
     if (o.radius === void 0 && ell.length !== 3) fail(at + ": needs radius, or all of semiMajor, eccentricity and periapsisAngle");
@@ -1612,7 +1800,7 @@ const TAU = Math.PI * 2;
 const DEFAULTS = { ...TABLE_RULES, ...PLAYER_DEFAULTS };
 const PLAYER_KEY = "galaxytable.player.v1", RULES_KEY = "galaxytable.rules.v1";
 let S = loadSettings();
-const LEVEL_FILES = /* @__PURE__ */ Object.assign({ "../levels/level-01.json": __vite_glob_0_0 });
+const LEVEL_FILES = /* @__PURE__ */ Object.assign({ "../levels/level-01.json": __vite_glob_0_0, "../levels/level-02.json": __vite_glob_0_1, "../levels/level-03.json": __vite_glob_0_2 });
 const LEVEL_IDS = Object.keys(LEVEL_FILES).map((k) => k.replace(/^.*\/|\.json$/g, "")).sort();
 const LEVEL_CTX = { G, balls: BALL_TYPES, starTypes: STAR_TYPES, sprites: BODY_SPRITES, rules: TABLE_RULES };
 function loadLevel(id) {
@@ -1668,7 +1856,9 @@ function derivePlanetDefs() {
     atmosphere: p.atmosphere || null,
     fragile: hasTrait(p, "fragile"),
     inhabited: hasTrait(p, "inhabited"),
-    gun: traitOf(p, "defended")
+    gun: traitOf(p, "defended"),
+    integrity0: p.integrity == null ? 1 : p.integrity,
+    moonOf: typeof p.orbit.around === "string" && LEVEL_OF("planet").some((q) => q.id === p.orbit.around) ? p.orbit.around : null
   }));
   ROGUE_DEFS = LEVEL_OF("rogue").map((p) => ({
     id: p.id,
@@ -1682,7 +1872,8 @@ function derivePlanetDefs() {
     atmosphere: p.atmosphere || null,
     fragile: hasTrait(p, "fragile"),
     inhabited: hasTrait(p, "inhabited"),
-    gun: traitOf(p, "defended")
+    gun: traitOf(p, "defended"),
+    integrity0: 1
   }));
 }
 function strikesStar(ballType, star) {
@@ -1896,9 +2087,57 @@ function deriveRogue(d) {
     spin: Math.random() * TAU
   };
 }
-function derivePlanet(d, stars) {
-  const r = d.r * S.systemScale, c = centreOf(d.around, stars || STARS);
-  return {
+function makeWorlds(stars) {
+  const out = [];
+  for (const d of PLANET_DEFS) if (!d.moonOf) out.push(derivePlanet(d, stars));
+  for (const d of PLANET_DEFS) if (d.moonOf) {
+    const parent = out.find((b) => b.id === d.moonOf);
+    if (parent) out.push(derivePlanet(d, stars, parent));
+  }
+  return out;
+}
+function stepMoons(list, h) {
+  for (const b of list) {
+    if (!b.alive || !b.moonOf || b.loose) continue;
+    const p = list.find((q) => q.id === b.moonOf);
+    if (!p || !p.alive) {
+      looseMoon(b);
+      continue;
+    }
+    b.moonPhase += b.moonRate * h;
+    const c = Math.cos(b.moonPhase), sn = Math.sin(b.moonPhase);
+    b.x = p.x + b.moonR * c;
+    b.y = p.y + b.moonR * sn;
+    const v = b.moonR * b.moonRate;
+    b.vx = p.vx - v * sn;
+    b.vy = p.vy + v * c;
+    if (p.struck) b.struck = true;
+  }
+}
+function looseMoon(b) {
+  if (!b.moonOf || b.loose) return;
+  b.loose = true;
+  b.struck = true;
+  note(b.name + " HAS COME OFF " + (nameOfBody(b.moonOf) || "its world").toUpperCase(), b.color);
+}
+function nameOfBody(id) {
+  const b = bodies.find((q) => q.id === id);
+  return b && b.name;
+}
+function checkMoons(list) {
+  for (const b of list) {
+    if (!b.alive || !b.moonOf || b.loose) continue;
+    const p = list.find((q) => q.id === b.moonOf);
+    if (!p || !p.alive) {
+      looseMoon(b);
+      continue;
+    }
+    if (p.pvx !== void 0 && Math.hypot(p.vx - p.pvx, p.vy - p.pvy) >= S.moonBreakAUyr) looseMoon(b);
+  }
+}
+function derivePlanet(d, stars, parent) {
+  const r = d.r * S.systemScale, c = parent || centreOf(d.around, stars || STARS);
+  const b = {
     ...keplerState(r, d.e, d.w, d.a, d.retro, c),
     orbit: { a: r, e: d.e, w: d.w, around: d.around },
     id: d.id,
@@ -1911,13 +2150,20 @@ function derivePlanet(d, stars) {
     fragile: d.fragile,
     inhabited: d.inhabited,
     gun: makeGun(d.gun),
-    integrity: 1,
+    integrity: d.integrity0 == null ? 1 : d.integrity0,
     orbitR: r,
     struck: false,
     alive: true,
     trail: [],
     spin: Math.random() * TAU
   };
+  if (parent) {
+    b.moonOf = parent.id;
+    b.moonR = r;
+    b.moonPhase = d.a;
+    b.moonRate = Math.sqrt(G * parent.mass / (r * r * r)) * (d.retro ? -1 : 1);
+  }
+  return b;
 }
 function applySystemScale() {
   const k = S.systemScale;
@@ -1979,7 +2225,7 @@ function resetWorld() {
   const fresh = makeStars();
   Object.assign(STAR, fresh[0], { broken: false, brokenNoted: false });
   STARS = [STAR, ...fresh.slice(1)];
-  bodies = PLANET_DEFS.map((d) => derivePlanet(d)).concat(ROGUE_DEFS.filter(rogueArrives).map(deriveRogue));
+  bodies = makeWorlds(STARS).concat(ROGUE_DEFS.filter(rogueArrives).map(deriveRogue));
   ship = { ...shipSpawn(), trail: [] };
   acb = { mode: "attached", type: LEVEL.loadout.nose, x: 0, y: 0, vx: 0, vy: 0, cap: null, lostT: 0 };
   balls = [];
@@ -2013,9 +2259,43 @@ function resetWorld() {
   if (S.introFlyover && !editing) startIntro();
   else endIntro();
 }
+const LEVEL_NAMES = {};
+for (const id of LEVEL_IDS) {
+  try {
+    LEVEL_NAMES[id] = JSON.parse(LEVEL_FILES["../levels/" + id + ".json"]).name;
+  } catch {
+    LEVEL_NAMES[id] = id;
+  }
+}
+let levelsShown = true;
+function buildLevelList() {
+  const box = document.getElementById("levels");
+  if (!box) return;
+  box.replaceChildren(
+    Object.assign(document.createElement("h2"), { textContent: "TABLES" }),
+    ...LEVEL_IDS.map((id, i) => {
+      const b = document.createElement("button");
+      b.className = id === LEVEL_ID ? "on" : "";
+      b.innerHTML = `<span class="n">${String(i + 1).padStart(2, "0")}</span><span>${(LEVEL_NAMES[id] || id).toUpperCase()}</span>`;
+      b.title = id;
+      b.onclick = () => {
+        if (id !== LEVEL_ID) location.search = "?level=" + id;
+      };
+      return b;
+    })
+  );
+  showLevelList();
+}
+function showLevelList() {
+  const box = document.getElementById("levels");
+  if (box) box.style.display = levelsShown && !editing && !intro && !arrival ? "" : "none";
+}
 function deriveBrief() {
   BRIEF = { ship: { cls: LEVEL.ship.brief.class, ...LEVEL.ship.brief, inhabited: hasTrait(LEVEL.ship, "inhabited") } };
   for (const b of LEVEL.bodies) if (b.brief) BRIEF[b.id] = { cls: b.brief.class, ...b.brief, inhabited: hasTrait(b, "inhabited") };
+}
+function acbMassFor(b) {
+  return b && b.isStar ? S.acbMassRatio * b.mass : S.acbMassRatio * S.acbMassRefMsun;
 }
 const MSUN_KG = 1989e27, MEARTH_KG = 5972e21;
 function densityGcc(massMsun, diameterKm) {
@@ -2058,6 +2338,7 @@ function outroS() {
 const INTRO_CY = 0.36;
 function startIntro() {
   acbShown = 0;
+  showLevelList();
   intro = { t: 0, realT: 0, stops: introStops(), done: false, naming: null };
   for (const st of intro.stops) if (st.pause) st.o.name = "???";
   const p = document.getElementById("panel");
@@ -2088,6 +2369,7 @@ function endIntro(arrive) {
   else showPlayUI();
 }
 function showPlayUI() {
+  showLevelList();
   document.getElementById("panel").style.display = panelWasHidden ? "none" : "";
   document.getElementById("chamber").style.display = "";
 }
@@ -2112,6 +2394,7 @@ const ARRIVE_ZOOM = 30;
 let arrival = null;
 function startArrival() {
   acbShown = 0;
+  showLevelList();
   arrival = { t: 0, flow: 0, streaks: [] };
   for (let i = 0; i < 260; i++) arrival.streaks.push({ u: Math.random(), v: Math.random(), len: 0.3 + Math.random() * 1.1, a: 0.25 + Math.random() * 0.7 });
   fx.shake = 0;
@@ -2744,6 +3027,7 @@ function stepWorlds(list, h, stars) {
   stars = stars || STARS;
   for (const b of list) {
     if (!b.alive) continue;
+    if (b.moonOf && !b.loose) continue;
     for (const st of stars) if (st.alive) pull(st.x, st.y, G * st.mass, b, h);
     if (b.struck) pullPockets(b, h);
   }
@@ -2805,7 +3089,7 @@ function resolveContacts(list, freeBalls, events) {
     const closing = Math.hypot(ball.vx - b.vx, ball.vy - b.vy);
     ball.vx *= boost;
     ball.vy *= boost;
-    const hit = collide(ball, S.acbMassRatio * b.mass, rA, b, b.mass, ballR(b));
+    const hit = collide(ball, acbMassFor(b), rA, b, b.mass, ballR(b));
     if (!hit) {
       ball.vx /= boost;
       ball.vy /= boost;
@@ -2813,6 +3097,7 @@ function resolveContacts(list, freeBalls, events) {
     }
     const dmg = damageWorld(b, ball.type, closing / S.shotPower);
     if (dmg > 0) events.push({ kind: "damage", b, dmg, x: b.x, y: b.y });
+    if (b.moonOf && !b.loose) b.loose = true;
     if (!b.struck) {
       b.struck = true;
       events.push({ kind: "struck", b, ball, x: b.x, y: b.y });
@@ -2983,7 +3268,7 @@ function starFateOf(st) {
 }
 function forwardCheck(years) {
   const h = MAX_SUBSTEP_YR, n = Math.round(years / h), stars = makeStars();
-  const list = PLANET_DEFS.map((d) => derivePlanet(d, stars)).concat(ROGUE_DEFS.map(deriveRogue));
+  const list = makeWorlds(stars).concat(ROGUE_DEFS.map(deriveRogue));
   const spawn = shipSpawn(), events = [], touching = /* @__PURE__ */ new Set(), overShip = /* @__PURE__ */ new Set();
   for (let i = 1; i <= n; i++) {
     stepWorlds(list, h, stars);
@@ -3081,10 +3366,15 @@ function simStep(h, offGravity) {
   for (const k of balls) if (!k.flash) gameGravity(k, bodies, h, S.acbFeelsWorlds);
   gravitizeAll(balls, contactList(bodies), balls, offGravity ? null : ship, h);
   for (const b of bodies) if (b.alive) {
+    b.pvx = b.vx;
+    b.pvy = b.vy;
+  }
+  for (const b of bodies) if (b.alive && !(b.moonOf && !b.loose)) {
     b.x += b.vx * h;
     b.y += b.vy * h;
     b.spin += h * 40;
   }
+  stepMoons(bodies, h);
   stepStars(STARS, h);
   if (!shipOwnClock) {
     ship.x += ship.vx * h;
@@ -3163,6 +3453,7 @@ function simStep(h, offGravity) {
   }
   const events = [];
   resolveContacts(contactList(bodies), balls.filter((k) => !k.flash), events);
+  checkMoons(bodies);
   for (const e of events) {
     if (e.kind === "struck") {
       flash(e.x, e.y, 0.15, e.b.color);
@@ -3759,7 +4050,7 @@ function endImpactFrame() {
   const boost = k.type === "thermo" ? Math.sqrt(S.thermoEnergy) : 1;
   k.vx *= boost;
   k.vy *= boost;
-  collide(k, S.acbMassRatio * b.mass, S.acbRadiusAU, b, b.mass, ballR(b));
+  collide(k, acbMassFor(b), S.acbRadiusAU, b, b.mass, ballR(b));
   if (!b.struck) {
     b.struck = true;
     note("STRUCK: " + b.name, b.color);
@@ -3897,7 +4188,7 @@ function buildGhost() {
       const boost = k.type === "thermo" ? Math.sqrt(S.thermoEnergy) : 1;
       k.vx *= boost;
       k.vy *= boost;
-      collide(k, S.acbMassRatio * hit.mass, S.acbRadiusAU, hit, hit.mass, ballR(hit));
+      collide(k, acbMassFor(hit), S.acbRadiusAU, hit, hit.mass, ballR(hit));
       hit.struck = true;
       damageWorld(hit, k.type, k.flash.normalDv / S.shotPower);
       if (k.type === "thermo") thermoAftermath(k, hit);
@@ -5537,6 +5828,7 @@ function drawHud(W, H) {
       ["LMB release", "shoot"],
       ["RMB", S.aimMode === "charge" ? "teleport; mid-charge: aim down sights" : "teleport, short range, 2 s recharge"],
       ["SHIFT hold", "stop time while held"],
+      ["T", "the table list"],
       ["Q / E", "slower / faster time (Q to the end pauses)"],
       ["SPACE", "catch a ball / load the next"],
       ["C", "camera"],
@@ -6067,6 +6359,10 @@ addEventListener("keydown", (e) => {
     note("TIME RESUMED", "#8fc3e8");
   }
   if (e.code === "KeyQ" && !e.repeat) qArmed = true;
+  if (e.code === "KeyT") {
+    levelsShown = !levelsShown;
+    showLevelList();
+  }
   if (e.code === "KeyC") {
     S.camFollow = !S.camFollow;
     saveSettings();
@@ -6358,6 +6654,7 @@ function buildPanel() {
   });
 }
 buildPanel();
+buildLevelList();
 window.RIG = {
   level: () => JSON.parse(JSON.stringify(LEVEL)),
   levels: () => LEVEL_IDS.slice(),
@@ -6543,6 +6840,7 @@ editor = createEditor({
       cv.classList.remove("briefing");
     }
     editing = true;
+    setTimeout(showLevelList, 0);
     applyLevel(L);
     playUI(false);
   },
@@ -6554,6 +6852,7 @@ editor = createEditor({
     editing = false;
     applyLevel(L);
     playUI(true);
+    showLevelList();
   },
   scale: () => S.systemScale,
   cx,
@@ -6661,10 +6960,22 @@ requestAnimationFrame(frame);</script>
 #edbar .warn { color: #e8b463; margin-top: 3px; }
 #edpanel .slide { display: flex; align-items: center; gap: 5px; }
 #edpanel .slide input[type=range] { width: 96px; }
-#edpanel input.num { width: 72px; }</style>
+#edpanel input.num { width: 72px; }
+
+/* THE TABLE LIST, left: every level the build carries, the one being played marked. T hides it. */
+#levels { position: fixed; left: 12px; top: 50%; transform: translateY(-50%); z-index: 9; display: flex; flex-direction: column; gap: 3px;
+  font: 11px/1.35 "Share Tech Mono", Menlo, monospace; color: #9fb4cc; }
+#levels h2 { margin: 0 0 3px 2px; font: inherit; letter-spacing: 1px; color: #6f86a8; font-weight: normal; }
+#levels button { display: flex; gap: 7px; align-items: baseline; text-align: left; background: rgba(8,12,22,0.72); color: #cfe0ff;
+  border: 1px solid #22334e; border-left: 2px solid #2f4468; border-radius: 3px; font: inherit; padding: 4px 9px 4px 7px; cursor: pointer; min-width: 132px; }
+#levels button:hover { background: rgba(20,32,54,0.9); border-color: #3c5a80; }
+#levels button .n { color: #6f86a8; }
+#levels button.on { border-left-color: #4fc3f7; color: #ffffff; background: rgba(18,34,54,0.9); }
+#levels button.on .n { color: #4fc3f7; }</style>
 </head>
 <body>
 <canvas id="cv"></canvas>
+<div id="levels"></div>
 <div id="panel"></div>
 <div id="chamber"></div>
 </body>
