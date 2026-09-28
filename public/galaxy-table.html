@@ -847,6 +847,8 @@ const TABLE_RULES = {
   // the ACB flies the game layer (boosted worlds) like the ship
   planetsCollide: true,
   // struck worlds knock each other
+  holeEatYears: 0.5,
+  // a black hole standing in the belt: how long a section has to spend at its mouth, over all its passes, before it is gone for good
   bossDamage: 0.3,
   // what a celestial body pooled into the boss takes off it: its weight in reference worlds, times how fast it went in over shotPower, times this
   porousFrac: 0.5,
@@ -2392,7 +2394,7 @@ function beltContact(o, r0, sections, t, spend) {
   const fromInside = r < BELT.r;
   if (fromInside && vr <= 0 || !fromInside && vr >= 0) return -1;
   const i = beltSection(o.x, o.y, t);
-  if (!sections[i]) return -1;
+  if (!sections[i] || sectionAtHole(i, t)) return -1;
   o.vx -= (1 + BELT.restitution) * vr * nx;
   o.vy -= (1 + BELT.restitution) * vr * ny;
   const back = fromInside ? inner - 1e-3 : outer + 1e-3;
@@ -2406,7 +2408,34 @@ function beltInside(x, y, r0, sections, t) {
   const r = Math.hypot(x - ORIGIN.x, y - ORIGIN.y);
   if (r < BELT.r - BELT_HALF - r0 || r > BELT.r + BELT_HALF + r0) return -1;
   const i = beltSection(x, y, t);
-  return sections[i] ? i : -1;
+  return sections[i] && !sectionAtHole(i, t) ? i : -1;
+}
+function beltHoles() {
+  return POCKETS.filter((p) => !p.eatsBelt && BELT && Math.abs(Math.hypot(p.x - ORIGIN.x, p.y - ORIGIN.y) - BELT.r) <= BELT_HALF + p.size);
+}
+function sectionAtHole(i, t) {
+  if (!BELT) return false;
+  const a = beltTheta(t) + (i + 0.5) * (TAU / BELT_N);
+  const x = ORIGIN.x + BELT.r * Math.cos(a), y = ORIGIN.y + BELT.r * Math.sin(a);
+  for (const p of beltHoles()) if (dist(x, y, p.x, p.y) <= p.size * 1.8) return true;
+  return false;
+}
+function holesEatBelt(h) {
+  const holes = beltHoles();
+  if (!holes.length) return;
+  const th = beltTheta(simYears), sec = TAU / BELT_N;
+  for (const p of holes) for (let i = 0; i < BELT_N; i++) {
+    if (!belt[i]) continue;
+    const a = th + (i + 0.5) * sec;
+    if (dist(ORIGIN.x + BELT.r * Math.cos(a), ORIGIN.y + BELT.r * Math.sin(a), p.x, p.y) > p.size * 1.8) continue;
+    beltEat[i] += h / S.holeEatYears;
+    if (beltEat[i] < 1) continue;
+    belt[i] = 0;
+    flash(p.x, p.y, 0.12, "#b48cff");
+    burst(p.x, p.y, 0.05, "#8a7a66");
+    const gone = BELT_N - belt.reduce((a2, b) => a2 + b, 0);
+    if (gone % 8 === 0) note(p.name.toUpperCase() + " HAS WORN AWAY " + gone + "/" + BELT_N + " belt sections", "#b48cff");
+  }
 }
 function styxEatsBelt(h) {
   if (!EATER) return;
@@ -3007,7 +3036,7 @@ function introStops() {
     const d = PLANET_DEFS.find((q) => q.id === b.id) || ROGUE_DEFS.find((q) => q.id === b.id);
     stops.push({ ...framing(b, ballR(b), 110), key: b.id, name: b.name, defName: d ? d.name : b.name, mass: b.mass / 3003e-9, unit: "Earth masses", speed: Math.hypot(b.vx, b.vy), sprite: b.sprite, pause: !bodyNames[b.id] });
   }
-  for (const p of POCKETS) stops.push({ ...framing(p, p.size, 110), key: p.id, name: p.name, defName: p.id, pause: !bodyNames[p.id], mass: p.mass, unit: "solar masses", speed: 0, sprite: "blackhole", pocket: true });
+  for (const p of POCKETS) stops.push({ ...framing(p, p.size, 110), key: p.id, name: p.name, defName: p.name, pause: !bodyNames[p.id], mass: p.mass, unit: "solar masses", speed: 0, sprite: "blackhole", pocket: true });
   return stops;
 }
 function introFocal() {
@@ -4227,6 +4256,7 @@ function simStep(h, offGravity) {
     note("BROKEN: " + b.name + " " + (b.breakCause || "shattered") + " (foul)", "#ff5030");
   }
   if (BELT && EATER) styxEatsBelt(h);
+  if (BELT) holesEatBelt(h);
   const gone = [];
   for (const k of balls) {
     if (k.dead) {
@@ -5965,11 +5995,12 @@ function draw(realDt) {
     const th = beltTheta(simYears), sec = TAU / BELT_N;
     for (let i = 0; i < BELT_N; i++) {
       if (!belt[i]) continue;
-      const e = beltEat[i], st = EATER;
+      const e = beltEat[i], st = EATER || beltHoles().find((p) => dist(ORIGIN.x + BELT.r * Math.cos(th + (i + 0.5) * sec), ORIGIN.y + BELT.r * Math.sin(th + (i + 0.5) * sec), p.x, p.y) <= p.size * 1.8);
+      if (!st && e > 0) continue;
       for (const rk of BELT_ROCKS[i]) {
         const a = th + (i + rk.da) * sec, r = BELT.r + rk.dr * BELT_HALF;
         let wx = ORIGIN.x + r * Math.cos(a), wy = ORIGIN.y + r * Math.sin(a);
-        if (e > 0) {
+        if (e > 0 && st) {
           const k = e * e * (0.7 + 0.3 * rk.tint);
           wx += (st.x - wx) * k;
           wy += (st.y - wy) * k;
