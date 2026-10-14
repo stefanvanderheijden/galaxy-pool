@@ -1,0 +1,366 @@
+/* THE MENU LANGUAGE (GAME_DESIGN §7): simple, grainy, computery, high contrast, white on near
+   black. One stylesheet for every shell screen: the menu now, the cards, the dialogue view and
+   the builder later, so the page stays at two visual languages, this one and the table's own
+   canvas HUD, which is not styled from here. Values are the mockup's
+   (Reference/mockups/menu-ui-mockup.html); read its header for the decisions behind them. */
+:root {
+  --blue: #4a7fd4;        /* cold, slightly desaturated, deliberately not neon */
+  --white: #e8e8e6;
+  --dim: #6d6d69;
+  --dimmer: #3a3a38;
+  --bg: #050506;
+  --mono: "Courier New", Courier, monospace;
+  --sans: Helvetica, Arial, sans-serif;
+  --item-off: #8e8e89;    /* an unhighlighted entry is just text, a shade down from white */
+  --note-off: #55554f;
+  --note-on: #5d7ea8;
+  --label: #595953;
+  /* The gutters every shell screen shares: the column sits low-left in a field of nothing. */
+  --gutter-l: 8vw;
+  --gutter-r: 6vw;
+}
+* { box-sizing: border-box; border-radius: 0 !important; }
+html, body { height: 100%; margin: 0; background: var(--bg); color: var(--white); font-family: var(--mono); overflow: hidden; cursor: default; -webkit-font-smoothing: antialiased; }
+
+/* The two layers. The table owns the canvas while a mission runs; the shell is DOM over it, and
+   is emptied, not hidden, when the table has the page. */
+#table { position: fixed; inset: 0; display: block; }
+#shell { position: fixed; inset: 0; }
+#shell:empty { display: none; }
+
+/* ---------- a shell screen: porous black, grain, scanlines, vignette ---------- */
+/* Uneven black: two very low-contrast pools of light, so the field is not a flat fill. */
+.menu {
+  position: absolute; inset: 0; overflow: hidden;
+  /* The footer box every screen places its hint in (menu.js, cards.js). */
+  --footer-bottom: 4vh; --footer-h: clamp(57px, 3.54vw, 74px);
+  background:
+    radial-gradient(120% 90% at 18% 78%, rgba(46,52,64,.20) 0%, rgba(0,0,0,0) 60%),
+    radial-gradient(70% 55% at 82% 12%, rgba(30,36,48,.16) 0%, rgba(0,0,0,0) 65%),
+    var(--bg);
+}
+/* The three overlays never take input. The grain tiles are drawn by the screen that owns them. */
+.grain { position: absolute; inset: 0; pointer-events: none; z-index: 40; opacity: .10; mix-blend-mode: screen; background-repeat: repeat; image-rendering: pixelated; }
+.scan {
+  position: absolute; inset: 0; pointer-events: none; z-index: 41; opacity: .55;
+  background: repeating-linear-gradient(to bottom, rgba(0,0,0,0) 0px, rgba(0,0,0,0) 2px, rgba(0,0,0,.30) 3px, rgba(0,0,0,.30) 4px);
+}
+.vig { position: absolute; inset: 0; pointer-events: none; z-index: 42; background: radial-gradient(110% 85% at 50% 50%, rgba(0,0,0,0) 40%, rgba(0,0,0,.85) 100%); }
+
+/* ---------- the menu ---------- */
+/* Header, panel block and footer are three siblings, each placed on its own. The mockup put
+   panels and footer in one grid so a hint that wrapped to two lines pushed the buttons up
+   (the known bug in GAME_DESIGN §7.4); here the footer has a fixed box, three hint lines
+   tall, and the panel block sits above that box whatever the hint does. */
+.menu-stage { position: absolute; inset: 0; z-index: 10; }
+.menu-header { position: absolute; top: 5vh; left: var(--gutter-l); right: var(--gutter-r); user-select: none; }
+.menu-title { font-family: var(--sans); font-weight: 300; font-size: clamp(22px, 2.8vw, 46px); letter-spacing: .62em; text-indent: .62em; color: var(--white); opacity: .92; white-space: nowrap; }
+.menu-subtitle { margin-top: 1.1em; font-size: clamp(11px, .72vw, 15px); letter-spacing: .34em; color: var(--dim); text-transform: uppercase; white-space: pre; }
+
+.menu-panels { position: absolute; left: var(--gutter-l); bottom: calc(var(--footer-bottom) + var(--footer-h) + 6vh); }
+.panel { position: absolute; bottom: 0; left: 0; opacity: 0; visibility: hidden; transition: opacity .18s linear; }
+.panel.active { opacity: 1; visibility: visible; position: relative; bottom: auto; }
+.panel-label { font-size: clamp(10px, .66vw, 14px); letter-spacing: .42em; color: var(--label); text-transform: uppercase; margin-bottom: 2.2em; }
+
+/* An entry is just text (§7). The stroke box hugs this padding, so the negative left margin
+   keeps the unhighlighted text flush with the column. */
+.item {
+  display: block; width: max-content; position: relative;
+  padding: .46em .95em .52em .95em; margin: 0 0 .30em -.95em;
+  font-size: clamp(14px, 1.25vw, 22px); letter-spacing: .30em; text-transform: uppercase;
+  color: var(--item-off); white-space: nowrap; transition: color .12s linear; user-select: none;
+}
+.item.on { color: var(--white); }
+.item .note { margin-left: 1.6em; font-size: clamp(10px, .62vw, 12px); letter-spacing: .20em; text-transform: lowercase; color: var(--note-off); }
+.item.on .note { color: var(--note-on); }
+.item .state { margin-left: 1.6em; font-size: clamp(10px, .62vw, 12px); letter-spacing: .24em; color: var(--dimmer); }
+.item.on .state { color: var(--dim); }
+/* Dimmed and inert (§7.4): the highlight lands, the colour does not change. */
+.item.off, .item.off.on, .item.off .note, .item.off.on .note { color: var(--dimmer); }
+
+/* The cursor box: stroke only, never filled (§7). The live box glides; a ghost is dropped
+   along the path and fades (menu.js, trail). */
+.cursor-layer { position: absolute; inset: 0; pointer-events: none; z-index: 20; }
+.box { position: absolute; top: 0; left: 0; border: 1px solid var(--blue); background: none; will-change: transform, width, height; }
+.cursor { transition: transform 90ms cubic-bezier(.15,.85,.25,1), width 90ms cubic-bezier(.15,.85,.25,1), height 90ms cubic-bezier(.15,.85,.25,1); }
+.cursor.snap { transition: none; }
+.ghost { opacity: .55; }
+
+.menu-footer {
+  position: absolute; left: var(--gutter-l); right: var(--gutter-r); bottom: var(--footer-bottom); height: var(--footer-h);
+  display: flex; justify-content: space-between; align-items: flex-end; gap: 4em;
+  font-size: clamp(10px, .62vw, 13px); letter-spacing: .22em; color: var(--dimmer); text-transform: uppercase; user-select: none;
+}
+.menu-hint { max-width: 56ch; line-height: 1.9; color: var(--dim); text-transform: none; letter-spacing: .12em; }
+.menu-build { white-space: pre; }
+
+/* ---------- dev layer: string editing (BRIEF.md section 8) ---------- */
+#dev-layer { position: fixed; inset: 0; pointer-events: none; z-index: 1000; font: 11px/1.4 var(--mono); }
+#dev-layer > * { pointer-events: auto; }
+.dev .dev-str { outline: 1px dotted var(--blue); outline-offset: 2px; cursor: text; }
+.dev .dev-str-missing { outline-color: #d4a04a; color: #d4a04a; }
+.dev-float { position: fixed; z-index: 1001; background: #000; color: var(--white); border: 1px solid var(--blue); font: inherit; font-size: 13px; padding: 0 6px; outline: none; }
+#dev-panel { position: fixed; right: 10px; top: 10px; width: 420px; max-height: calc(100vh - 20px); display: flex; flex-direction: column; background: rgba(5,5,6,0.92); border: 1px solid var(--dimmer); color: var(--white); }
+#dev-panel .dev-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--dimmer); }
+#dev-panel .dev-head b { letter-spacing: 0.2em; color: var(--dim); }
+#dev-panel .dev-tabs { display: flex; gap: 2px; flex: 1; }
+#dev-panel button { background: none; border: 1px solid var(--dimmer); color: var(--dim); font: inherit; padding: 1px 6px; cursor: pointer; }
+#dev-panel button.on { border-color: var(--blue); color: var(--white); }
+#dev-panel button:disabled { opacity: 0.4; cursor: default; }
+#dev-panel .dev-toggle { color: var(--dim); display: flex; gap: 4px; align-items: center; white-space: nowrap; }
+#dev-panel .dev-filter { margin: 6px 8px 0; background: #000; border: 1px solid var(--dimmer); color: var(--white); font: inherit; padding: 2px 6px; outline: none; }
+#dev-panel .dev-list { overflow-y: auto; padding: 6px 8px; }
+#dev-panel .dev-row { display: grid; grid-template-columns: 150px 1fr; gap: 6px; align-items: center; margin: 2px 0; }
+#dev-panel .dev-row code { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#dev-panel .dev-row-missing code { color: #d4a04a; }
+#dev-panel .dev-row input { background: #000; border: 1px solid var(--dimmer); color: var(--white); font: inherit; padding: 1px 4px; outline: none; }
+#dev-panel .dev-row input:focus { border-color: var(--blue); }
+#dev-panel .dev-foot { padding: 4px 8px; border-top: 1px solid var(--dimmer); color: var(--dim); white-space: pre; }
+
+/* ---------- the cards (BRIEF.md Phase 2) ---------- */
+/* The same field as the menu, the same column low-left, the same faces. A card is one plate: a
+   kicker line in the subtitle's voice, the plate itself in the title's, body lines in the hint's.
+   The title card alone sits centred: it is a plate, not an entry (GAME_DESIGN §7.3). */
+.card { position: absolute; inset: 0; z-index: 10; user-select: none; }
+.card-body { position: absolute; left: var(--gutter-l); right: var(--gutter-r); bottom: calc(var(--footer-bottom) + var(--footer-h) + 6vh); }
+.card-kicker { font-size: clamp(11px, .72vw, 15px); letter-spacing: .34em; color: var(--dim); text-transform: uppercase; margin-bottom: 1.1em; }
+.card-plate { font-family: var(--sans); font-weight: 300; font-size: clamp(22px, 2.8vw, 46px); letter-spacing: .32em; color: var(--white); opacity: .92; margin-bottom: 1.2em; }
+/* Data (an id, a chapter title from the export) in the entry's voice, so it reads as the menu's
+   level pick does: mono, spaced, a shade down from white. */
+.card-data { font-family: var(--mono); letter-spacing: .30em; text-transform: uppercase; color: var(--item-off); }
+.card-plate .card-data { font-size: clamp(14px, 1.25vw, 22px); color: var(--white); }
+.card-line { font-size: clamp(10px, .62vw, 13px); letter-spacing: .12em; line-height: 1.9; color: var(--dim); max-width: 72ch; margin-top: .4em; }
+.card-line .card-data { font-size: clamp(14px, 1.25vw, 22px); }
+.card-note { font-size: clamp(10px, .62vw, 13px); letter-spacing: .12em; line-height: 1.9; color: var(--note-off); max-width: 72ch; margin-top: 1.6em; }
+.card-error { font: inherit; font-size: clamp(11px, .72vw, 15px); letter-spacing: .06em; line-height: 1.7; color: var(--white); white-space: pre-wrap; margin: 0; max-width: 90ch; }
+.card.centre .card-body { left: 0; right: 0; bottom: auto; top: 50%; transform: translateY(-50%); text-align: center; }
+.card.centre .card-plate { font-size: clamp(34px, 4.6vw, 76px); letter-spacing: .42em; text-indent: .42em; margin-bottom: 0; }
+.card.centre .card-kicker { margin-bottom: 2.2em; }
+.card.centre .card-line { max-width: none; margin-top: 2.2em; }
+/* The title card hands control on at the start of its fade (cards.js): it stays above the next
+   screen, inert, until it is gone. */
+.card-fading { z-index: 60; pointer-events: none; opacity: 0; transition: opacity .6s linear; }
+
+/* ---------- the mission: the game's note over the table's canvas (mission.js) ---------- */
+/* The table draws its own HUD in its own face; this is the shell's one word over it, in the
+   menu language, bottom centre, so the two languages share the screen without mixing. */
+#mission .mission-note {
+  position: fixed; left: 50%; bottom: 18vh; transform: translateX(-50%);
+  max-width: 60ch; padding: 1.2em 1.6em; text-align: center;
+  background: rgba(5,5,6,0.82); border: 1px solid var(--dimmer); color: var(--white);
+  font-family: var(--mono); font-size: clamp(12px, .9vw, 16px); letter-spacing: .12em; line-height: 1.8;
+  pointer-events: none; user-select: none;
+}
+#mission .mission-speaker { font-size: .8em; letter-spacing: .3em; text-transform: uppercase; color: var(--dim); margin-bottom: .6em; }
+#mission .mission-line { color: var(--white); }
+#mission .mission-hint { margin-top: .8em; font-size: .8em; letter-spacing: .22em; text-transform: uppercase; color: var(--dim); }
+#mission .mission-note:empty { display: none; }
+  html, body { margin: 0; height: 100%; background: #05070d; overflow: hidden; }
+  canvas { display: block; }
+  #panel { position: fixed; top: 10px; right: 10px; width: 330px; background: rgba(8,12,22,0.86);
+    border: 1px solid #2a3a55; border-radius: 6px; font: 11px/1.5 "Share Tech Mono", Menlo, monospace;
+    color: #9fb4cc; padding: 10px 12px; user-select: none; max-height: calc(100vh - 40px); overflow-y: auto; }
+  #panel h1 { font-size: 12px; margin: 0 0 6px; color: #cfe0ff; letter-spacing: 1px; display: flex; justify-content: space-between; }
+  #panel #collapse { cursor: pointer; color: #6f86a8; }
+  #panel label { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+  #panel label span:first-child { flex: 1; line-height: 1.2; display: flex; flex-direction: column; }
+  #panel label b { font-weight: 700; color: #e2ecff; }
+  #panel label i { font-style: italic; color: #8fa6c8; font-size: 10px; margin-top: 1px; }
+  #panel .row { margin: 5px 0; }
+  #panel input[type=range] { width: 90px; flex: none; }
+  #panel .val { width: 44px; text-align: right; color: #e2ecff; }
+  #panel .adv { cursor: pointer; color: #8fa6c8; font-size: 11px; letter-spacing: 1px; margin: 2px 0 4px; user-select: none; }
+  #panel hr { border: 0; border-top: 1px solid #22304a; margin: 6px 0; }
+  #panel .sec { display: flex; flex-direction: column; margin: 10px 0 4px; padding-top: 6px; border-top: 1px solid #2f4468; }
+  #panel .sec b { font-size: 11px; letter-spacing: 1px; color: #cfe0ff; }
+  #panel .sec i { font-size: 10px; color: #8fa6c8; line-height: 1.3; }
+  #panel .sec i#tunedNote { color: #e8b463; font-style: normal; margin-top: 2px; }
+  #panel button + button { margin-top: 4px; }
+  #chamber { position: fixed; left: 14px; bottom: 112px; display: flex; gap: 8px; font: 11px/1.4 "Share Tech Mono", Menlo, monospace; user-select: none; }
+  #chamber .slot { width: 96px; background: rgba(8,12,22,0.8); border: 1px solid #2a3a55; border-radius: 6px; padding: 6px 8px; color: #9fb4cc; }
+  #chamber .slot .lbl { font-size: 9px; letter-spacing: 1px; color: #6f86a8; }
+  #chamber .slot .ball { display: flex; align-items: center; gap: 6px; margin: 4px 0 2px; }
+  #chamber .slot .dot { width: 14px; height: 14px; border-radius: 50%; box-shadow: 0 0 6px rgba(255,255,255,0.25); }
+  #chamber .slot .type { cursor: pointer; color: #cfe0ff; border-bottom: 1px dotted #4a5f80; }
+  #chamber .slot .type:hover { color: #ffffff; }
+  #chamber .slot.out .type, #chamber .slot.none .type { cursor: default; border-bottom: 0; color: #6f86a8; }
+  #chamber .slot.active { border-color: #4fc3f7; }
+  #chamber .slot.padsel { outline: 1px solid #8fe8b0; outline-offset: 2px; }
+  #cv.briefing { cursor: default; }
+  #panel button { background: #182640; color: #cfe0ff; border: 1px solid #2f4468; border-radius: 4px;
+    font: inherit; padding: 3px 8px; cursor: pointer; width: 100%; }
+/* THE LEVEL EDITOR (src/editor.js) */
+#edenter { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 20; background: rgba(8,12,22,0.8); color: #8fc3e8;
+  border: 1px solid #2f4468; border-radius: 4px; font: 11px "Share Tech Mono", Menlo, monospace; letter-spacing: 1px; padding: 4px 10px; cursor: pointer; }
+#edenter:hover { color: #ffffff; border-color: #4fc3f7; }
+#edbar { position: fixed; top: 8px; left: 332px; z-index: 20; max-width: calc(100vw - 344px);   /* beside the panel: the bar grows with the forward check and must not cover it */ background: rgba(8,12,22,0.92);
+  border: 1px solid #2f4468; border-radius: 6px; padding: 6px 8px; font: 11px "Share Tech Mono", Menlo, monospace; color: #cfe0ff; }
+#edbar .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+#edbar b { letter-spacing: 1px; color: #ffe08a; }
+#edbar .dirty { color: #e8b463; }
+#edbar .err { color: #ff8c70; margin-top: 5px; max-width: 760px; }
+#edbar .note { color: #8fe8b0; margin-top: 5px; }
+#edbar button, #edpanel button { background: #182640; color: #cfe0ff; border: 1px solid #2f4468; border-radius: 4px; font: inherit; padding: 3px 8px; cursor: pointer; }
+#edbar button:disabled { opacity: 0.4; cursor: default; }
+#edbar button.go { border-color: #4f8f6a; color: #8fe8b0; }
+#edbar button.play { border-color: #4fc3f7; color: #ffffff; }
+#edbar select, #edpanel select, #edpanel input, #edpanel textarea { background: #0d1526; color: #e2ecff; border: 1px solid #2f4468; border-radius: 3px; font: inherit; }
+#edpanel { position: fixed; left: 12px; top: 8px; bottom: 60px; width: 290px; overflow-y: auto; z-index: 20; background: rgba(8,12,22,0.9);
+  border: 1px solid #2a3a55; border-radius: 6px; padding: 8px 10px; font: 11px/1.4 "Share Tech Mono", Menlo, monospace; color: #9fb4cc; }
+#edpanel .head { display: flex; flex-direction: column; margin-bottom: 6px; }
+#edpanel .head b { color: #ffe08a; letter-spacing: 1px; font-size: 12px; }
+#edpanel .head i { color: #8fa6c8; }
+#edpanel label { display: flex; justify-content: space-between; align-items: center; gap: 6px; margin: 3px 0; }
+#edpanel label > span:first-child { color: #cfe0ff; flex: none; }
+#edpanel input[type=number], #edpanel input:not([type]) { width: 130px; }
+#edpanel textarea { width: 100%; resize: vertical; }
+#edpanel label:has(textarea) { flex-direction: column; align-items: stretch; }
+#edpanel .pair { display: flex; gap: 4px; align-items: center; }
+#edpanel fieldset { border: 1px solid #22304a; border-radius: 4px; margin: 6px 0; padding: 4px 8px; }
+#edpanel legend { color: #8fc3e8; padding: 0 4px; }
+@media (max-width: 700px) { #edbar { left: 8px; max-width: calc(100vw - 16px); } #edpanel { top: auto; bottom: 8px; left: 8px; right: 8px; width: auto; height: 40vh; } }
+#edbar .fwd { color: #9fb4cc; margin-top: 2px; }
+#edbar .fwd.ok { color: #8fe8b0; margin-top: 5px; }
+#edbar .fwd.potted, #edbar .fwd.overlap { color: #e8b463; }
+#edbar .fwd.burned, #edbar .fwd.escaped, #edbar .fwd.over-ship { color: #ff8c70; }
+#edbar .fwd.left { color: #8fc3e8; }
+#edpanel label.inline { display: inline-flex; gap: 3px; margin: 0 6px 0 0; }
+#edpanel .hint { color: #8fa6c8; font-style: italic; margin: 4px 0; }
+#edbar .warn { color: #e8b463; margin-top: 3px; }
+#edpanel .slide { display: flex; align-items: center; gap: 5px; }
+#edpanel .slide input[type=range] { width: 96px; }
+#edpanel input.num { width: 72px; }
+
+/* THE TABLE LIST, left: every level the build carries, the one being played marked. T hides it. */
+#levels { position: fixed; left: 12px; top: 50%; transform: translateY(-50%); z-index: 9; display: flex; flex-direction: column; gap: 3px;
+  font: 11px/1.35 "Share Tech Mono", Menlo, monospace; color: #9fb4cc; }
+#levels h2 { margin: 0 0 3px 2px; font: inherit; letter-spacing: 1px; color: #6f86a8; font-weight: normal; }
+#levels button { display: flex; gap: 7px; align-items: baseline; text-align: left; background: rgba(8,12,22,0.72); color: #cfe0ff;
+  border: 1px solid #22334e; border-left: 2px solid #2f4468; border-radius: 3px; font: inherit; padding: 4px 9px 4px 7px; cursor: pointer; min-width: 132px; }
+#levels button:hover { background: rgba(20,32,54,0.9); border-color: #3c5a80; }
+#levels button .n { color: #6f86a8; }
+#levels button.on { border-left-color: #4fc3f7; color: #ffffff; background: rgba(18,34,54,0.9); }
+#levels button.on .n { color: #4fc3f7; }
+/* THE BUILDER, in the menu language (style.css holds the tokens, the field, .item, the cursor
+   box and the footer; this only places them). Imported by builder.js, so it loads with the
+   screen and nothing else carries it. The column is denser than the menu's: 25 to 30 rows have to
+   fit where the menu puts six, so the entries use the menu's small-type sizes, and the list
+   scrolls when a window is shorter still (builder.js, scrollTo). */
+.builder-stage { position: absolute; inset: 0; z-index: 10; }
+.builder-header { position: absolute; top: 5vh; left: var(--gutter-l); right: var(--gutter-r); user-select: none; }
+.builder-title { font-size: clamp(11px, .72vw, 15px); letter-spacing: .34em; color: var(--dim); text-transform: uppercase; white-space: nowrap; }
+.builder-title .state { margin-left: 2.4em; color: var(--dimmer); letter-spacing: .24em; }
+
+/* The column: from under the header to above the footer box, scrolling without a scrollbar. */
+.builder-list {
+  position: absolute; left: var(--gutter-l); top: 11vh;
+  bottom: calc(var(--footer-bottom) + var(--footer-h) + 4vh);
+  width: min(46vw, 620px); padding-left: .95em; margin-left: -.95em;
+  overflow-y: auto; overflow-x: hidden; scrollbar-width: none;
+}
+.builder-list::-webkit-scrollbar { display: none; }
+.builder-head { font-size: clamp(10px, .66vw, 14px); letter-spacing: .42em; color: var(--label); text-transform: uppercase; margin: 1.6em 0 .8em; white-space: nowrap; }
+.builder-head:first-child { margin-top: 0; }
+.builder-head:empty { height: .6em; margin: 0; }
+.builder-head .state { margin-left: 1.6em; color: var(--dimmer); letter-spacing: .24em; }
+
+/* An entry, at the menu's small size: the stroke box hugs the padding (style.css, .item). */
+.builder .brow { font-size: clamp(11px, .9vw, 15px); padding: .32em .95em .36em .95em; margin-bottom: .18em; display: flex; align-items: center; gap: 1.2em; }
+.builder .brow .lbl { min-width: 9em; }
+.builder .brow .val { min-width: 4.2em; text-align: right; letter-spacing: .12em; color: var(--dim); font-variant-numeric: tabular-nums; }
+.builder .brow.on .val { color: var(--white); }
+.builder .brow.cycle .val { color: var(--note-off); }
+.builder .brow.cycle.on .val { color: var(--note-on); }
+
+/* The Unity builder's steppers, for the mouse. Dim until the row is live. */
+.builder .brow .step { color: var(--dimmer); padding: 0 .15em; cursor: pointer; letter-spacing: 0; }
+.builder .brow.on .step { color: var(--dim); }
+.builder .brow.on .step:hover { color: var(--white); }
+
+/* A slider row is unboxed (§7.4: the selection box never applies to a slider). The cursor
+   shows as the box's left edge alone, the Unity builder's blue bar, and the fill turns blue. */
+.builder .brow.slider { width: 100%; }
+.builder .brow.slider.on::before { content: ""; position: absolute; left: 0; top: .3em; bottom: .3em; border-left: 1px solid var(--blue); }
+.builder .brow .track { position: relative; display: inline-block; width: 8em; height: 2px; background: var(--dimmer); flex: 0 0 auto; }
+.builder .brow .fill { position: absolute; left: 0; top: 0; height: 100%; width: 0; background: var(--dim); }
+.builder .brow.on .fill { background: var(--blue); }
+
+/* The name: the one text field. It is typed into in the entry's own face, underlined, not a form
+   control; the box around the row is the cursor's, the underline is the field's. */
+.builder .brow.name { gap: 1.2em; }
+.builder-name {
+  background: none; border: 0; border-bottom: 1px solid var(--dimmer); outline: none;
+  color: var(--white); font: inherit; letter-spacing: .18em; text-transform: none;
+  width: 13em; padding: 0 .2em .1em; caret-color: var(--blue);
+}
+.builder .brow.on .builder-name { border-bottom-color: var(--blue); }
+.builder-name::placeholder { color: var(--dimmer); letter-spacing: .12em; }
+
+/* The character, on the right, drawn by its rig at the creator's native 1024x1280 and scaled by
+   CSS to the height available; the hem sits on the footer line. */
+.builder-figure {
+  position: absolute; right: var(--gutter-r); top: 8vh;
+  bottom: calc(var(--footer-bottom) + var(--footer-h));
+  display: flex; align-items: flex-end; justify-content: flex-end; pointer-events: none;
+}
+.builder-figure canvas { height: min(100%, 60vw); width: auto; }
+/* THE DIALOGUE VIEW (BRIEF.md Phase 3), in the menu language. Everything here reuses the page's
+   tokens and classes (style.css): the field, the gutters, the footer box, the stroke-only cursor
+   box. Nothing from the export's theme is read: its colours and font are the web editor's
+   play-mode styling, and the game has two visual languages, not three (BRIEF.md section 9).
+   Imported by view.js so the rules travel with the module. */
+
+.narr { position: absolute; inset: 0; z-index: 10; user-select: none; }
+
+/* The room, as authored: the export's own image filling the frame. A scrim darkens the lower
+   half so the text sits on near-black whatever the collage behind it does; the rooms are busy and
+   bright, and at less than this the lines competed with the architecture (the Unity view found
+   the same and went to a 0.94 panel). */
+.narr-room { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.narr-scrim {
+  position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(to bottom, rgba(5,5,6,.15) 0%, rgba(5,5,6,.45) 40%, rgba(5,5,6,.92) 68%, var(--bg) 100%);
+}
+
+/* The character stands right of the text column, feet on the top of the panel area. The frame
+   owns the area and the image is fitted inside it (object-fit), so a bust and a full-height rig
+   both sit on the same floor without distortion. A live rig (Phase 4) is appended into the same
+   frame and inherits the fit through .narr-char-rig. */
+.narr-char-frame {
+  position: absolute; left: 56%; right: var(--gutter-r);
+  bottom: calc(var(--footer-bottom) + var(--footer-h) + 26vh);
+  height: 56vh; pointer-events: none;
+  display: flex; align-items: flex-end; justify-content: center;
+}
+.narr-char, .narr-char-rig { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+
+/* The panel: name, line, choices, in the column every shell screen shares. */
+.narr-panel {
+  position: absolute; left: var(--gutter-l); right: var(--gutter-r);
+  bottom: calc(var(--footer-bottom) + var(--footer-h) + 6vh);
+  /* Never under the character: the column stops short of the frame's left edge at any width. */
+  max-width: min(72ch, 46vw);
+}
+.narr-name { font-weight: bold; font-size: clamp(14px, 1.1vw, 20px); letter-spacing: .12em; line-height: 1.9; color: var(--white); }
+/* Newlines are load-bearing (EXPECTED-TRACE.md, assertion 7): a dropped {{if}} leaves its gap. */
+.narr-body { font-size: clamp(14px, 1.1vw, 20px); letter-spacing: .06em; line-height: 1.9; color: var(--white); white-space: pre-wrap; min-height: 5.7em; }
+/* The caret while the line types in: the menu's blue, blinking. */
+.narr-body.typing::after { content: "_"; color: var(--blue); animation: narr-caret 1s steps(2, end) infinite; }
+@keyframes narr-caret { 50% { opacity: 0; } }
+
+/* Choices: the entry's type at the entry's size (style.css .item), but sentence case and wrapping,
+   because a choice is a line of dialogue and uppercasing it changes its voice. The stroke box
+   hugs the padding like the menu's does. Hidden until the line has finished typing: offering a
+   decision while the line is still arriving is how a player picks before reading. */
+.narr-choices { position: relative; margin-top: 1.4em; }
+.narr-choices.hidden { visibility: hidden; }
+.narr-choice {
+  display: block; width: max-content; max-width: 100%; position: relative;
+  padding: .36em .95em .42em .95em; margin: 0 0 .30em -.95em;
+  font-size: clamp(14px, 1.1vw, 20px); letter-spacing: .10em; line-height: 1.5;
+  color: var(--item-off); transition: color .12s linear;
+}
+.narr-choice.on { color: var(--white); }
+.narr-cursor { pointer-events: none; z-index: 20; }
+/* The end state sits where the choices were, dim: a full stop, not a button. */
+.narr-end { font-size: clamp(11px, .72vw, 15px); letter-spacing: .34em; color: var(--dim); text-transform: uppercase; padding: .46em 0; }

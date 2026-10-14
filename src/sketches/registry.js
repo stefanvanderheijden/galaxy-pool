@@ -135,6 +135,17 @@ export const SKETCHES = [
       that crosses its horizon — worlds, cue balls and the ship alike.`,
     tags: ['twin stick', 'gamepad', 'time as throttle', 'freeze time to aim', 'no briefing'],
   },
+  {
+    id: '011',
+    name: '011 Galaxy Pool',
+    href: '/game/',
+    tagline: 'The whole loop: menu, the captain woken, the mirror, a table, the lounge.',
+    description: `The game itself, built around 009's table. Chapter 1 end to end: the menu, the
+      chapter card, the preamble conversation, the mirror that opens the character builder,
+      level-01 on the Galaxy Table, and the lounge afterwards. Built from the GalaxyPool repo's
+      web/ project and published here as a folder, not a single page.`,
+    tags: ['the game', 'chapter 1', 'dialogue', 'character builder', 'galaxy table'],
+  },
 ]
 
 /** @param {string} id */
